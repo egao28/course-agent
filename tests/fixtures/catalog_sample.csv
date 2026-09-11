@@ -14,4 +14,8 @@ Year,Term,YearTerm,Subject,Number,Name,Description,Credit Hours,Section Info,Deg
 2026,Spring,2026-sp,HIST,200,Global History,Survey of global history.,3 hours.,,"Humanities - Hist &amp; Phil, and Cultural Studies - Western course.",,,,,1,,,,,Lecture,,,,,,,
 2026,Spring,2026-sp,ANTH,103,Anthropology,Introduction to anthropology.,3 hours.,,"Social &amp; Beh Sci - Soc Sci, and Cultural Studies - Non-West course.",,,,,1,,,,,Lecture,,,,,,,
 2026,Spring,2026-sp,XREF,101,Cross Listed Course,Same as HIST 200. See HIST 200.,3 hours.,,,,,,,1,,,,,Lecture,,,,,,,
+2026,Spring,2026-sp,CS,233,Computer Architecture,Machine organization. Prerequisite: CS 125. Credit or concurrent registration in CS 173.,4 hours.,,,,,,,1,,,,,Lecture,,,,,,,
+2026,Spring,2026-sp,BADM,537,Doctoral Seminar,Research seminar. Prerequisite: Ph.D. standing in BADM or consent of instructor.,4 hours.,,,,,,,1,,,,,Lecture,,,,,,,
+2026,Spring,2026-sp,ANTH,390,Individual Study,Supervised study. Prerequisite: CS 173. May not be taken concurrently with CS 225.,2 TO 4 hours.,,,,,,,1,,,,,Lecture,,,,,,,
+2026,Spring,2026-sp,STAT,425,Applied Regression,Regression analysis. Prerequisite: STAT 100. Concurrent enrollment in CS 225 is preferred.,3 OR 4 hours.,,,,,,,1,,,,,Lecture,,,,,,,
 2026,Spring,2026-sp,,,Orphan row,No subject.,3 hours.,,,,,,,1,,,,,Lecture,,,,,,,

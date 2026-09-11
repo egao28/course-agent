@@ -17,11 +17,12 @@ the old data can never be mistaken for the new ones.
 Outputs
 -------
 ``data/courses.json``
-    One record per course, sorted by (subject, number). ``prereqCodes`` holds *every* course code
-    mentioned in the prerequisite text (minus self), resolved or not -- same as the frontend field.
+    One record per course, sorted by (subject, number). ``prereqRaw`` is the *whole* requirements
+    block -- the catalog runs it from the ``Prerequisite:`` label to the end of the description --
+    and ``prereqCodes`` / ``coreqCodes`` hold the course codes it names, resolved or not.
 ``data/prereqs.json``
     The prerequisite edge list, filtered to codes that exist in this catalog (the filter
-    ``dag.ts::prereqs()`` applies at read time). Courses whose references all dangle are omitted.
+    ``dag.ts::prereqs()`` applies at read time). Courses with no surviving edge are omitted.
 ``data/requirements.json``
     The 13 campus Gen Ed categories from ``almabot-web/src/lib/gened.ts``, as declarative
     ``Degree Attributes`` substring rules. Major requirements are not in the CSV: ``majors`` is an
@@ -37,9 +38,10 @@ import json
 import re
 import statistics
 import sys
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from config import REPO_ROOT, Config, load_config, rel_to_repo, verify_source
 
@@ -50,17 +52,46 @@ REQUIREMENTS_PATH = DATA_DIR / "requirements.json"
 
 # A course code as written in prose: "CS 374", "CS374", "MATH 241".
 CODE_RE = re.compile(r"\b([A-Z]{2,4})\s?(\d{3})\b")
-# Prerequisite sentence inside the description, up to the first sentence break.
-PREREQ_RE = re.compile(r"Prerequisite[s]?:\s*(.+?)(?:\.\s|\.$|$)")
+# The label that opens the requirements block; everything after it belongs to that block.
+PREREQ_HEAD_RE = re.compile(r"Prerequisite[s]?:\s*")
 # Descriptions that carry no content of their own: "Same as HIST 283. See HIST 283."
 CROSS_REF_RE = re.compile(r"^Same as [^.]*\.\s*See [^.]*\.$")
 
+# Sentence boundary: a stop followed by something that starts a new sentence. Splitting on ". "
+# alone would cut "Ph.D. standing in BADM" down to "Ph.D" -- the abbreviations below are never
+# treated as a boundary, and a continuation starting lower-case is not one either.
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(])")
+# fmt: off
+ABBREVIATIONS = frozenset({
+    "e.g", "i.e", "etc", "vs", "approx", "no", "jr", "sr", "dr", "st",
+    "ph.d", "m.s", "b.s", "m.a", "b.a", "m.eng", "sc.d", "ed.d", "ed.m", "m.b.a", "m.d", "d.v.m",
+    "u.s",
+})
+# fmt: on
+
+# A continuation sentence that states a corequisite: "Credit or concurrent registration in AE 323".
+COREQ_RE = re.compile(
+    r"credit or concurrent (?:registration|enrollment)"
+    r"|concurrent(?:ly)? (?:registration|enrollment)"
+    r"|concurrent enrollment"
+    r"|enroll(?:ed)? concurrently"
+    r"|corequisite",
+    re.IGNORECASE,
+)
+# ...unless it is optional or negated: "Concurrent enrollment with JOUR 317 is allowed."
+SOFT_REQUIREMENT_RE = re.compile(
+    r"\bis allowed\b|preferred|recommend|suggest|encouraged|not required|optional|cannot|may not"
+    r"|not given",
+    re.IGNORECASE,
+)
+
 TERM_ABBR = {"spring": "sp", "summer": "su", "fall": "fa", "winter": "wi"}
 
-# Gen Ed categories, transcribed from GENED in almabot-web/src/lib/gened.ts. The TS matchers are
-# closures over the "Degree Attributes" string; here each is declarative so the JSON can carry it:
-# a course matches when attrs contains ANY of `any` and NONE of `none`.
-#   - qr1 replaces the lookahead /Quantitative Reasoning I(?!I)/ with an explicit `none` exclusion.
+# Gen Ed categories, transcribed from GENED in almabot-web/src/lib/gened.ts. The TS matchers
+# are closures over the "Degree Attributes" string; here each rule is declarative so that
+# requirements.json can carry it verbatim and :func:`matches_attrs` can evaluate it straight
+# from the file: a course matches when attrs contains ANY of `any` and NONE of `none`.
+#   - qr1 replaces the lookahead /Quantitative Reasoning I(?!I)/ with an explicit `none`.
 #   - cultwest keeps both spellings the TS matcher ORs together.
 # fmt: off -- one line per category, aligned for review against the TS source
 GENED: tuple[dict[str, Any], ...] = (
@@ -68,92 +99,87 @@ GENED: tuple[dict[str, Any], ...] = (
         "id": "comp1",
         "label": "Composition I",
         "group": "Composition",
-        "any": ["Composition I"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Composition I"], "none": []},
     },
     {
         "id": "advcomp",
         "label": "Advanced Composition",
         "group": "Composition",
-        "any": ["Advanced Composition"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Advanced Composition"], "none": []},
     },
     {
         "id": "qr1",
         "label": "Quantitative Reasoning I",
         "group": "Quantitative Reasoning",
-        "any": ["Quantitative Reasoning I"],
-        "none": ["Quantitative Reasoning II"],
+        "match": {
+            "field": "attrs",
+            "any": ["Quantitative Reasoning I"],
+            "none": ["Quantitative Reasoning II"],
+        },
     },
     {
         "id": "qr2",
         "label": "Quantitative Reasoning II",
         "group": "Quantitative Reasoning",
-        "any": ["Quantitative Reasoning II"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Quantitative Reasoning II"], "none": []},
     },
     {
         "id": "natphys",
         "label": "Physical Sciences",
         "group": "Natural Sciences & Tech",
-        "any": ["Phys Sciences"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Phys Sciences"], "none": []},
     },
     {
         "id": "natlife",
         "label": "Life Sciences",
         "group": "Natural Sciences & Tech",
-        "any": ["Life Sciences"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Life Sciences"], "none": []},
     },
     {
         "id": "humhist",
         "label": "Historical & Philosophical",
         "group": "Humanities & the Arts",
-        "any": ["Hist & Phil"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Hist & Phil"], "none": []},
     },
     {
         "id": "humlit",
         "label": "Literature & the Arts",
         "group": "Humanities & the Arts",
-        "any": ["Lit & Arts"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Lit & Arts"], "none": []},
     },
     {
         "id": "socsoc",
         "label": "Social Sciences",
         "group": "Social & Behavioral Sci",
-        "any": ["Soc Sci"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Soc Sci"], "none": []},
     },
     {
         "id": "socbeh",
         "label": "Behavioral Sciences",
         "group": "Social & Behavioral Sci",
-        "any": ["Beh Sci"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Beh Sci"], "none": []},
     },
     {
         "id": "cultwest",
         "label": "Western/Comparative Cultures",
         "group": "Cultural Studies",
-        "any": ["Cultural Studies - Western", "Western course"],
-        "none": [],
+        "match": {
+            "field": "attrs",
+            "any": ["Cultural Studies - Western", "Western course"],
+            "none": [],
+        },
     },
     {
         "id": "cultnonwest",
         "label": "Non-Western Cultures",
         "group": "Cultural Studies",
-        "any": ["Non-West"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["Non-West"], "none": []},
     },
     {
         "id": "cultus",
         "label": "US Minority Cultures",
         "group": "Cultural Studies",
-        "any": ["US Minority"],
-        "none": [],
+        "match": {"field": "attrs", "any": ["US Minority"], "none": []},
     },
 )
 # fmt: on
@@ -186,22 +212,73 @@ def parse_credits(raw: str | None) -> float:
 
 
 def parse_prereq(desc: str | None) -> str:
-    """The raw prerequisite sentence from a description, or ``""``.
+    """The requirements block: everything from the ``Prerequisite:`` label to the end, or ``""``.
 
-    Stops at the first sentence break, exactly like the frontend: the text is a human-readable
-    excerpt, while :func:`prereq_codes` extracts the machine-readable part.
+    The catalog puts the whole enrollment-requirements block last, so the label runs to the end of
+    the description. The frontend instead stops at the first sentence break, which drops text for
+    483 of 2,732 courses and cuts mid-abbreviation ("Prerequisite: Ph.D. standing in BADM" becomes
+    ``"Ph.D"``) -- exactly the truncation this export exists to undo.
     """
-    m = PREREQ_RE.search(desc or "")
-    return m.group(1).strip() if m else ""
+    m = PREREQ_HEAD_RE.search(desc or "")
+    return (desc or "")[m.end() :].strip() if m else ""
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split on sentence boundaries, without breaking inside ``ABBREVIATIONS``.
+
+    ``"Ph.D. standing in BADM. Consent required."`` -> two sentences, not three.
+    """
+    sentences: list[str] = []
+    pending = ""
+    for part in SENTENCE_SPLIT_RE.split(text.strip()):
+        pending = f"{pending} {part}" if pending else part
+        words = pending.rstrip(".").split()
+        # An abbreviation can open a bracket or quote: "(e.g. STAT 100)".
+        tail = words[-1].lower().lstrip("([\"'") if words else ""
+        if tail in ABBREVIATIONS:
+            continue  # the stop belonged to an abbreviation: keep reading
+        sentences.append(pending)
+        pending = ""
+    if pending:
+        sentences.append(pending)
+    return [s for s in sentences if s]
+
+
+def _codes_in(text: str, code: str) -> set[str]:
+    """Normalized course codes in a span of text, minus the course itself."""
+    return {f"{m.group(1)} {m.group(2)}" for m in CODE_RE.finditer(text)} - {code}
 
 
 def prereq_codes(prereq_raw: str, code: str) -> list[str]:
-    """Course codes mentioned in the prerequisite text, normalized and self-excluded.
+    """Course codes required *before* the course, normalized and self-excluded.
+
+    Only the prerequisite statement itself -- the first sentence of the block -- contributes.
+    Later sentences state something else: a corequisite (:func:`coreq_codes`), a restriction, a
+    recommendation ("Recommended: PHYS 213"), or an exclusion ("May not be taken concurrently with
+    ANTH 391"). Reading codes out of those would put edges into the DAG that are not prerequisites
+    at all, so they are left to the raw text.
 
     Not filtered against the catalog -- ``prereqs.json`` is where dangling references are dropped.
     """
-    found = {f"{m.group(1)} {m.group(2)}" for m in CODE_RE.finditer(prereq_raw)}
-    return sorted(found - {code})
+    sentences = split_sentences(prereq_raw)
+    return sorted(_codes_in(sentences[0], code)) if sentences else []
+
+
+def coreq_codes(prereq_raw: str, code: str) -> list[str]:
+    """Course codes to be taken *alongside* the course.
+
+    A continuation sentence counts only when it states a corequisite outright ("Credit or
+    concurrent registration in AE 323 and AE 353.", "Corequisites: MATH 231, PHYS 212.") and does
+    not hedge it ("Concurrent enrollment with JOUR 317 is allowed."). Corequisites are kept apart
+    from prerequisites deliberately: they are mutual often enough (DANC 498 <-> DANC 499) that
+    folding them into the prerequisite DAG would create cycles out of correct data.
+    """
+    sentences = split_sentences(prereq_raw)
+    found: set[str] = set()
+    for sentence in sentences[1:]:
+        if COREQ_RE.search(sentence) and not SOFT_REQUIREMENT_RE.search(sentence):
+            found |= _codes_in(sentence, code)
+    return sorted(found - set(prereq_codes(prereq_raw, code)))
 
 
 def row_term(row: Mapping[str, str]) -> str:
@@ -230,18 +307,30 @@ def clean(value: str | None) -> str:
 # --- CSV -> courses ------------------------------------------------------------------------------
 
 
-def read_courses(csv_path: Path) -> tuple[list[dict[str, Any]], int]:
-    """De-duplicate section rows into courses. Returns ``(courses, section_row_count)``.
+class Catalog(NamedTuple):
+    """What one CSV read yields, including facts that de-duplication would otherwise hide."""
+
+    courses: list[dict[str, Any]]
+    section_rows: int
+    #: every term seen across section rows -> how many rows carried it. De-duplication keeps only
+    #: the first row per course, so this is the only place a mixed-term CSV is still visible.
+    terms: Counter[str]
+
+
+def read_courses(csv_path: Path) -> Catalog:
+    """De-duplicate section rows into courses.
 
     Course-level columns (Name, Description, Credit Hours, Degree Attributes) are identical across
     the sections of a course, so the first row of each code wins -- the same rule build_data.py
     uses. Section rows still contribute the counts and the ``partOfTerm`` / ``types`` sets, which
-    are the only section facts worth keeping as retrieval metadata.
+    are the only section facts worth keeping as retrieval metadata, and every row's term is tallied
+    for :func:`check_terms`.
     """
     courses: dict[str, dict[str, Any]] = {}
     sections: dict[str, int] = {}
     part_of_term: dict[str, set[str]] = {}
     types: dict[str, set[str]] = {}
+    terms: Counter[str] = Counter()
     rows = 0
 
     with csv_path.open(newline="", encoding="utf-8", errors="replace") as f:
@@ -251,6 +340,7 @@ def read_courses(csv_path: Path) -> tuple[list[dict[str, Any]], int]:
             if not subject or not number:
                 continue
             rows += 1
+            terms[row_term(row)] += 1
             code = f"{subject} {number}"
             course = courses.get(code)
             if course is None:
@@ -267,6 +357,7 @@ def read_courses(csv_path: Path) -> tuple[list[dict[str, Any]], int]:
                     "attrs": clean(row.get("Degree Attributes")),
                     "prereqRaw": prereq_raw,
                     "prereqCodes": prereq_codes(prereq_raw, code),
+                    "coreqCodes": coreq_codes(prereq_raw, code),
                 }
                 sections[code] = 0
                 part_of_term[code] = set()
@@ -283,51 +374,68 @@ def read_courses(csv_path: Path) -> tuple[list[dict[str, Any]], int]:
         course["types"] = sorted(types[code])
 
     ordered = sorted(courses.values(), key=lambda c: (c["subject"], c["number"]))
-    return ordered, rows
+    return Catalog(courses=ordered, section_rows=rows, terms=terms)
 
 
-def check_terms(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, Any]) -> None:
-    """Fail if the CSV does not hold exactly the term ``config.yaml`` claims.
+def check_terms(catalog: Catalog, cfg: Mapping[str, Any]) -> None:
+    """Fail unless *every section row* carries the term ``config.yaml`` claims.
 
     ``data.term`` is part of the config hash and ends up in every chunk, so a silent mismatch would
-    tag an index with the wrong term.
+    tag an index with the wrong term. The check runs on ``catalog.terms`` -- the tally over all
+    rows -- rather than on the de-duplicated courses: de-duplication keeps only the first row of
+    each course, so a CSV mixing 2026-sp and 2025-fa would pass a per-course check while
+    ``sectionCount`` silently blended the two terms.
     """
-    missing = [c["code"] for c in courses if not c["term"]]
+    missing = [c["code"] for c in catalog.courses if not c["term"]]
     if missing:
         raise ValueError(f"{len(missing)} courses have no term, e.g. {missing[:5]}")
-    found = sorted({c["term"] for c in courses})
     expected = cfg["data"]["term"]
-    if found != [expected]:
+    if set(catalog.terms) != {expected}:
+        found = ", ".join(f"{t} ({n} rows)" for t, n in sorted(catalog.terms.items()))
         raise ValueError(
-            f"config data.term is {expected!r} but the CSV holds {found}; "
-            "update config.yaml (the hash, and therefore the index names, must move with the data)"
+            f"config data.term is {expected!r} but the CSV holds {found or 'no terms'}; "
+            "every section row must be in the configured term -- update config.yaml "
+            "(the hash, and therefore the index names, must move with the data)"
         )
 
 
 def build_prereqs(courses: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Prerequisite edge list, keeping only references to courses in this catalog.
 
-    Mirrors ``dag.ts::prereqs()``, which filters ``prereqCodes`` through ``byCode()``. A course
-    whose references all dangle (a prerequisite not offered this term) gets no entry at all.
+    Mirrors ``dag.ts::prereqs()``, which filters ``prereqCodes`` through ``byCode()``. ``coreqs``
+    rides along in its own field -- a consumer building the prerequisite DAG reads ``prereqs`` and
+    is unaffected. A course whose references all dangle (a prerequisite not offered this term) gets
+    no entry at all.
     """
     known = {c["code"] for c in courses}
     edges = []
     for course in courses:
-        resolved = [p for p in course["prereqCodes"] if p in known]
-        if resolved:
+        prereqs = [p for p in course["prereqCodes"] if p in known]
+        coreqs = [p for p in course["coreqCodes"] if p in known]
+        if prereqs or coreqs:
             edges.append(
-                {"course": course["code"], "prereqs": resolved, "raw": course["prereqRaw"]}
+                {
+                    "course": course["code"],
+                    "prereqs": prereqs,
+                    "coreqs": coreqs,
+                    "raw": course["prereqRaw"],
+                }
             )
     return edges
 
 
 def matches_attrs(category: Mapping[str, Any], attrs: str) -> bool:
-    """Whether a ``Degree Attributes`` string satisfies a Gen Ed category rule."""
+    """Whether a ``Degree Attributes`` string satisfies a Gen Ed category rule.
+
+    Reads ``category["match"]`` -- the same nested shape :func:`build_requirements` writes into
+    ``requirements.json`` -- so a consumer can load a category straight out of the file and
+    evaluate it with this function instead of re-implementing the qr1 exclusion. ``match.field``
+    names the course field the rule applies to, for a consumer that holds a whole course.
+    """
     if not attrs:
         return False
-    return any(s in attrs for s in category["any"]) and not any(
-        s in attrs for s in category["none"]
-    )
+    rule = category["match"]
+    return any(s in attrs for s in rule["any"]) and not any(s in attrs for s in rule["none"])
 
 
 def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, Any]) -> dict:
@@ -340,10 +448,8 @@ def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, A
     for category in GENED:
         categories.append(
             {
-                "id": category["id"],
-                "label": category["label"],
-                "group": category["group"],
-                "match": {"field": "attrs", "any": category["any"], "none": category["none"]},
+                **category,
+                "match": dict(category["match"]),
                 "courseCount": sum(1 for c in courses if matches_attrs(category, c["attrs"])),
             }
         )
@@ -372,35 +478,40 @@ def write_json(path: Path, payload: Any) -> Path:
 
 
 def summarize(
-    courses: Sequence[Mapping[str, Any]],
+    catalog: Catalog,
     prereqs: Sequence[Mapping[str, Any]],
     requirements: Mapping[str, Any],
-    section_rows: int,
 ) -> list[str]:
     """Human-readable export stats: sizes, description quality, prerequisite coverage."""
+    courses = catalog.courses
     lengths = sorted(len(c["desc"]) for c in courses)
     empty = [c for c in courses if not c["desc"]]
     cross_ref = [c for c in courses if CROSS_REF_RE.match(c["desc"])]
     mentioned = sum(len(c["prereqCodes"]) for c in courses)
     resolved = sum(len(e["prereqs"]) for e in prereqs)
+    prereq_courses = sum(1 for e in prereqs if e["prereqs"])
+    coreq_resolved = sum(len(e["coreqs"]) for e in prereqs)
+    coreq_courses = sum(1 for e in prereqs if e["coreqs"])
     with_attrs = sum(1 for c in courses if c["attrs"])
-    truncated = sum(1 for n in lengths if n > 240)
+    untruncated = sum(1 for n in lengths if n > 240)
 
     lines = [
-        f"section rows read      {section_rows}",
+        f"section rows read      {catalog.section_rows}",
         f"courses                {len(courses)}",
-        f"term                   {courses[0]['term'] if courses else '-'}",
+        "term                   "
+        + ", ".join(f"{t} ({n} rows)" for t, n in sorted(catalog.terms.items())),
         (
             f"desc length p50 / max  {int(statistics.median(lengths)) if lengths else 0} / "
             f"{lengths[-1] if lengths else 0}"
         ),
-        f"  longer than 240      {truncated}  (what the AlmaBot export truncated)",
+        f"  longer than 240      {untruncated}  (what the AlmaBot export truncated)",
         f"  empty                {len(empty)}"
         + (f"  {[c['code'] for c in empty[:5]]}" if empty else ""),
         f'  cross-reference only {len(cross_ref)}  ("Same as X. See X.")',
         f"prereq codes mentioned {mentioned}",
-        f"  resolved in catalog  {resolved}  over {len(prereqs)} courses",
+        f"  resolved in catalog  {resolved}  over {prereq_courses} courses",
         f"  dangling (dropped)   {mentioned - resolved}",
+        f"corequisite edges      {coreq_resolved}  over {coreq_courses} courses",
         f"courses with attrs     {with_attrs}",
     ]
     lines += [f"  {c['id']:<12} {c['courseCount']:>4}  {c['label']}" for c in requirements["genEd"]]
@@ -410,20 +521,20 @@ def summarize(
 def export(cfg: Config) -> dict[str, Any]:
     """Read the pinned CSV and write all three data files. Returns the exported objects."""
     csv_path = verify_source(cfg)
-    courses, section_rows = read_courses(csv_path)
-    if not courses:
+    catalog = read_courses(csv_path)
+    if not catalog.courses:
         raise ValueError(f"{rel_to_repo(csv_path)} yielded no courses; is it the catalog export?")
-    check_terms(courses, cfg)
-    prereqs = build_prereqs(courses)
-    requirements = build_requirements(courses, cfg)
-    write_json(COURSES_PATH, courses)
+    check_terms(catalog, cfg)
+    prereqs = build_prereqs(catalog.courses)
+    requirements = build_requirements(catalog.courses, cfg)
+    write_json(COURSES_PATH, catalog.courses)
     write_json(PREREQS_PATH, prereqs)
     write_json(REQUIREMENTS_PATH, requirements)
     return {
-        "courses": courses,
+        "catalog": catalog,
+        "courses": catalog.courses,
         "prereqs": prereqs,
         "requirements": requirements,
-        "section_rows": section_rows,
         "source": csv_path,
     }
 
@@ -438,9 +549,7 @@ def main(argv: list[str] | None = None) -> None:
 
     result = export(cfg)
     print(f"source   {rel_to_repo(result['source'])}  (sha256 pinned, config hash {cfg.hash})")
-    for line in summarize(
-        result["courses"], result["prereqs"], result["requirements"], result["section_rows"]
-    ):
+    for line in summarize(result["catalog"], result["prereqs"], result["requirements"]):
         print(line)
     for path in (COURSES_PATH, PREREQS_PATH, REQUIREMENTS_PATH):
         print(f"wrote    {rel_to_repo(path)}  ({path.stat().st_size // 1024} KB)")

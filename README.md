@@ -81,9 +81,10 @@ de-duplication, credit parsing, prerequisite extraction.
 uv run python -m ingest.export_almabot   # -> data/{courses,prereqs,requirements}.json + stats
 ```
 
-4,502 courses (term `2026-sp`), 2,080 prerequisite edges, 13 Gen Ed categories. The outputs are
-committed, so a clone can build indexes without the private CSV; see [data/README.md](data/README.md)
-for the schema and the known data quality issues.
+4,502 courses (term `2026-sp`), 2,086 prerequisite and 34 corequisite edges, 13 Gen Ed categories.
+The outputs are committed, so a clone can build indexes without the private CSV; see
+[data/README.md](data/README.md) for the schema, how the requirements block is parsed, and the
+known data quality issues.
 
 ## Day 1 goal
 
