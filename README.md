@@ -14,7 +14,7 @@ lagged new CPython releases before, so we stay one version behind the system Pyt
 ```bash
 uv sync --locked         # creates .venv (Python 3.12), installs deps + dev group; fails if uv.lock is stale
 cp -n .env.example .env  # then fill in OPENAI_API_KEY (-n never overwrites an existing .env)
-uv run python -c "import chromadb, rank_bm25, openai, yaml; print('ok')"
+uv run pytest -q         # smoke: imports resolve + config hash properties hold
 ```
 
 Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --locked --extra local`.
@@ -26,36 +26,49 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 ```
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
-├── config.py      # load_config() / config_hash()
+├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
 ├── data/          # courses.json, prereqs.json, requirements.json, chunks.jsonl
 ├── ingest/        # export → chunk → build indexes (dense / bm25)
 ├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
-└── indexes/       # Chroma persistence + BM25 pickle (gitignored, rebuildable)
+├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
+└── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
 ```
 
 ## Config & reproducibility
 
 All experiment settings live in `config.yaml`; nothing is hard-coded in the modules. `config.py`
-loads it and derives the **config hash**: sha256 of the canonical dump (sorted keys, no whitespace),
-first 8 hex chars. Changing any value — including `seed` — changes the hash; reordering keys does
-not; list order matters (`chunk.fields` order defines the chunk template).
+loads it into a read-only `Config` whose **config hash** is computed once, at load time: sha256 of
+the canonical dump (sorted keys, no whitespace), first 8 hex chars. Changing any value — including
+`seed` and the `data.source_sha256` pin — changes the hash; reordering keys does not; list order
+matters (`chunk.fields` order defines the chunk template). The mapping is immutable, so the hash
+cannot drift between two calls inside one build. For an ablation, copy and rebuild:
+`Config({**cfg.to_dict(), "seed": 43})`.
 
 ```python
-from config import load_config, config_hash, collection_name, bm25_path, report_path
+from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
-cfg = load_config()                 # config.yaml at repo root
-config_hash(cfg)                    # e.g. "a1b2c3d4"
-collection_name(cfg)                # "courses_a1b2c3d4"           Chroma collection
-bm25_path(cfg)                      # indexes/bm25_a1b2c3d4.pkl
-report_path("day1_smoke", cfg)      # report/day1_smoke_a1b2c3d4.md
+cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
+cfg.hash                         # "a1b2c3d4", frozen at load
+collection_name(cfg)             # "courses_a1b2c3d4"                   Chroma collection
+bm25_path(cfg)                   # <repo>/indexes/bm25_a1b2c3d4.pkl     absolute, dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_a1b2c3d4.md absolute, dir created on demand
+rel_to_repo(bm25_path(cfg))      # "indexes/bm25_a1b2c3d4.pkl"          for reports/logs, never str(path)
+source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
 
-Every artifact is tagged with the hash so outputs from different settings never mix, and
-`retrieve()` results carry a `config_hash` field (#8). Print the current hash with
-`uv run python config.py` (add `--canonical` to see the exact string that is hashed).
+The naming helpers return **absolute** paths so a build works from any cwd; print them through
+`rel_to_repo()` so a local home directory never lands in a git-tracked report.
+
+`data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter (#3)
+calls `verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
+forces a new hash instead of silently reusing an index built from the old data. After replacing the
+CSV, print the new digest with `uv run python config.py --source-digest` and update the pin.
+
+Print the current hash with `uv run python config.py`, and the exact string being hashed with
+`--canonical`.
 
 ## Day 1 goal
 

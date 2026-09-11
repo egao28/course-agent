@@ -1,13 +1,17 @@
 # Experiment configuration — the single place where all settings live.
 #
 # Every artifact this repo produces (Chroma collection, BM25 pickle, report, retrieve() result)
-# is tagged with config_hash(cfg): sha256 of the canonical dump of this file, first 8 hex chars.
-# Changing ANY value below (including seed) changes the hash; reordering keys does not.
-# Print the current hash with:  uv run python config.py
+# is tagged with the config hash: sha256 of the canonical dump of this file, first 8 hex chars.
+# Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash;
+# reordering keys does not. Print the current hash with:  uv run python config.py
 
 seed: 42
 data:
   source: ~/Downloads/course-catalog.csv
+  # sha256 of the file above. verify_source() refuses a file that does not match, so re-exporting
+  # from new input data forces a new hash instead of silently reusing old indexes. After
+  # replacing the CSV:  uv run python config.py --source-digest
+  source_sha256: 0b7c50d4b901251a3ed43a692b1e40ccfcb138180ba107145e3452e315a0a931
   term: 2026-sp
 chunk:
   strategy: one_course_one_chunk
