@@ -93,8 +93,12 @@ course not offered this term stays visible in metadata even though `prereqs.json
 
 Neither file is committed, unlike the three above: they are rebuilt from those by one command with
 no private input and no API key, and a template change rewrites all 3 MB. `chunks.meta.json` records
-the config hash, template and token stats of the run that wrote `chunks.jsonl`, so an index build
-can tell whether the chunks on disk were built under its own config.
+the term, strategy, template, field list and token stats of the run that wrote `chunks.jsonl`, so an
+index build can tell whether the chunks on disk were built under its own config. Compare its
+`chunk_key` — a hash of exactly the four values that decide chunk content — and not `config_hash`,
+which also moves when `seed`, `bm25` or `fusion` is tuned and the chunks on disk stay valid.
+`tokens` is `null` when the run could not fetch the tokenizer vocabulary, which also means those
+chunks were never checked against the 8191-token embedding limit.
 
 ## How the requirements block is read
 

@@ -36,7 +36,7 @@ algorithms, divide-and-conquer algorithms, dynamic programming, greedy algorithm
 algorithms. Formal models of computation including finite automata and Turing machines. Same as \
 ECE 374. Prerequisite: One of CS 173, MATH 213; CS 225.
 Prerequisites: One of CS 173, MATH 213; CS 225.
-Gen Ed: None"""
+Degree Attributes: None"""
 
 #: ...and for one that fills none of the optional ones.
 CWL593_CHUNK = """CWL 593 — Directed Research
@@ -44,7 +44,11 @@ Credits: 1
 Term: 2026-sp
 Description:
 Prerequisites: None listed
-Gen Ed: None"""
+Degree Attributes: None"""
+
+#: How ``v1`` renders a field whose value is not the bare string. Keyed by course field, so the
+#: coverage test can be derived from TEMPLATE_FIELDS instead of listing fields by hand.
+FIELD_AS_RENDERED = {"credits": ch.format_credits}
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +108,16 @@ def fake_encode(text: str) -> list[int]:
     return [len(w) for w in text.split()]
 
 
+@pytest.fixture
+def no_tokenizer(monkeypatch) -> None:
+    """tiktoken with no vocabulary available -- a fresh clone with no network."""
+
+    def offline(name: str) -> None:
+        raise RuntimeError(f"could not fetch {name}")
+
+    monkeypatch.setattr(ch.tiktoken, "get_encoding", offline)
+
+
 # --- rendering ----------------------------------------------------------------------------------
 
 
@@ -119,10 +133,25 @@ def test_render_chunk_v1_labels_absent_fields(by_code):
     assert "Description:\n" in CWL593_CHUNK  # bare label, not a trailing space
 
 
-def test_render_chunk_covers_every_configured_field(by_code):
-    text = ch.render_chunk(by_code["AAS 100"], "v1")
-    for field in ("code", "name", "term", "desc", "attrs"):
-        assert str(by_code["AAS 100"][field]) in text
+def test_render_chunk_covers_every_configured_field(courses):
+    # Derived from TEMPLATE_FIELDS, not from a hand-written list: adding a field to the hashed
+    # field set and forgetting it in _render_v1 must fail here. check_chunk_config only compares
+    # the config against the constant, so this is the only check that the template renders them.
+    for field in ch.TEMPLATE_FIELDS["v1"]:
+        # A course that actually fills the field -- an empty value would assert nothing, and no
+        # single fixture course fills all seven (none has both a prereq block and attributes).
+        course = next((c for c in courses if c[field]), None)
+        assert course is not None, f"no fixture course fills {field}"
+        rendered = FIELD_AS_RENDERED.get(field, str)(course[field])
+        assert rendered in ch.render_chunk(course, "v1"), field
+
+
+def test_render_chunk_labels_attrs_as_the_catalog_does(by_code):
+    # Not "Gen Ed": the column also carries non-Gen-Ed attributes, so that label would have the
+    # embedded text claim a category the course does not hold. gened_ids is the real answer.
+    text = ch.render_chunk(by_code["ECON 102"], "v1")
+    assert "Degree Attributes: Social & Beh Sci - Soc Sci course." in text
+    assert "Gen Ed" not in text
 
 
 def test_render_chunk_rejects_an_unknown_template(by_code):
@@ -231,6 +260,21 @@ def test_check_chunk_config_rejects_fields_the_template_does_not_render(cfg):
         ch.check_chunk_config(other)
 
 
+def test_check_chunk_config_reports_a_missing_section_as_a_sentence(cfg):
+    # This function's job is turning a bad config into an actionable error, so a config it cannot
+    # read must not escape as a bare KeyError from inside it.
+    raw = cfg.to_dict()
+    raw.pop("chunk")
+    with pytest.raises(ValueError, match="no `chunk` section"):
+        ch.check_chunk_config(Config(raw))
+
+
+def test_check_chunk_config_names_the_keys_it_needs(cfg):
+    partial = {k: v for k, v in cfg["chunk"].items() if k != "template_version"}
+    with pytest.raises(ValueError, match="missing template_version"):
+        ch.check_chunk_config(Config({**cfg.to_dict(), "chunk": partial}))
+
+
 def test_check_terms_rejects_a_corpus_from_another_term(courses, cfg):
     stale = [{**c, "term": "2025-fa"} for c in courses]
     with pytest.raises(ValueError, match="2025-fa"):
@@ -285,6 +329,24 @@ def test_token_stats_name_the_chunks_over_the_embedding_limit():
     assert stats.over_limit == ["2026-sp:CS-999"]
 
 
+def test_check_sizes_names_the_offenders_and_the_fix():
+    stats = ch.token_stats(
+        [{"doc_id": "2026-sp:CS-999", "text": "x " * (ch.EMBEDDING_TOKEN_LIMIT + 1)}], fake_encode
+    )
+    with pytest.raises(ValueError, match="2026-sp:CS-999"):
+        ch.check_sizes(stats)
+
+
+def test_check_sizes_passes_a_corpus_within_the_limit(courses, categories):
+    ch.check_sizes(ch.token_stats(ch.build_chunks(courses, categories, "v1"), fake_encode))
+
+
+def test_default_encode_degrades_instead_of_failing_the_build(no_tokenizer, capsys):
+    # A fresh clone with no network must still get its chunks: the size report is a diagnostic.
+    assert ch.default_encode() is None
+    assert "no cl100k_base vocabulary" in capsys.readouterr().err
+
+
 # --- end to end ---------------------------------------------------------------------------------
 
 
@@ -304,6 +366,7 @@ def test_chunk_records_the_config_hash_alongside_the_corpus(cfg, corpus):
     ch.chunk(cfg, encode=fake_encode)
 
     meta = json.loads(corpus["CHUNKS_META_PATH"].read_text(encoding="utf-8"))
+    assert meta["chunk_key"] == ch.chunk_key(cfg)  # what a consumer compares
     assert meta["config_hash"] == cfg.hash
     assert meta["template_version"] == "v1"
     assert meta["strategy"] == ch.STRATEGY
@@ -317,3 +380,48 @@ def test_chunk_refuses_a_corpus_that_does_not_match_the_config(cfg, corpus, cour
     with pytest.raises(ValueError, match="data.term"):
         ch.chunk(cfg, encode=fake_encode)
     assert not corpus["CHUNKS_PATH"].exists()  # nothing written on a failed run
+
+
+def test_chunk_refuses_to_write_a_chunk_over_the_embedding_limit(cfg, corpus, courses):
+    # Not merely reported: #5 would otherwise pay for the batch ahead of the rejected chunk.
+    huge = {**courses[0], "desc": "x " * (ch.EMBEDDING_TOKEN_LIMIT + 1)}
+    ex.write_json(corpus["COURSES_PATH"], [huge, *courses[1:]])
+    with pytest.raises(ValueError, match=f"exceed the {ch.EMBEDDING_TOKEN_LIMIT}-token"):
+        ch.chunk(cfg, encode=fake_encode)
+    assert not corpus["CHUNKS_PATH"].exists()
+
+
+def test_chunk_writes_the_corpus_when_the_tokenizer_is_unavailable(
+    cfg, corpus, courses, no_tokenizer
+):
+    # The diagnostic degrades, the product does not: an offline run still gets its chunks, and
+    # the sidecar says they were never size-checked.
+    result = ch.chunk(cfg)
+
+    assert result["stats"] is None
+    lines = corpus["CHUNKS_PATH"].read_text(encoding="utf-8").splitlines()
+    assert len(lines) == len(courses)
+    assert json.loads(corpus["CHUNKS_META_PATH"].read_text(encoding="utf-8"))["tokens"] is None
+    assert "not size-checked" in "\n".join(ch.summarize(result))
+
+
+# --- the chunk key ------------------------------------------------------------------------------
+
+
+def test_chunk_key_ignores_settings_that_do_not_change_the_chunks(cfg):
+    # A Day 4 ablation tunes these on purpose; the chunks on disk stay valid, so the key must not
+    # move or #5 / #6 learn to ignore it.
+    tuned = Config({**cfg.to_dict(), "seed": 43, "fusion": {**cfg["fusion"], "rrf_k": 10}})
+    assert tuned.hash != cfg.hash
+    assert ch.chunk_key(tuned) == ch.chunk_key(cfg)
+
+
+def test_chunk_key_moves_with_the_term(cfg):
+    other = Config({**cfg.to_dict(), "data": {**cfg["data"], "term": "2026-fa"}})
+    assert ch.chunk_key(other) != ch.chunk_key(cfg)
+
+
+def test_chunk_key_moves_with_the_template(cfg, monkeypatch):
+    monkeypatch.setitem(ch.TEMPLATE_FIELDS, "v2", ("code", "desc"))
+    v2 = Config({**cfg.to_dict(), "chunk": {**cfg["chunk"], "template_version": "v2"}})
+    assert ch.chunk_key(v2) != ch.chunk_key(cfg)

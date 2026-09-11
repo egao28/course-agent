@@ -24,13 +24,15 @@ in ``config.yaml``. A template ablation (#15) adds a ``v2`` renderer next to ``v
 one config value, and gets fresh index names for free: the version is part of the config hash.
 Nothing else in the pipeline may build chunk text.
 
-Two properties the rest of Day 1 relies on, both asserted here rather than assumed downstream:
-every ``doc_id`` is unique, and every course carries the term ``config.yaml`` claims.
+Three properties the rest of Day 1 relies on, all asserted here rather than assumed downstream:
+every ``doc_id`` is unique, every course carries the term ``config.yaml`` claims, and no chunk
+exceeds the embedding input limit (#5 pays for a batch before the API rejects the long one).
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -40,7 +42,7 @@ from typing import Any, NamedTuple
 
 import tiktoken
 
-from config import Config, load_config, rel_to_repo
+from config import HASH_LEN, Config, canonical_dump, load_config, rel_to_repo
 from ingest.export_almabot import COURSES_PATH, DATA_DIR, REQUIREMENTS_PATH, matches_attrs
 
 CHUNKS_PATH = DATA_DIR / "chunks.jsonl"
@@ -80,10 +82,18 @@ def format_credits(credits: float) -> str:
 def _render_v1(course: Mapping[str, Any]) -> str:
     """Template ``v1``: a labelled line per field, in ``TEMPLATE_FIELDS["v1"]`` order.
 
-    Labels are spelled out ("Prerequisites", "Gen Ed") because they are embedded along with the
-    values and carry query vocabulary of their own. An empty field keeps its label -- bare for
-    ``desc`` (one course in the catalog has no description), with an explicit "None listed" /
-    "None" for the two fields where absence is itself an answer ("does this need a prereq?").
+    Labels are spelled out ("Prerequisites", "Degree Attributes") because they are embedded along
+    with the values and carry query vocabulary of their own. An empty field keeps its label --
+    bare for ``desc`` (one course in the catalog has no description), with an explicit "None
+    listed" / "None" for the two fields where absence is itself an answer ("does this need a
+    prereq?").
+
+    ``attrs`` is labelled as the catalog labels it, *not* "Gen Ed": the column also carries
+    non-Gen-Ed attributes (ACE 436 and CMN 361 are "Global Classroom course." and satisfy no Gen
+    Ed at all; ABE 232 mixes the two), so a "Gen Ed:" line would have the chunk assert a category
+    the course does not hold. The authoritative answer is ``metadata.gened_ids``, computed from
+    the rules in ``requirements.json``; whether v2 should render those labels as text is part of
+    #15.
     """
     lines = [
         f"{course['code']} — {course['name']}",
@@ -91,7 +101,7 @@ def _render_v1(course: Mapping[str, Any]) -> str:
         f"Term: {course['term']}",
         f"Description: {course['desc']}",
         f"Prerequisites: {course['prereqRaw'] or 'None listed'}",
-        f"Gen Ed: {course['attrs'] or 'None'}",
+        f"Degree Attributes: {course['attrs'] or 'None'}",
     ]
     return "\n".join(line.rstrip() for line in lines)
 
@@ -183,8 +193,23 @@ def check_chunk_config(cfg: Mapping[str, Any]) -> str:
     Every value here is part of the config hash, which names the indexes built from these chunks.
     A config claiming a strategy or field set the renderer does not honour would tag an index
     with a description of a corpus that was never built.
+
+    An incomplete section is reported the same way as a wrong one: this function exists to turn a
+    bad config into a sentence, so it must not be the place a bare ``KeyError`` escapes from.
     """
+    if "chunk" not in cfg:
+        raise ValueError(
+            "config has no `chunk` section; it must set strategy, template_version and fields "
+            "(see config.yaml) -- all three are hashed into the index names"
+        )
     chunk = cfg["chunk"]
+    missing = [key for key in ("strategy", "template_version", "fields") if key not in chunk]
+    if missing:
+        raise ValueError(
+            f"config chunk section is missing {', '.join(missing)}; it must set strategy, "
+            "template_version and fields (see config.yaml) -- all three are hashed into the "
+            "index names"
+        )
     if chunk["strategy"] != STRATEGY:
         raise ValueError(
             f"chunk.strategy is {chunk['strategy']!r}, but this module only implements {STRATEGY!r}"
@@ -269,22 +294,49 @@ def write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> Path:
     return path
 
 
-def chunks_meta(cfg: Config, chunks: Sequence[Mapping[str, Any]], stats: TokenStats) -> dict:
+def chunk_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of just the config values that decide what a chunk *contains*.
+
+    ``cfg.hash`` covers the whole file, so tuning ``fusion.rrf_k``, ``bm25.k1`` or ``seed`` --
+    which a Day 4 ablation does on purpose -- would mark byte-identical chunks stale and train
+    #5 / #6 to ignore the mismatch, disarming the guard for the case it was written for. This
+    moves only when the term, strategy, template version or field list moves, which is exactly
+    when ``chunks.jsonl`` has to be rebuilt. Consumers compare this; ``config_hash`` in the
+    sidecar records which run wrote the file.
+    """
+    version = cfg["chunk"]["template_version"]
+    content = {
+        "term": cfg["data"]["term"],
+        "strategy": STRATEGY,
+        "template_version": version,
+        "fields": list(TEMPLATE_FIELDS[version]),
+    }
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def chunks_meta(cfg: Config, chunks: Sequence[Mapping[str, Any]], stats: TokenStats | None) -> dict:
     """What the sidecar records: the settings this corpus was chunked under, plus its size.
 
-    ``config_hash`` is the point of it. The indexes built in #5 / #6 are named after that hash
-    while ``chunks.jsonl`` has a fixed name, so a rebuild under a changed ``chunk`` section would
-    otherwise leave a stale file that a later index build reads without noticing.
+    ``chunk_key`` is the point of it. The indexes built in #5 / #6 are named after the config
+    hash while ``chunks.jsonl`` has a fixed name, so a rebuild under a changed ``chunk`` section
+    would otherwise leave a stale file that a later index build reads without noticing.
+
+    ``tokens`` is ``null`` when the tokenizer vocabulary was unavailable (see
+    :func:`default_encode`) -- which also means this corpus was never size-checked against
+    ``EMBEDDING_TOKEN_LIMIT``.
     """
     version = cfg["chunk"]["template_version"]
     return {
+        "chunk_key": chunk_key(cfg),
         "config_hash": cfg.hash,
         "term": cfg["data"]["term"],
         "strategy": STRATEGY,
         "template_version": version,
         "fields": list(TEMPLATE_FIELDS[version]),
         "chunks": len(chunks),
-        "tokens": {
+        "tokens": None
+        if stats is None
+        else {
             "encoding": TOKEN_ENCODING,
             "total": stats.total,
             "p50": stats.p50,
@@ -304,11 +356,49 @@ def write_meta(path: Path, payload: Mapping[str, Any]) -> Path:
     return path
 
 
+def default_encode() -> Callable[[str], Sequence[int]] | None:
+    """The ``cl100k_base`` tokenizer, or ``None`` if its vocabulary cannot be had.
+
+    tiktoken fetches the vocabulary over the network on first use and caches it. The chunks are
+    the product of this module and the token report is a diagnostic, so a fresh clone with no
+    network writes the corpus with an empty ``tokens`` block instead of failing the build after
+    rendering all 4,502 chunks.
+    """
+    try:
+        return tiktoken.get_encoding(TOKEN_ENCODING).encode
+    except Exception as exc:  # noqa: BLE001 -- any failure to fetch a diagnostic is degradable
+        print(
+            f"warning: no {TOKEN_ENCODING} vocabulary ({type(exc).__name__}: {exc}); "
+            "writing chunks without the size report, so they are NOT checked against the "
+            f"{EMBEDDING_TOKEN_LIMIT}-token limit",
+            file=sys.stderr,
+        )
+        return None
+
+
+def check_sizes(stats: TokenStats) -> None:
+    """Fail on a chunk the embeddings API would reject, before anything is written.
+
+    Asserted like the other two invariants rather than merely printed: a corpus with one
+    9,000-token description otherwise writes cleanly and exits 0, and #5 discovers it mid-batch,
+    after paying for the chunks ahead of it.
+    """
+    if stats.over_limit:
+        listed = ", ".join(stats.over_limit[:5])
+        more = "" if len(stats.over_limit) <= 5 else f" (+{len(stats.over_limit) - 5} more)"
+        raise ValueError(
+            f"{len(stats.over_limit)} chunk(s) exceed the {EMBEDDING_TOKEN_LIMIT}-token "
+            f"embedding limit and would be rejected: {listed}{more}; split them or render a "
+            "shorter template (a new chunk.template_version) before building an index"
+        )
+
+
 def chunk(cfg: Config, encode: Callable[[str], Sequence[int]] | None = None) -> dict[str, Any]:
     """Read the exported corpus, write ``data/chunks.jsonl`` + its sidecar, and report sizes.
 
-    ``encode`` defaults to the ``cl100k_base`` tokenizer, whose vocabulary tiktoken downloads and
-    caches on first use; pass one in to count tokens with anything else.
+    ``encode`` defaults to :func:`default_encode`; pass one in to count tokens with anything
+    else. Everything that can fail is checked before the first write, so a failed run leaves the
+    previous ``chunks.jsonl`` in place rather than a half-written one.
     """
     version = check_chunk_config(cfg)
     courses = load_courses()
@@ -316,8 +406,10 @@ def chunk(cfg: Config, encode: Callable[[str], Sequence[int]] | None = None) -> 
     categories = load_gened_categories()
     chunks = build_chunks(courses, categories, version)
     if encode is None:
-        encode = tiktoken.get_encoding(TOKEN_ENCODING).encode
-    stats = token_stats(chunks, encode)
+        encode = default_encode()
+    stats = None if encode is None else token_stats(chunks, encode)
+    if stats is not None:
+        check_sizes(stats)
     write_jsonl(CHUNKS_PATH, chunks)
     write_meta(CHUNKS_META_PATH, chunks_meta(cfg, chunks, stats))
     return {
@@ -375,22 +467,35 @@ def token_stats(
     )
 
 
-def summarize(result: Mapping[str, Any], stats: TokenStats) -> list[str]:
-    """Human-readable build stats: counts, token budget, metadata coverage."""
+def summarize(result: Mapping[str, Any]) -> list[str]:
+    """Human-readable build stats: counts, token budget, metadata coverage.
+
+    Reads the stats out of ``result`` rather than taking them alongside it, so there is one path
+    to them and no way to describe one corpus with another's numbers.
+    """
     chunks = result["chunks"]
     version = result["template_version"]
+    stats = result["stats"]
     with_prereqs = sum(1 for c in chunks if c["metadata"]["prereq_codes"])
     with_gened = sum(1 for c in chunks if c["metadata"]["gened_ids"])
-    headroom = EMBEDDING_TOKEN_LIMIT - stats.largest
+    tokens = (
+        [f"tokens ({TOKEN_ENCODING})        unavailable, chunks not size-checked"]
+        if stats is None
+        else [
+            f"tokens ({TOKEN_ENCODING})",
+            f"  total                {stats.total}  (what #5 pays to embed once)",
+            f"  p50 / p95 / max      {stats.p50} / {stats.p95} / {stats.largest}",
+            (
+                f"  over {EMBEDDING_TOKEN_LIMIT} limit        {len(stats.over_limit)}"
+                f"  (headroom {EMBEDDING_TOKEN_LIMIT - stats.largest})"
+            ),
+        ]
+    )
     return [
         f"courses read           {len(result['courses'])}",
         f"chunks written         {len(chunks)}  (strategy {STRATEGY}, template {version})",
         f"unique doc_ids         {len({c['doc_id'] for c in chunks})}",
-        f"tokens ({TOKEN_ENCODING})",
-        f"  total                {stats.total}  (what #5 pays to embed once)",
-        f"  p50 / p95 / max      {stats.p50} / {stats.p95} / {stats.largest}",
-        f"  over {EMBEDDING_TOKEN_LIMIT} limit        {len(stats.over_limit)}"
-        + (f"  {stats.over_limit[:5]}" if stats.over_limit else f"  (headroom {headroom})"),
+        *tokens,
         f"metadata prereq_codes  {with_prereqs} chunks",
         f"metadata gened_ids     {with_gened} chunks",
     ]
@@ -429,8 +534,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     result = chunk(cfg)
-    print(f"config hash {cfg.hash}")
-    for line in summarize(result, result["stats"]):
+    print(f"config hash {cfg.hash}  (chunk key {chunk_key(cfg)})")
+    for line in summarize(result):
         print(line)
     for path in (CHUNKS_PATH, CHUNKS_META_PATH):
         print(f"wrote    {rel_to_repo(path)}  ({path.stat().st_size // 1024} KB)")
