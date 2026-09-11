@@ -27,8 +27,8 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
-├── data/          # courses.json, prereqs.json, requirements.json, chunks.jsonl
-├── ingest/        # export → chunk → build indexes (dense / bm25)
+├── data/          # courses.json, prereqs.json, requirements.json (exported), chunks.jsonl
+├── ingest/        # export_almabot.py → chunk → build indexes (dense / bm25)
 ├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
@@ -62,13 +62,28 @@ source_path(cfg)                 # data.source with ~ expanded; cfg itself is un
 The naming helpers return **absolute** paths so a build works from any cwd; print them through
 `rel_to_repo()` so a local home directory never lands in a git-tracked report.
 
-`data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter (#3)
-calls `verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
+`data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter calls
+`verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
 forces a new hash instead of silently reusing an index built from the old data. After replacing the
 CSV, print the new digest with `uv run python config.py --source-digest` and update the pin.
 
 Print the current hash with `uv run python config.py`, and the exact string being hashed with
 `--canonical`.
+
+## Data
+
+`ingest/export_almabot.py` re-exports the catalog CSV into `data/`. AlmaBot's `public/courses.json`
+cannot be reused: it truncates `desc` to 240 chars (3,255 of 4,502 courses lose text) and carries no
+term, so the exporter re-reads the CSV and keeps only the *logic* from `build_data.py` — section
+de-duplication, credit parsing, prerequisite extraction.
+
+```bash
+uv run python -m ingest.export_almabot   # -> data/{courses,prereqs,requirements}.json + stats
+```
+
+4,502 courses (term `2026-sp`), 2,080 prerequisite edges, 13 Gen Ed categories. The outputs are
+committed, so a clone can build indexes without the private CSV; see [data/README.md](data/README.md)
+for the schema and the known data quality issues.
 
 ## Day 1 goal
 
