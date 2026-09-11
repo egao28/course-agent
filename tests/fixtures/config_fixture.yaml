@@ -1,0 +1,23 @@
+# Test fixture for tests/test_config.py — NOT the live config.yaml.
+# Deliberately covers every YAML scalar type the hash must handle (int, float, str, bool, null,
+# list, nested mapping) so the hash-property tests stay valid however the real config evolves.
+seed: 7
+data:
+  source: ~/somewhere/data.csv
+  source_sha256: null
+  term: 2026-sp
+chunk:
+  strategy: one_course_one_chunk
+  fields: [code, name]
+  overlap: 0
+embedding:
+  provider: local
+  normalize: true
+  batch_size: 16
+bm25:
+  k1: 1.5
+  b: 0.75
+fusion:
+  method: rrf
+  rrf_k: 60
+  top_k_final: 5

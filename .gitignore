@@ -10,8 +10,9 @@ venv/
 # secrets
 .env
 
-# rebuildable artifacts
-indexes/
+# rebuildable artifacts (keep the directory itself so a fresh clone can write into it)
+indexes/*
+!indexes/.gitkeep
 *.pkl
 
 # os / editor
