@@ -3,8 +3,10 @@ name = "course-agent"
 version = "0.1.0"
 description = "Hybrid retrieval (dense + BM25 + RRF) and agent layer for a UIUC course-planning assistant"
 readme = "README.md"
-# chromadb typically lags the newest CPython release; system Python is 3.14, so pin to 3.11/3.12.
-requires-python = ">=3.11,<3.13"
+# Single interpreter version for reproducible lock/indexes/reports. The stack also resolves on
+# 3.13/3.14 today, but chromadb's onnxruntime dependency has lagged new CPython releases before,
+# so stay one version behind the system Python (3.14).
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "chromadb",
     "rank-bm25",
@@ -24,10 +26,12 @@ dev = ["pytest", "ruff"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+# target-version is inferred from requires-python
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# keep ruff defaults, add the full pycodestyle E set (incl. E501 line length)
+extend-select = ["E"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 pythonpath = ["."]

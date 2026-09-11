@@ -5,17 +5,21 @@ Retrieval + agent layer for a UIUC course-planning assistant. Data comes from [A
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/). Python is pinned to **3.12** via `.python-version`
-(system Python is 3.14; `chromadb` typically lags the newest CPython release, so we pin one back).
+Requires [uv](https://docs.astral.sh/uv/). Python is pinned to **3.12** via `.python-version` and
+`requires-python`: one interpreter version keeps `uv.lock`, indexes and reports reproducible across
+machines. The stack also resolves on 3.13/3.14 today, but `chromadb`'s `onnxruntime` dependency has
+lagged new CPython releases before, so we stay one version behind the system Python (3.14).
 `uv sync` downloads the interpreter if it is missing.
 
 ```bash
-uv sync               # creates .venv (Python 3.12) and installs deps + dev group (pytest, ruff)
-cp .env.example .env  # then fill in OPENAI_API_KEY
+uv sync --locked         # creates .venv (Python 3.12), installs deps + dev group; fails if uv.lock is stale
+cp -n .env.example .env  # then fill in OPENAI_API_KEY (-n never overwrites an existing .env)
 uv run python -c "import chromadb, rank_bm25, openai, yaml; print('ok')"
 ```
 
-Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --extra local`.
+Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --locked --extra local`.
+`uv sync` is exact by default, so pass `--extra local` on **every** sync or the extra is removed again;
+alternatively use `uv sync --inexact` to leave already-installed extras in place.
 
 ## Layout
 
