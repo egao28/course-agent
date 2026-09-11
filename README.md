@@ -27,8 +27,8 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
-├── data/          # courses.json, prereqs.json, requirements.json (exported), chunks.jsonl
-├── ingest/        # export_almabot.py → chunk → build indexes (dense / bm25)
+├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
+├── ingest/        # export_almabot.py → chunk.py → build indexes (dense / bm25)
 ├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
@@ -85,6 +85,38 @@ uv run python -m ingest.export_almabot   # -> data/{courses,prereqs,requirements
 The outputs are committed, so a clone can build indexes without the private CSV; see
 [data/README.md](data/README.md) for the schema, how the requirements block is parsed, and the
 known data quality issues.
+
+## Chunking
+
+One course is one chunk — descriptions are short (p50 111 tokens, max 523, against an 8191-token
+embedding limit), so splitting would only scatter a course's facts across several vectors.
+
+```bash
+uv run python -m ingest.chunk                # -> data/chunks.jsonl + chunks.meta.json, with stats
+uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
+```
+
+```
+CS 374 — Introduction to Algorithms & Models of Computation
+Credits: 4
+Term: 2026-sp
+Description: Analysis of algorithms, major paradigms of algorithm design including recursive …
+Prerequisites: One of CS 173, MATH 213; CS 225.
+Gen Ed: None
+```
+
+The wording of that text is a retrieval parameter, not a detail: it is what gets embedded and
+BM25-tokenized. So it is built in `render_chunk(course, template_version)` and nowhere else, keyed
+by `chunk.template_version` in `config.yaml`. A template ablation adds a `v2` renderer beside `v1`,
+flips that one value, and gets fresh index names for free — the version is part of the config hash.
+`chunk.fields` must list exactly what the chosen template renders; the build refuses to run
+otherwise, so the hash can never describe a corpus that was not built.
+
+`doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
+credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
+the exported `data/*.json`, it is rebuilt from them by the command above with no private input.
+Its `chunks.meta.json` sidecar records the config hash it was built under, so an index build can
+detect chunks left over from another template. See [data/README.md](data/README.md#chunksjsonl).
 
 ## Day 1 goal
 

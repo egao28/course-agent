@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "tqdm",
     "python-dotenv",
+    "tiktoken",
 ]
 
 [project.optional-dependencies]
