@@ -3,6 +3,20 @@
 Retrieval + agent layer for a UIUC course-planning assistant. Data comes from [AlmaBot](../almabot-web)
 (React frontend; its `scripts/build_data.py` exports courses and the prerequisite DAG from `course-catalog.csv`).
 
+## Setup
+
+Requires [uv](https://docs.astral.sh/uv/). Python is pinned to **3.12** via `.python-version`
+(system Python is 3.14; `chromadb` typically lags the newest CPython release, so we pin one back).
+`uv sync` downloads the interpreter if it is missing.
+
+```bash
+uv sync               # creates .venv (Python 3.12) and installs deps + dev group (pytest, ruff)
+cp .env.example .env  # then fill in OPENAI_API_KEY
+uv run python -c "import chromadb, rank_bm25, openai, yaml; print('ok')"
+```
+
+Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --extra local`.
+
 ## Layout
 
 ```

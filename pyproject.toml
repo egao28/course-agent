@@ -1,0 +1,33 @@
+[project]
+name = "course-agent"
+version = "0.1.0"
+description = "Hybrid retrieval (dense + BM25 + RRF) and agent layer for a UIUC course-planning assistant"
+readme = "README.md"
+# chromadb typically lags the newest CPython release; system Python is 3.14, so pin to 3.11/3.12.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "chromadb",
+    "rank-bm25",
+    "openai",
+    "pyyaml",
+    "numpy",
+    "tqdm",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+# Local embedding route (BGE-M3); heavy, install only when needed: `uv sync --extra local`
+local = ["sentence-transformers"]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
