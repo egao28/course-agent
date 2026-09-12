@@ -6,9 +6,12 @@ Run from the repo root, after ``ingest.chunk``::
     uv run --env-file .env python -m ingest.build_dense --rebuild  # drop it and embed again
     uv run python -m ingest.build_dense --dry-run                  # what it would cost, no API call
 
-The collection is ``courses_{config_hash}`` inside ``indexes/chroma``, so a config change builds a
-new collection beside the old one instead of overwriting it, and ``retrieval.dense`` can only read
-the one its own config names.
+The collection is ``courses_{dense_key}`` inside ``indexes/chroma``, so a change to the chunk
+template or the encoder builds a new collection beside the old one instead of overwriting it, and
+``retrieval.dense`` can only read the one its own config names. It is keyed on ``dense_key`` rather
+than the full config hash because tuning ``fusion`` or ``bm25`` -- which a Day 4 ablation does on
+purpose -- cannot change a single vector, and re-embedding a byte-identical corpus to answer to a
+new name would cost money for nothing; see :func:`config.dense_key`.
 
 **Cosine, explicitly.** Chroma defaults to squared L2. OpenAI embeddings are meant to be compared
 by cosine, and ``DenseRetriever`` reports ``1 - distance`` as its score, which is only a similarity
@@ -72,13 +75,18 @@ class Tally(NamedTuple):
 
 
 def load_chunks(path: Path | None = None) -> list[dict[str, Any]]:
-    """The chunk corpus, or a pointer at the command that writes it."""
+    """The chunk corpus, or a pointer at the command that writes it.
+
+    ``doc_id`` uniqueness is checked here because it is what makes ``len(chunks)`` the number of
+    rows a finished collection holds -- the signal the whole idempotency story rests on.
+    """
     path = CHUNKS_PATH if path is None else Path(path)
     if not path.exists():
         raise FileNotFoundError(
             f"{rel_to_repo(path)} is missing; run `uv run python -m ingest.chunk` first"
         )
     chunks = []
+    seen: dict[str, int] = {}
     with path.open(encoding="utf-8") as f:
         for lineno, line in enumerate(f, start=1):
             row = json.loads(line)
@@ -88,6 +96,15 @@ def load_chunks(path: Path | None = None) -> list[dict[str, Any]]:
                     f"{rel_to_repo(path)}:{lineno} is missing {missing}; "
                     "re-run `uv run python -m ingest.chunk`"
                 )
+            first = seen.get(row["doc_id"])
+            if first is not None:
+                raise ValueError(
+                    f"{rel_to_repo(path)}:{lineno} repeats doc_id {row['doc_id']!r} from line "
+                    f"{first}; two rows with one id are not two vectors -- Chroma keeps the first "
+                    "and drops the second without a word, so the build would pay for a chunk the "
+                    "collection does not hold. Re-run `uv run python -m ingest.chunk`"
+                )
+            seen[row["doc_id"]] = lineno
             chunks.append(row)
     if not chunks:
         raise ValueError(f"{rel_to_repo(path)} is empty; re-run `uv run python -m ingest.chunk`")
@@ -135,8 +152,15 @@ def check_chunks(
 
 
 def open_store(path: Path | None = None) -> chromadb.ClientAPI:
-    """A persistent Chroma client on ``indexes/chroma`` (gitignored, rebuildable)."""
-    return chromadb.PersistentClient(path=str(chroma_path() if path is None else path))
+    """A persistent Chroma client on ``indexes/chroma`` (gitignored, rebuildable).
+
+    This is the one place a store comes into existence: opening a persistent client writes a
+    ``chroma.sqlite3``, so :func:`chroma_path` deliberately does not create the directory and
+    read-only callers go through :func:`find_collection` instead.
+    """
+    path = chroma_path() if path is None else Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return chromadb.PersistentClient(path=str(path))
 
 
 def get_collection(client: chromadb.ClientAPI, name: str) -> Any | None:
@@ -151,6 +175,21 @@ def get_collection(client: chromadb.ClientAPI, name: str) -> Any | None:
         return client.get_collection(name, embedding_function=None)
     except NotFoundError:
         return None
+
+
+def find_collection(client: chromadb.ClientAPI | None, name: str) -> Any | None:
+    """The named collection, without bringing a store into existence to find out.
+
+    ``None`` covers both "no store yet" and "store, but no such collection": either way there is
+    nothing to read and nothing has been created. A store that is not on disk cannot hold a
+    collection, so the question is answered from the filesystem rather than by opening a client
+    that would write one.
+    """
+    if client is None:
+        if not chroma_path().exists():
+            return None
+        client = open_store()
+    return get_collection(client, name)
 
 
 def collection_metadata(
@@ -232,15 +271,20 @@ def build(
 
     Returns ``status`` ``"up-to-date"`` (nothing embedded, nothing charged) or ``"built"``.
     Everything that can fail without spending money -- the config, the corpus, the collection
-    state -- is checked before the embedder is even constructed.
+    state, the API key -- is checked before the store is opened, so a run that cannot embed
+    leaves nothing behind, not even an empty ``indexes/chroma``.
+
+    What landed is counted afterwards as well. ``count()`` is the signal every later run reads to
+    decide whether there is anything to do, so a build that reports success while the collection
+    is short would make every future run demand a ``--rebuild`` that re-pays for the corpus and
+    ends in exactly the same state.
     """
     section = check_embedding_config(cfg)
     chunks = load_chunks()
     check_chunks(chunks, load_chunks_meta(), cfg)
 
-    client = open_store() if client is None else client
-    name = collection_name(cfg)
-    existing = get_collection(client, name)
+    name = collection_name(cfg, chunk_key(cfg))
+    existing = find_collection(client, name)
     if existing is not None and not rebuild:
         count = existing.count()
         if count == len(chunks):
@@ -252,6 +296,7 @@ def build(
         )
 
     embedder = make_embedder(cfg) if embedder is None else embedder
+    client = open_store() if client is None else client
     if existing is not None:
         client.delete_collection(name)
     payload = collection_metadata(cfg, chunks, section)
@@ -263,6 +308,14 @@ def build(
     )
     tally = embed_into(collection, chunks, embedder, int(section["batch_size"]), progress)
     collection.modify(metadata={**payload, "dim": tally.dim})
+    stored = collection.count()
+    if stored != len(chunks):
+        raise RuntimeError(
+            f"embedded {tally.vectors} chunks but collection {name!r} holds {stored} of "
+            f"{len(chunks)}; the store dropped rows instead of the run being interrupted, so "
+            "--rebuild would buy the same result again. The collection is left in place to "
+            "inspect"
+        )
     return {
         "status": "built",
         "name": name,
@@ -316,28 +369,43 @@ def summarize(result: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def plan(cfg: Config, client: chromadb.ClientAPI | None = None) -> list[str]:
+def plan(cfg: Config, rebuild: bool = False, client: chromadb.ClientAPI | None = None) -> list[str]:
     """What a build would do, without embedding anything: the ``--dry-run`` report.
 
     The token count is the one ``ingest.chunk`` already measured on exactly this corpus, so the
     cost quoted here is the cost of the run -- not a re-estimate that could disagree with it.
+
+    It is the cost of *this* run, too: a complete collection would be left alone by :func:`build`,
+    so quoting the full corpus there would be a bill for work that is not going to happen. This is
+    the command someone runs to decide whether to pay, so it takes ``--rebuild`` -- which does
+    change the answer -- and, like ``build``, it creates nothing on the way to the report.
     """
     section = check_embedding_config(cfg)
     chunks = load_chunks()
     meta = load_chunks_meta()
     check_chunks(chunks, meta, cfg)
-    name = collection_name(cfg)
-    existing = get_collection(open_store() if client is None else client, name)
-    state = f"holds {existing.count()} chunks" if existing is not None else "does not exist yet"
+    name = collection_name(cfg, chunk_key(cfg))
+    existing = find_collection(client, name)
+    count = None if existing is None else existing.count()
+    state = "does not exist yet" if count is None else f"holds {count} chunks"
+    store = f"store                  {rel_to_repo(chroma_path())}"
+    if count == len(chunks) and not rebuild:
+        return [
+            f"collection             {name}  ({state})",
+            f"would embed            nothing  (already holds all {len(chunks)} chunks)",
+            "cost                   $0.0000  (--rebuild drops it and embeds again)",
+            store,
+        ]
+    verb = "drop and re-embed" if count is not None and rebuild else "would embed"
     tokens = (meta.get("tokens") or {}).get("total")
     return [
         f"collection             {name}  ({state})",
         (
-            f"would embed            {len(chunks)} chunks via {section['provider']} "
+            f"{verb:<22} {len(chunks)} chunks via {section['provider']} "
             f"in batches of {section['batch_size']}"
         ),
         *cost_lines(section["model"], tokens),
-        f"store                  {rel_to_repo(chroma_path())}",
+        store,
     ]
 
 
@@ -355,14 +423,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="report what would be embedded and what it would cost; calls no API",
+        help=(
+            "report what would be embedded and what it would cost; calls no API, writes nothing. "
+            "Combines with --rebuild"
+        ),
     )
     args = parser.parse_args(argv)
     cfg = load_config(args.config) if args.config else load_config()
 
     print(f"config hash {cfg.hash}  (chunk key {chunk_key(cfg)})")
     if args.dry_run:
-        for line in plan(cfg):
+        for line in plan(cfg, rebuild=args.rebuild):
             print(line)
         return
     for line in summarize(build(cfg, rebuild=args.rebuild)):

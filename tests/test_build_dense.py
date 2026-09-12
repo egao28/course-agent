@@ -158,6 +158,15 @@ def test_load_chunks_names_the_line_that_is_missing_a_field(corpus, redirect_pat
         bd.load_chunks()
 
 
+def test_load_chunks_refuses_a_repeated_doc_id(corpus, redirect_paths, cfg):
+    # Chroma keeps the first of two rows with one id and drops the second without a word, so the
+    # build would pay for 6 chunks and hold 5 -- and every later run would demand a --rebuild that
+    # lands in exactly the same place.
+    write_corpus(redirect_paths, cfg, [*CHUNKS, CHUNKS[0]])
+    with pytest.raises(ValueError, match=r"chunks.jsonl:6 repeats doc_id '2026-sp:CS-446'"):
+        bd.load_chunks()
+
+
 def test_load_chunks_meta_points_at_the_chunker_when_the_sidecar_is_missing():
     with pytest.raises(FileNotFoundError, match="ingest.chunk"):
         bd.load_chunks_meta()
@@ -190,7 +199,7 @@ def test_build_checks_the_corpus_before_it_embeds_anything(corpus, redirect_path
     with pytest.raises(ValueError, match="chunk_key"):
         bd.build(cfg, client=store, embedder=embedder, progress=False)
     assert embedder.batches == []  # nothing was sent, so nothing was charged
-    assert bd.get_collection(store, collection_name(cfg)) is None
+    assert bd.get_collection(store, collection_name(cfg, chunk_key(cfg))) is None
 
 
 # --- building -------------------------------------------------------------------------------------
@@ -200,15 +209,40 @@ def test_build_writes_every_chunk_into_the_named_collection(corpus, cfg, store):
     result = bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
 
     assert result["status"] == "built"
-    assert result["name"] == collection_name(cfg) == f"courses_{cfg.hash}"
+    assert result["name"] == collection_name(cfg, chunk_key(cfg))
     collection = bd.get_collection(store, result["name"])
     assert collection.count() == len(CHUNKS)
     assert result["tally"].dim == len(VOCAB) + 1
 
 
+def test_an_ablation_that_cannot_change_a_vector_reuses_the_collection(corpus, cfg, store):
+    # The Day 4 case: tuning fusion / bm25 / seed moves cfg.hash, but not one number in the index.
+    bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+    ablation = Config({**cfg.to_dict(), "seed": 43, "fusion": {**cfg["fusion"], "rrf_k": 61}})
+    assert ablation.hash != cfg.hash
+
+    again = FakeEmbedder()
+    result = bd.build(ablation, client=store, embedder=again, progress=False)
+    assert result["status"] == "up-to-date"
+    assert again.batches == []  # the whole point: the ablation does not re-pay for the corpus
+
+
+def test_another_encoder_builds_its_own_collection(corpus, cfg, store):
+    # The opposite case: a different model is a different vector space, and mixing two in one
+    # collection would rank nonsense with no error anywhere.
+    bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+    large = Config(
+        {**cfg.to_dict(), "embedding": {**cfg["embedding"], "model": "text-embedding-3-large"}}
+    )
+    result = bd.build(large, client=store, embedder=FakeEmbedder(), progress=False)
+
+    assert result["status"] == "built"
+    assert result["name"] != collection_name(cfg, chunk_key(cfg))
+
+
 def test_build_stores_the_text_and_the_flattened_metadata(corpus, cfg, store):
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
-    collection = bd.get_collection(store, collection_name(cfg))
+    collection = bd.get_collection(store, collection_name(cfg, chunk_key(cfg)))
 
     row = collection.get(ids=["2026-sp:CS-446"], include=["documents", "metadatas"])
     assert row["documents"][0] == CHUNKS[0]["text"]
@@ -222,13 +256,13 @@ def test_build_creates_the_collection_in_cosine_space(corpus, cfg, store):
     # Chroma's default is squared L2, under which retrieval.dense's `1 - distance` is not a
     # similarity at all.
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
-    collection = bd.get_collection(store, collection_name(cfg))
+    collection = bd.get_collection(store, collection_name(cfg, chunk_key(cfg)))
     assert collection.configuration_json["hnsw"]["space"] == "cosine"
 
 
 def test_build_records_how_the_collection_was_built(corpus, cfg, store):
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
-    metadata = bd.get_collection(store, collection_name(cfg)).metadata
+    metadata = bd.get_collection(store, collection_name(cfg, chunk_key(cfg))).metadata
 
     assert metadata["chunk_key"] == chunk_key(cfg)  # what DenseRetriever compares
     assert metadata["config_hash"] == cfg.hash
@@ -246,7 +280,8 @@ def test_build_batches_by_the_configured_size(corpus, cfg, store):
 
     assert [len(b) for b in embedder.batches] == [2, 2, 1]
     assert result["tally"].batches == 3
-    assert bd.get_collection(store, collection_name(batched)).count() == len(CHUNKS)
+    name = collection_name(batched, chunk_key(batched))
+    assert bd.get_collection(store, name).count() == len(CHUNKS)
 
 
 def test_build_totals_the_tokens_every_batch_reported(corpus, cfg, store):
@@ -276,6 +311,33 @@ def test_build_refuses_vectors_of_two_different_dimensions(corpus, cfg, store):
         bd.build(small, client=store, embedder=Drifting(), progress=False)
 
 
+def test_build_refuses_to_report_a_collection_that_is_short(corpus, cfg, store, monkeypatch):
+    # count() is the signal every later run reads. A build that reported success over a short
+    # collection would make each of those runs ask for a --rebuild that re-pays for the corpus and
+    # ends in the identical state -- with a diagnosis ("interrupted build") naming the wrong cause.
+    real = bd.embed_into
+
+    def embed_then_lose_a_row(collection, chunks, *args, **kwargs):
+        tally = real(collection, chunks, *args, **kwargs)
+        collection.delete(ids=[chunks[0]["doc_id"]])
+        return tally
+
+    monkeypatch.setattr(bd, "embed_into", embed_then_lose_a_row)
+    with pytest.raises(RuntimeError, match=r"holds 4 of 5"):
+        bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+
+
+def test_build_leaves_no_store_behind_when_it_cannot_embed(corpus, cfg, monkeypatch):
+    # No client injected, so this is the path a real `uv run ... build_dense` takes with no key.
+    def no_key(_cfg):
+        raise RuntimeError("OPENAI_API_KEY is not set")
+
+    monkeypatch.setattr(bd, "make_embedder", no_key)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        bd.build(cfg, progress=False)
+    assert not config.chroma_path().exists()
+
+
 # --- idempotency ----------------------------------------------------------------------------------
 
 
@@ -295,14 +357,30 @@ def test_rebuild_drops_the_collection_and_embeds_again(corpus, cfg, store):
 
     assert result["status"] == "built"
     assert sum(len(b) for b in again.batches) == len(CHUNKS)
-    assert bd.get_collection(store, collection_name(cfg)).count() == len(CHUNKS)
+    assert bd.get_collection(store, collection_name(cfg, chunk_key(cfg))).count() == len(CHUNKS)
+
+
+def test_a_build_with_no_client_opens_the_store_itself_and_reuses_it(corpus, cfg):
+    # The path a real `uv run ... build_dense` takes: nothing is injected, so the store is opened
+    # here -- once to look, once to write -- and the second run has to see what the first wrote.
+    first = bd.build(cfg, embedder=FakeEmbedder(), progress=False)
+    assert first["status"] == "built"
+    assert (config.chroma_path() / "chroma.sqlite3").is_file()
+
+    again = FakeEmbedder()
+    assert bd.build(cfg, embedder=again, progress=False)["status"] == "up-to-date"
+    assert again.batches == []
+
+    rebuilt = FakeEmbedder()
+    assert bd.build(cfg, rebuild=True, embedder=rebuilt, progress=False)["status"] == "built"
+    assert sum(len(b) for b in rebuilt.batches) == len(CHUNKS)
 
 
 def test_an_incomplete_collection_asks_for_rebuild_instead_of_topping_up(corpus, cfg, store):
     # What an interrupted build leaves behind. Adding the missing rows would look like a repair
     # and produce a corpus that is silently a mix of two runs.
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
-    bd.get_collection(store, collection_name(cfg)).delete(ids=[CHUNKS[0]["doc_id"]])
+    bd.get_collection(store, collection_name(cfg, chunk_key(cfg))).delete(ids=[CHUNKS[0]["doc_id"]])
 
     with pytest.raises(ValueError, match=r"holds 4 of the 5 chunks.*--rebuild"):
         bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
@@ -331,7 +409,7 @@ def test_summarize_a_build_names_the_collection_and_the_cost(corpus, cfg, store)
     result = bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
     text = "\n".join(bd.summarize(result))
 
-    assert collection_name(cfg) in text
+    assert collection_name(cfg, chunk_key(cfg)) in text
     assert "cosine" in text and f"dim {len(VOCAB) + 1}" in text
     assert "tokens billed" in text and "elapsed" in text
 
@@ -351,9 +429,34 @@ def test_plan_quotes_the_token_count_the_chunker_measured(corpus, cfg, store):
 
 def test_plan_embeds_nothing_and_creates_nothing(corpus, cfg, store):
     bd.plan(cfg, client=store)
-    assert bd.get_collection(store, collection_name(cfg)) is None
+    assert bd.get_collection(store, collection_name(cfg, chunk_key(cfg))) is None
 
 
 def test_plan_reports_an_existing_collection(corpus, cfg, store):
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
     assert "holds 5 chunks" in "\n".join(bd.plan(cfg, client=store))
+
+
+def test_plan_quotes_nothing_for_a_collection_that_is_already_complete(corpus, cfg, store):
+    # The dry run is the command someone runs to decide whether to pay. build() would leave this
+    # collection alone and spend $0, so quoting the whole corpus would be a bill for a no-op.
+    bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+    lines = "\n".join(bd.plan(cfg, client=store))
+
+    assert "would embed            nothing" in lines
+    assert "$0.0000" in lines and "$0.0200" not in lines
+
+
+def test_plan_with_rebuild_quotes_the_re_embed(corpus, cfg, store):
+    bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+    lines = "\n".join(bd.plan(cfg, rebuild=True, client=store))
+
+    assert "drop and re-embed" in lines and "5 chunks via openai" in lines
+    assert "$0.0200" in lines
+
+
+def test_plan_does_not_create_the_store(corpus, cfg):
+    # No client injected: plan() has to answer "does the collection exist" without opening a
+    # persistent client, because opening one is what writes indexes/chroma/chroma.sqlite3.
+    bd.plan(cfg)
+    assert not config.chroma_path().exists()

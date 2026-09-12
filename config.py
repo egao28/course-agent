@@ -17,12 +17,16 @@ calls inside one build; to derive a variant (an ablation), copy and rebuild::
 
 Artifacts are named with the hash so results from different settings never mix::
 
-    Chroma collection   courses_{hash}                    collection_name(cfg)
+    Chroma collection   courses_{dense_key}               collection_name(cfg, chunk_key)
     BM25 index          <repo>/indexes/bm25_{hash}.pkl    bm25_path(cfg)
     reports             <repo>/report/{stem}_{hash}.md    report_path(stem, cfg)
 
-The one exception is the Chroma store directory (``chroma_path()``): it holds one collection per
-config, so the hash belongs on the collection inside it, not on the directory.
+The Chroma collection is the one artifact *not* named after the full hash. It holds embeddings,
+which move only when the chunk text or the encoder moves, so it is named after ``dense_key()``: an
+ablation over ``fusion.rrf_k``, ``bm25.k1`` or ``seed`` then queries the vectors it already paid
+for instead of re-embedding a byte-identical corpus into a second collection. The store *directory*
+(``chroma_path()``) carries no key at all -- it holds one collection per config, so the key belongs
+on the collection inside it -- and it is the one path helper that does not create its directory.
 
 Those paths are absolute (anchored at this module, not the cwd) and their directory is created on
 demand. Write them into reports and logs via ``rel_to_repo(path)`` so no local home directory
@@ -185,21 +189,55 @@ def verify_source(cfg: Mapping[str, Any]) -> Path:
 # --- artifact naming: single source of truth for the {hash} tag ----------------------------------
 
 
-def collection_name(cfg: Mapping[str, Any]) -> str:
-    """Chroma collection name, ``courses_{hash}``."""
-    return f"courses_{config_hash(cfg)}"
+def dense_key(cfg: Mapping[str, Any], chunk_key: str) -> str:
+    """Short hash of everything that decides a vector: the chunk text, and the encoder.
+
+    The full config hash names most artifacts, but the dense index is the expensive one and it
+    moves for far fewer reasons than the config does. Only ``chunk_key`` (what the text is) and
+    ``embedding.provider`` / ``embedding.model`` (what turns it into a vector) can change a single
+    number in it. A Day 4 ablation over ``fusion.rrf_k``, ``bm25.k1`` or ``seed`` moves
+    ``cfg.hash`` without moving any of those, so naming the collection after the full hash would
+    orphan the index, re-embed 4,502 byte-identical chunks and pay for them a second time -- the
+    same reasoning that gave ``ingest.chunk`` its ``chunk_key``.
+
+    ``chunk_key`` is passed in rather than imported: ``ingest.chunk`` owns the chunk template and
+    imports this module, so the dependency runs one way only.
+    """
+    embedding = cfg.get("embedding") or {}
+    missing = [key for key in ("provider", "model") if key not in embedding]
+    if missing:
+        raise ValueError(
+            f"config embedding section is missing {', '.join(missing)}; both are part of the name "
+            "of the collection the dense index lives in (see config.yaml)"
+        )
+    content = {
+        "chunk_key": chunk_key,
+        "provider": embedding["provider"],
+        "model": embedding["model"],
+    }
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def collection_name(cfg: Mapping[str, Any], chunk_key: str) -> str:
+    """Chroma collection name, ``courses_{dense_key}`` -- see :func:`dense_key`."""
+    return f"courses_{dense_key(cfg, chunk_key)}"
 
 
 def chroma_path() -> Path:
-    """Chroma persistence directory, ``<repo>/indexes/chroma``; created if missing.
+    """Chroma persistence directory, ``<repo>/indexes/chroma``. **Not** created if missing.
 
-    Takes no config and carries no hash on purpose: one store holds a collection per config
+    Takes no config and carries no key on purpose: one store holds a collection per config
     (:func:`collection_name`), so an ablation adds a collection beside the baseline instead of a
     second copy of the store.
+
+    Every other path helper here creates its directory; this one must not. Opening a persistent
+    Chroma client on a directory *writes* a ``chroma.sqlite3`` into it, so a caller that only
+    wants to know where the store would go -- ``build_dense --dry-run``, a query against an index
+    that was never built, an error message quoting the path -- would leave an empty store behind
+    just by asking. Whoever actually writes the store creates it: see
+    ``ingest.build_dense.open_store``.
     """
-    path = INDEXES_DIR / "chroma"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return INDEXES_DIR / "chroma"
 
 
 def bm25_path(cfg: Mapping[str, Any]) -> Path:

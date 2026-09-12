@@ -12,6 +12,7 @@ retriever the scale shifts with the query. That is exactly why RRF fuses on ``ra
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, NamedTuple, Protocol
 
 
@@ -38,3 +39,29 @@ class Retriever(Protocol):
     """
 
     def search(self, query: str, k: int | None = None) -> list[Hit]: ...
+
+
+def top_k_each(cfg: Mapping[str, Any]) -> int:
+    """``fusion.top_k_each`` -- the recall depth every retriever defaults to.
+
+    Read through one guard rather than indexed in each constructor, so dense (#5), BM25 (#6) and
+    fusion (#7) get the same number and, when a config never set it, the same sentence. A bad
+    config becomes a sentence naming the section and the key in this repo; a bare ``KeyError``
+    from whichever line happened to read it first names neither, and ``config.yaml`` is the file
+    the reader has to go and fix.
+    """
+    if "fusion" not in cfg:
+        raise ValueError(
+            "config has no `fusion` section; it must set top_k_each -- how many hits each "
+            "retriever returns before fusion (see config.yaml)"
+        )
+    section = cfg["fusion"]
+    if "top_k_each" not in section:
+        raise ValueError(
+            "config fusion section is missing top_k_each -- how many hits each retriever returns "
+            "before fusion (see config.yaml)"
+        )
+    value = section["top_k_each"]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"fusion.top_k_each must be a positive integer, got {value!r}")
+    return value

@@ -101,7 +101,7 @@ def client(tmp_path) -> chromadb.ClientAPI:
 def make_collection(client, cfg, space: str = "cosine", key: str | None = None):
     """A collection filled the way ``ingest.build_dense`` fills one."""
     collection = client.create_collection(
-        collection_name(cfg),
+        collection_name(cfg, chunk_key(cfg)),
         configuration={"hnsw": {"space": space}},
         metadata={"chunk_key": chunk_key(cfg) if key is None else key, "space": space},
         embedding_function=None,
@@ -172,6 +172,22 @@ def test_to_hits_of_an_empty_result_is_an_empty_list():
 def test_open_collection_points_at_the_build_when_there_is_no_index(client, cfg):
     with pytest.raises(FileNotFoundError, match="ingest.build_dense"):
         dense.open_collection(cfg, client=client)
+
+
+def test_open_collection_does_not_create_a_store_it_could_not_read(cfg):
+    # No client injected, which is the path the CLI takes. Constructing a persistent client is
+    # what creates indexes/chroma, so failing to find an index must not leave an empty store.
+    with pytest.raises(FileNotFoundError, match="ingest.build_dense"):
+        dense.open_collection(cfg)
+    assert not config.chroma_path().exists()
+
+
+def test_a_config_without_a_recall_depth_says_which_key_is_missing(client, cfg):
+    # Not a bare KeyError from the constructor: config.yaml is the file the reader has to fix.
+    fusion = {k: v for k, v in cfg["fusion"].items() if k != "top_k_each"}
+    bare = Config({**cfg.to_dict(), "fusion": fusion})
+    with pytest.raises(ValueError, match="fusion section is missing top_k_each"):
+        DenseRetriever(bare, collection=make_collection(client, bare), embedder=FakeEmbedder())
 
 
 def test_check_collection_refuses_another_distance_space(client, cfg):

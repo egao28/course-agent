@@ -36,7 +36,7 @@ from chromadb.errors import NotFoundError
 from config import Config, chroma_path, collection_name, load_config, rel_to_repo
 from embedding import Embedder, make_embedder
 from ingest.chunk import chunk_key, decode_chroma_metadata
-from retrieval.types import Hit
+from retrieval.types import Hit, top_k_each
 
 #: The only distance function this module can turn into a similarity; see :func:`similarity`.
 COSINE = "cosine"
@@ -44,17 +44,30 @@ COSINE = "cosine"
 INCLUDE = ["documents", "metadatas", "distances"]
 
 
+def no_index(name: str) -> str:
+    """The message for a query that has no index to run against, whatever is missing."""
+    return (
+        f"no collection {name!r} in {rel_to_repo(chroma_path())}; run "
+        "`uv run --env-file .env python -m ingest.build_dense` first"
+    )
+
+
 def open_collection(cfg: Mapping[str, Any], client: chromadb.ClientAPI | None = None) -> Any:
-    """The collection this config names, or a pointer at the command that builds it."""
-    name = collection_name(cfg)
-    client = chromadb.PersistentClient(path=str(chroma_path())) if client is None else client
+    """The collection this config names, or a pointer at the command that builds it.
+
+    A store that is not on disk is answered from the filesystem rather than by opening a client:
+    constructing a persistent Chroma client *creates* ``indexes/chroma``, so a query against an
+    index that was never built would leave an empty store behind as a side effect of failing.
+    """
+    name = collection_name(cfg, chunk_key(cfg))
+    if client is None:
+        if not chroma_path().exists():
+            raise FileNotFoundError(no_index(name))
+        client = chromadb.PersistentClient(path=str(chroma_path()))
     try:
         return client.get_collection(name, embedding_function=None)
     except NotFoundError as exc:
-        raise FileNotFoundError(
-            f"no collection {name!r} in {rel_to_repo(chroma_path())}; run "
-            "`uv run --env-file .env python -m ingest.build_dense` first"
-        ) from exc
+        raise FileNotFoundError(no_index(name)) from exc
 
 
 def collection_space(collection: Any) -> str | None:
@@ -148,7 +161,7 @@ class DenseRetriever:
     ) -> None:
         self.cfg = cfg
         #: Default recall depth: what fusion (#7) asks each retriever for.
-        self.default_k = int(cfg["fusion"]["top_k_each"])
+        self.default_k = top_k_each(cfg)
         self.collection = open_collection(cfg) if collection is None else collection
         check_collection(self.collection, cfg)
         self.space = collection_space(self.collection)
@@ -187,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     query = " ".join(args.query)
     hits = DenseRetriever(cfg).search(query, args.k)
-    print(f"{query!r}  ->  {len(hits)} hits from {collection_name(cfg)}")
+    print(f"{query!r}  ->  {len(hits)} hits from {collection_name(cfg, chunk_key(cfg))}")
     for hit in hits:
         print(format_hit(hit))
 
