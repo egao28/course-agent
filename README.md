@@ -27,8 +27,8 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
-├── data/          # courses.json, prereqs.json, requirements.json (exported), chunks.jsonl
-├── ingest/        # export_almabot.py → chunk → build indexes (dense / bm25)
+├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
+├── ingest/        # export_almabot.py → chunk.py → build indexes (dense / bm25)
 ├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
@@ -85,6 +85,53 @@ uv run python -m ingest.export_almabot   # -> data/{courses,prereqs,requirements
 The outputs are committed, so a clone can build indexes without the private CSV; see
 [data/README.md](data/README.md) for the schema, how the requirements block is parsed, and the
 known data quality issues.
+
+## Chunking
+
+One course is one chunk — descriptions are short (p50 111 tokens, max 523, against an 8191-token
+embedding limit), so splitting would only scatter a course's facts across several vectors.
+
+```bash
+uv run python -m ingest.chunk                # -> data/chunks.jsonl + chunks.meta.json, with stats
+uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
+```
+
+```
+doc_id   2026-sp:CS-374
+metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
+chroma   {"code": "CS 374", …, "prereq_codes": "CS 173|CS 225|MATH 213", "gened_ids": ""}
+text
+CS 374 — Introduction to Algorithms & Models of Computation
+Credits: 4
+Term: 2026-sp
+Description: Analysis of algorithms, major paradigms of algorithm design including recursive algorithms, … Same as ECE 374. Prerequisite: One of CS 173, MATH 213; CS 225.
+Prerequisites: One of CS 173, MATH 213; CS 225.
+Degree Attributes: None
+```
+
+The requirements block appears twice there: the catalog runs it to the end of the description, so
+`prereqRaw` is a suffix of `desc` — true of 2,732 courses, and what `v1` was specified to render.
+Changing it is a template change, measured in #15 rather than baked into the baseline. The last
+line is labelled the way the catalog labels the column, *not* "Gen Ed": it also carries non-Gen-Ed
+attributes ("Global Classroom course."), so the authoritative Gen Ed answer is `metadata.gened_ids`,
+computed from the rules in `requirements.json`.
+
+The wording of that text is a retrieval parameter, not a detail: it is what gets embedded and
+BM25-tokenized. So it is built in `render_chunk(course, template_version)` and nowhere else, keyed
+by `chunk.template_version` in `config.yaml`. A template ablation adds a `v2` renderer beside `v1`,
+flips that one value, and gets fresh index names for free — the version is part of the config hash.
+`chunk.fields` must list exactly what the chosen template renders; the build refuses to run
+otherwise, so the hash can never describe a corpus that was not built. It also refuses to write a
+chunk over the 8191-token limit, rather than letting the embedding call discover it mid-batch.
+
+`doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
+credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
+the exported `data/*.json`, it is rebuilt from them by the command above with no private input.
+Its `chunks.meta.json` sidecar records a `chunk_key` — a hash of just the term, strategy, template
+version and field list — so an index build can detect chunks left over from another template while
+ignoring the `seed` / `bm25` / `fusion` tuning that a Day 4 ablation changes on purpose (the full
+`config_hash` of the run is recorded too, but only as a record of who wrote the file). See
+[data/README.md](data/README.md#chunksjsonl).
 
 ## Day 1 goal
 

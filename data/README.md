@@ -15,7 +15,7 @@ files and the indexes built from them always belong to the same CSV. After repla
 | `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 2.9 MB, term `2026-sp` |
 | `prereqs.json` | Same source; `prereqCodes` / `coreqCodes` filtered to courses in the catalog | done — 2,086 prerequisite + 34 corequisite edges |
 | `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; major requirements are not in the CSV, source TBD | done — 13 Gen Ed categories, `majors: []` |
-| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | pending |
+| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.1 MB, **not committed** (rebuildable, see below) |
 
 Note: `almabot-web/public/courses.json` truncates `desc` to 240 chars and `attrs` to 160, and has no
 term field. **Do not copy it over.** Re-export the full text from the CSV.
@@ -69,6 +69,37 @@ export match, derived in the same run.
 which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
 pages, or a department plan).
 
+## chunks.jsonl
+
+What the indexes embed: one JSON object per line, one line per course.
+
+```bash
+uv run python -m ingest.chunk                # -> data/chunks.jsonl + data/chunks.meta.json
+uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
+```
+
+```json
+{"doc_id": "2026-sp:CS-374", "text": "CS 374 — Introduction to Algorithms...",
+ "metadata": {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0,
+              "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
+              "gened_ids": []}}
+```
+
+`doc_id` is `{term}:{SUBJ}-{NUM}` — readable in a ranked list, and term-scoped so a second term can
+join the same collection without colliding. `text` is rendered by `render_chunk()` alone, under the
+template named by `chunk.template_version`; see [the chunking section of the top-level
+README](../README.md#chunking). `prereq_codes` is the **unfiltered** list, so a reference to a
+course not offered this term stays visible in metadata even though `prereqs.json` drops it.
+
+Neither file is committed, unlike the three above: they are rebuilt from those by one command with
+no private input and no API key, and a template change rewrites all 3 MB. `chunks.meta.json` records
+the term, strategy, template, field list and token stats of the run that wrote `chunks.jsonl`, so an
+index build can tell whether the chunks on disk were built under its own config. Compare its
+`chunk_key` — a hash of exactly the four values that decide chunk content — and not `config_hash`,
+which also moves when `seed`, `bm25` or `fusion` is tuned and the chunks on disk stay valid.
+`tokens` is `null` when the run could not fetch the tokenizer vocabulary, which also means those
+chunks were never checked against the 8191-token embedding limit.
+
 ## How the requirements block is read
 
 The catalog puts the whole enrollment-requirements block after the `Prerequisite:` label, running
@@ -97,14 +128,19 @@ extracted is still extracted, and nothing is added without an explicit statement
 Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every run.
 
 - **497 descriptions are cross-references only** (`"Same as HIST 200. See HIST 200."`). They carry
-  no topical text, so both retrievers will rank them poorly — a candidate for following the
-  reference at chunk time (#4).
+  no topical text, so both retrievers will rank them poorly. Template `v1` renders them as they
+  are; following the reference is #15.
 - **1 course has an empty description** (`CWL 593`).
 - **779 of 2,865 prerequisite references dangle** — a course mentioned in prerequisite text that is
   not offered in 2026-sp. They stay in `courses.json:prereqCodes` and are dropped from
   `prereqs.json`.
 - **Only 572 of 4,502 courses carry any `Degree Attributes`**, so Gen Ed coverage is sparse by
   nature, not by parsing loss.
+- **`socbeh` over-matches.** The catalog writes both social-science categories under one prefix,
+  `Social & Beh Sci - Soc Sci` / `Social & Beh Sci - Beh Sci`, so the `Beh Sci` substring rule
+  (inherited verbatim from `gened.ts`) matches all 118 Soc Sci courses on top of the 24 real
+  Behavioral Sciences ones — 142 instead of 24. Affects `requirements.json:courseCount` and every
+  chunk's `gened_ids`: #14.
 - **Prerequisite text is prose, not a grammar.** `prereqCodes` is a bag of codes: "One of CS 173,
   MATH 213; CS 225" loses the "one of" structure, so a planner cannot tell alternatives from
   conjunctions. Parsing that structure is a separate job.

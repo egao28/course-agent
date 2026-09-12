@@ -15,6 +15,12 @@ indexes/*
 !indexes/.gitkeep
 *.pkl
 
+# chunks are rebuilt from the committed data/*.json by `uv run python -m ingest.chunk`, with no
+# private input and no API key -- unlike those files, whose source CSV is not in the repo. A
+# template change rewrites all 3 MB, so keeping them out spares git the churn.
+data/chunks.jsonl
+data/chunks.meta.json
+
 # os / editor
 .DS_Store
 .vscode/
