@@ -20,6 +20,7 @@ import config
 from config import (
     Config,
     bm25_path,
+    chroma_path,
     collection_name,
     config_hash,
     load_config,
@@ -291,6 +292,16 @@ def test_artifact_paths_are_absolute_and_create_their_directory(cfg, tmp_path, m
     assert p.parent.is_dir()
     assert r == tmp_path / "report" / f"day1_smoke_{cfg.hash}.md"
     assert r.parent.is_dir()
+
+
+def test_chroma_path_is_one_store_for_every_config(cfg, tmp_path, monkeypatch):
+    # The hash belongs on the collection inside the store, not on the store: an ablation should
+    # add a collection beside the baseline, not a second copy of the whole directory.
+    monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
+    path = chroma_path()
+    assert path == tmp_path / "indexes" / "chroma"
+    assert path.is_dir()
+    assert cfg.hash not in str(path)
 
 
 def test_artifact_directories_exist_in_a_fresh_checkout():

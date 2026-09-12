@@ -17,6 +17,10 @@ cp -n .env.example .env  # then fill in OPENAI_API_KEY (-n never overwrites an e
 uv run pytest -q         # smoke: imports resolve + config hash properties hold
 ```
 
+Nothing loads `.env` by itself yet (that is #11), so commands that call the embeddings API are run
+as `uv run --env-file .env python -m ...`. Everything else — tests, chunking, `--dry-run` — needs
+no key at all.
+
 Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --locked --extra local`.
 `uv sync` is exact by default, so pass `--extra local` on **every** sync or the extra is removed again;
 alternatively use `uv sync --inexact` to leave already-installed extras in place.
@@ -27,9 +31,10 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
+├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
-├── ingest/        # export_almabot.py → chunk.py → build indexes (dense / bm25)
-├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
+├── ingest/        # export_almabot.py → chunk.py → build_dense.py (+ build_bm25.py)
+├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
@@ -132,6 +137,72 @@ version and field list — so an index build can detect chunks left over from an
 ignoring the `seed` / `bm25` / `fusion` tuning that a Day 4 ablation changes on purpose (the full
 `config_hash` of the run is recorded too, but only as a record of who wrote the file). See
 [data/README.md](data/README.md#chunksjsonl).
+
+## Dense index
+
+`ingest/build_dense.py` embeds every chunk once and puts the vectors in Chroma, in the collection
+`courses_{config_hash}` under `indexes/chroma` (gitignored: rebuildable, and never committed).
+
+```bash
+uv run python -m ingest.build_dense --dry-run                  # what it would cost; calls no API
+uv run --env-file .env python -m ingest.build_dense            # build it
+uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collection, embed again
+```
+
+```
+config hash 1edbaf46  (chunk key 05d00726)
+collection             courses_1edbaf46  (does not exist yet)
+would embed            4502 chunks via openai in batches of 256
+tokens billed          522658  (text-embedding-3-small)
+cost                   $0.0105  (at $0.02 / 1M tokens)
+store                  indexes/chroma
+```
+
+The whole 2026-sp corpus is about one cent on `text-embedding-3-small`. After a real run the same
+report prints what the API said it *billed*, not an estimate of it.
+
+Re-running costs nothing: a collection that already holds exactly as many rows as there are chunks
+is left alone. Any other count — an interrupted build — stops and asks for `--rebuild` instead of
+topping the collection up, which would leave a corpus that is quietly a mix of two runs. The chunks
+are checked against the config's `chunk_key` first, since discovering afterwards that they came from
+another template means paying for the build twice.
+
+The collection is created in **cosine** space (Chroma defaults to squared L2) and records how it was
+built — `chunk_key`, `config_hash`, `provider`, `model`, `dim`, `built_at` — for the person who opens
+an index six weeks later.
+
+### Querying it
+
+```bash
+uv run --env-file .env python -m retrieval.dense "machine learning" -k 5
+```
+
+```python
+from config import load_config
+from retrieval.dense import DenseRetriever
+
+DenseRetriever(load_config()).search("machine learning", 5)
+```
+
+`search` returns `Hit(doc_id, score, rank, text, metadata)` — the same shape BM25 returns, so RRF can
+fuse two lists without knowing which retriever produced either. `score` is `1 - cosine_distance`:
+higher is better, and comparable only *within* one list, which is why fusion works on `rank`. Text
+and metadata come back out of the index rather than `chunks.jsonl`, with the joined metadata lists
+split into lists again so a dense hit and a BM25 hit mean the same thing.
+
+### Embeddings
+
+`embedding.py` is the one place text becomes a vector — build side and query side both go through
+it, so a query can never be encoded by a different model than the corpus was. `embedding.provider`
+picks the route:
+
+| provider | model | needs |
+| --- | --- | --- |
+| `openai` | `text-embedding-3-small` | `OPENAI_API_KEY` |
+| `local` | `BAAI/bge-m3` | `uv sync --locked --extra local` |
+
+Both are part of the config hash, so switching providers names a new collection instead of mixing
+two vector spaces in one.
 
 ## Day 1 goal
 

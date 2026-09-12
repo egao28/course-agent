@@ -21,6 +21,9 @@ Artifacts are named with the hash so results from different settings never mix::
     BM25 index          <repo>/indexes/bm25_{hash}.pkl    bm25_path(cfg)
     reports             <repo>/report/{stem}_{hash}.md    report_path(stem, cfg)
 
+The one exception is the Chroma store directory (``chroma_path()``): it holds one collection per
+config, so the hash belongs on the collection inside it, not on the directory.
+
 Those paths are absolute (anchored at this module, not the cwd) and their directory is created on
 demand. Write them into reports and logs via ``rel_to_repo(path)`` so no local home directory
 leaks into tracked files.
@@ -185,6 +188,18 @@ def verify_source(cfg: Mapping[str, Any]) -> Path:
 def collection_name(cfg: Mapping[str, Any]) -> str:
     """Chroma collection name, ``courses_{hash}``."""
     return f"courses_{config_hash(cfg)}"
+
+
+def chroma_path() -> Path:
+    """Chroma persistence directory, ``<repo>/indexes/chroma``; created if missing.
+
+    Takes no config and carries no hash on purpose: one store holds a collection per config
+    (:func:`collection_name`), so an ablation adds a collection beside the baseline instead of a
+    second copy of the store.
+    """
+    path = INDEXES_DIR / "chroma"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def bm25_path(cfg: Mapping[str, Any]) -> Path:

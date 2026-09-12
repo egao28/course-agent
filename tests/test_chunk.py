@@ -227,6 +227,27 @@ def test_chroma_metadata_flattens_lists_into_scalars(by_code, categories):
     assert all(isinstance(v, (str, int, float, bool)) for v in flat.values())
 
 
+def test_chroma_metadata_round_trips_through_the_decoder(by_code, categories):
+    # A dense hit must carry the same metadata a BM25 hit does, or `Hit` means two things.
+    metadata = ch.chunk_metadata(by_code["CS 374"], categories)
+    assert ch.decode_chroma_metadata(ch.chroma_metadata(metadata)) == metadata
+
+
+def test_decode_chroma_metadata_reads_an_empty_field_as_an_empty_list():
+    assert ch.decode_chroma_metadata({"gened_ids": ""})["gened_ids"] == []
+
+
+def test_decode_chroma_metadata_leaves_scalars_alone():
+    decoded = ch.decode_chroma_metadata({"code": "CS 374", "credits": 4.0, "number": "374"})
+    assert decoded == {"code": "CS 374", "credits": 4.0, "number": "374"}
+
+
+def test_chroma_metadata_refuses_a_list_field_the_decoder_could_not_restore():
+    # Chroma accepts it; the query side would read back a string nothing splits again.
+    with pytest.raises(ValueError, match="LIST_FIELDS"):
+        ch.chroma_metadata({"code": "CS 374", "instructors": ["Chekuri"]})
+
+
 # --- config guards ------------------------------------------------------------------------------
 
 

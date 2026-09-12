@@ -57,6 +57,9 @@ TOKEN_ENCODING = "cl100k_base"
 EMBEDDING_TOKEN_LIMIT = 8191
 #: Chroma metadata values must be scalars, so list fields are joined on this.
 LIST_SEPARATOR = "|"
+#: The metadata fields that hold a list. Named rather than sniffed by type: after the join, a
+#: decoder cannot tell "CS 173|CS 225" from a string that happens to contain a pipe.
+LIST_FIELDS = ("prereq_codes", "gened_ids")
 
 #: Course fields each template reads, in the order they appear in the rendered text. Checked
 #: against ``chunk.fields`` in config.yaml, which is hashed: the hash must not claim a field set
@@ -180,8 +183,33 @@ def chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, str | int | float 
     Chroma rejects a list metadata value, so ``prereq_codes`` / ``gened_ids`` go in joined on
     ``LIST_SEPARATOR`` (``"CS 173|CS 225"``, ``""`` when empty). Flattening lives here so the
     dense and BM25 sides cannot disagree about the encoding; ``chunks.jsonl`` keeps the lists.
+
+    A list field missing from :data:`LIST_FIELDS` is refused rather than flattened: it would
+    write fine and come back from a query as a string nothing splits again.
     """
+    unnamed = [k for k, v in metadata.items() if isinstance(v, list) and k not in LIST_FIELDS]
+    if unnamed:
+        raise ValueError(
+            f"metadata field(s) {', '.join(unnamed)} hold a list but are not in LIST_FIELDS; "
+            "add them there, or decode_chroma_metadata cannot restore them"
+        )
     return {k: LIST_SEPARATOR.join(v) if isinstance(v, list) else v for k, v in metadata.items()}
+
+
+def decode_chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Inverse of :func:`chroma_metadata`, for what a dense query reads back out of Chroma.
+
+    BM25 (#6) takes its metadata straight from ``chunks.jsonl``, where the lists are still lists.
+    The dense side only has what Chroma stored, so it splits them again here -- beside the join,
+    so the two encodings cannot drift -- and a ``Hit`` means the same thing whichever retriever
+    produced it. An empty string decodes to ``[]``, not ``[""]``.
+    """
+    return {
+        k: [part for part in v.split(LIST_SEPARATOR) if part]
+        if k in LIST_FIELDS and isinstance(v, str)
+        else v
+        for k, v in metadata.items()
+    }
 
 
 # --- building -------------------------------------------------------------------------------------
