@@ -386,6 +386,21 @@ def test_an_incomplete_collection_asks_for_rebuild_instead_of_topping_up(corpus,
         bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
 
 
+def test_an_empty_collection_is_read_as_no_index_at_all(corpus, cfg, store):
+    # What a run refused on its first API request leaves behind: created, never written to. It
+    # was reached for real -- an OpenAI key with no credits on it -- and demanding --rebuild here
+    # asks the reader to rebuild nothing.
+    store.create_collection(
+        collection_name(cfg, chunk_key(cfg)),
+        configuration={"hnsw": {"space": bd.SPACE}},
+        embedding_function=None,
+    )
+    result = bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
+
+    assert result["status"] == "built"
+    assert bd.get_collection(store, result["name"]).count() == len(CHUNKS)
+
+
 # --- reporting ------------------------------------------------------------------------------------
 
 
