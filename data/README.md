@@ -65,6 +65,15 @@ The 13 campus Gen Ed categories as declarative rules: a course matches when its 
 **any** of `match.any` and **none** of `match.none`. `courseCount` is how many courses in this
 export match, derived in the same run.
 
+**Sub-category rules match on the `- ` separator**, not on the bare label: the catalog writes a
+sub-category as `"<group> - <name>"` (`"Social & Beh Sci - Soc Sci course."`), and the bare labels
+`gened.ts` tests are not safe substrings of that shape — `"Beh Sci"` also occurs inside the *group*
+name `Social & Beh Sci`, so `socbeh` used to claim all 118 Soc Sci courses on top of its own 24
+(#14). Anchoring is what keeps the 13 rules disjoint; it left the other 12 categories' membership
+unchanged, and it made the second spelling `gened.ts` ORs into `cultwest` (`"Western course"`)
+redundant, since that string only ever occurs as the tail of `"Cultural Studies - Western course"`.
+`almabot-web/src/lib/gened.ts` still carries the unanchored rules.
+
 `majors` is an empty placeholder: major and degree requirements are not in `course-catalog.csv`,
 which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
 pages, or a department plan).
@@ -136,11 +145,9 @@ Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every 
   `prereqs.json`.
 - **Only 572 of 4,502 courses carry any `Degree Attributes`**, so Gen Ed coverage is sparse by
   nature, not by parsing loss.
-- **`socbeh` over-matches.** The catalog writes both social-science categories under one prefix,
-  `Social & Beh Sci - Soc Sci` / `Social & Beh Sci - Beh Sci`, so the `Beh Sci` substring rule
-  (inherited verbatim from `gened.ts`) matches all 118 Soc Sci courses on top of the 24 real
-  Behavioral Sciences ones — 142 instead of 24. Affects `requirements.json:courseCount` and every
-  chunk's `gened_ids`: #14.
+- **Gen Ed categories are small, and two of them share a group name.** `socsoc` is 118 courses and
+  `socbeh` 24; both are written under the `Social & Beh Sci` prefix, which is why the rules match
+  on the `- ` separator (#14). A rule added later has to do the same.
 - **Prerequisite text is prose, not a grammar.** `prereqCodes` is a bag of codes: "One of CS 173,
   MATH 213; CS 225" loses the "one of" structure, so a planner cannot tell alternatives from
   conjunctions. Parsing that structure is a separate job.
