@@ -19,6 +19,7 @@ import yaml
 import config
 from config import (
     Config,
+    bm25_key,
     bm25_path,
     chroma_path,
     collection_name,
@@ -185,7 +186,6 @@ def test_hash_is_frozen_at_load_and_shared_by_every_helper(cfg):
     assert "~" not in str(expanded)
     assert cfg["data"]["source"].startswith("~/")
     assert cfg.hash == h
-    assert bm25_path(cfg).name == f"bm25_{h}.pkl"
     assert report_path("x", cfg).name == f"x_{h}.md"
 
 
@@ -203,6 +203,47 @@ def test_collection_name_moves_with_the_chunks_and_with_the_encoder(cfg):
     assert collection_name(cfg, "deadbeef") != name  # other chunks, other vectors
     other_model = {**cfg["embedding"], "model": "text-embedding-3-large"}
     assert collection_name(Config({**cfg.to_dict(), "embedding": other_model}), "c0ffee00") != name
+
+
+def test_bm25_key_ignores_settings_that_cannot_change_a_posting_list(cfg):
+    # The dense argument, for the cheaper index: tuning fusion or the seed moves the config hash
+    # without moving a single term, and so must not move the name the BM25 index answers to.
+    ablation = Config({**cfg.to_dict(), "seed": 43, "fusion": {**cfg["fusion"], "rrf_k": 61}})
+    assert ablation.hash != cfg.hash
+    assert bm25_key(ablation, "c0ffee00") == bm25_key(cfg, "c0ffee00")
+
+
+def test_bm25_key_moves_with_the_chunks_and_with_every_bm25_setting(cfg):
+    key = bm25_key(cfg, "c0ffee00")
+    assert HEX8.match(key)
+    assert bm25_key(cfg, "deadbeef") != key  # other chunks, other terms
+    tuned = {**cfg["bm25"], "k1": 1.2}
+    assert bm25_key(Config({**cfg.to_dict(), "bm25": tuned}), "c0ffee00") != key
+
+
+def test_bm25_key_covers_a_setting_nobody_has_added_yet(cfg):
+    # The section is hashed whole rather than field by field, so the next knob added to it cannot
+    # be quietly left out of the name of the index it changes.
+    extended = {**cfg["bm25"], "delta": 1.0}
+    assert bm25_key(Config({**cfg.to_dict(), "bm25": extended}), "c0ffee00") != bm25_key(
+        cfg, "c0ffee00"
+    )
+
+
+def test_the_two_index_keys_do_not_move_each_other(cfg):
+    # Rebuilding the BM25 index must not orphan the one that cost money, and re-embedding must not
+    # invalidate a posting list that no embedding setting can reach.
+    tuned = Config({**cfg.to_dict(), "bm25": {**cfg["bm25"], "k1": 1.2}})
+    assert collection_name(tuned, "c0ffee00") == collection_name(cfg, "c0ffee00")
+    other_model = {**cfg["embedding"], "model": "text-embedding-3-large"}
+    remodelled = Config({**cfg.to_dict(), "embedding": other_model})
+    assert bm25_key(remodelled, "c0ffee00") == bm25_key(cfg, "c0ffee00")
+
+
+def test_bm25_key_says_so_when_there_is_no_section_to_hash(cfg):
+    without = {k: v for k, v in cfg.to_dict().items() if k != "bm25"}
+    with pytest.raises(ValueError, match="no `bm25` section"):
+        bm25_key(Config(without), "c0ffee00")
 
 
 def test_dense_key_names_the_embedding_keys_it_needs(cfg):
@@ -307,15 +348,22 @@ def test_verify_source_missing_file(raw, tmp_path):
 # --- artifact naming ------------------------------------------------------------------------------
 
 
-def test_artifact_paths_are_absolute_and_create_their_directory(cfg, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
+def test_a_report_path_is_absolute_and_creates_its_directory(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REPORT_DIR", tmp_path / "report")
-    p = bm25_path(cfg)
     r = report_path("day1_smoke", cfg)
-    assert p == tmp_path / "indexes" / f"bm25_{cfg.hash}.pkl"
-    assert p.parent.is_dir()
     assert r == tmp_path / "report" / f"day1_smoke_{cfg.hash}.md"
     assert r.parent.is_dir()
+
+
+def test_the_index_paths_only_name(cfg, tmp_path, monkeypatch):
+    # Both are asked for by readers looking for an index -- a query, an error message -- and a read
+    # that creates what it failed to find is how a failed one leaves an empty store behind. The
+    # builds create the directory they write into.
+    monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
+    p = bm25_path(cfg, "c0ffee00")
+    assert p == tmp_path / "indexes" / f"bm25_{bm25_key(cfg, 'c0ffee00')}.pkl"
+    assert not p.parent.exists()
+    assert not chroma_path().exists()
 
 
 def test_chroma_path_is_one_store_for_every_config(cfg, tmp_path, monkeypatch):
@@ -343,7 +391,9 @@ def test_artifact_directories_exist_in_a_fresh_checkout():
 
 
 def test_rel_to_repo_never_leaks_home_directory(cfg):
-    assert rel_to_repo(bm25_path(cfg)) == f"indexes/bm25_{cfg.hash}.pkl"
+    assert rel_to_repo(bm25_path(cfg, "c0ffee00")) == (
+        f"indexes/bm25_{bm25_key(cfg, 'c0ffee00')}.pkl"
+    )
     assert rel_to_repo(report_path("day1_smoke", cfg)) == f"report/day1_smoke_{cfg.hash}.md"
     assert rel_to_repo(Path.home() / "Downloads" / "x.csv") == "~/Downloads/x.csv"
     assert rel_to_repo(Path("/opt/data.csv")) == "/opt/data.csv"

@@ -33,7 +33,7 @@ course-agent/
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
-├── ingest/        # export_almabot.py → chunk.py → build_dense.py (+ build_bm25.py)
+├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
@@ -56,24 +56,36 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "a1b2c3d4", frozen at load
-collection_name(cfg, chunk_key)  # "courses_094143d8"                   Chroma collection, see below
-bm25_path(cfg)                   # <repo>/indexes/bm25_a1b2c3d4.pkl     absolute, dir created on demand
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_a1b2c3d4.md absolute, dir created on demand
-rel_to_repo(bm25_path(cfg))      # "indexes/bm25_a1b2c3d4.pkl"          for reports/logs, never str(path)
+cfg.hash                         # "7045a614", frozen at load
+collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
+bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_7045a614.md  dir created on demand
+rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
 
 The naming helpers return **absolute** paths so a build works from any cwd; print them through
 `rel_to_repo()` so a local home directory never lands in a git-tracked report.
 
-The Chroma collection is the one artifact *not* named after the full hash. It is keyed on
-`dense_key()` — `chunk_key` plus `embedding.provider` and `embedding.model`, i.e. everything that
-can change a vector. A Day 4 ablation over `fusion.rrf_k`, `bm25.k1` or `seed` moves `cfg.hash`
-without moving a single number in the index, so naming the collection after it would orphan the
-index and re-embed (and re-pay for) a byte-identical corpus. `chroma_path()` is also the one path
-helper that does **not** create its directory: opening a persistent Chroma client is what writes a
-store, so a dry run, a failed query or an error message quoting the path leaves nothing behind.
+Only the reports are named after the full hash. **An index is named after its own key** — the
+settings that can actually change what is in it:
+
+| artifact | key | moves when |
+| --- | --- | --- |
+| Chroma collection `courses_{dense_key}` | `chunk_key` + `embedding.provider` + `embedding.model` | the chunk text or the encoder changes |
+| BM25 pickle `bm25_{bm25_key}.pkl` | `chunk_key` + the whole `bm25` section | the chunk text, the tokenizer or `k1`/`b`/`code_boost` changes |
+
+A Day 4 ablation over `fusion.rrf_k` or `seed` moves `cfg.hash` without moving a single number in
+either index, so naming them after it would orphan both — re-embedding (and re-paying for) a
+byte-identical corpus, and re-tokenizing one that nothing about tokenization touched. Tuning
+`bm25.k1` renames the BM25 index and leaves the dense one alone, which is the point of keying them
+separately. `bm25_key` hashes the `bm25` section whole rather than field by field, so the next knob
+added to it cannot be quietly left out of the name of the index it changes.
+
+Neither index helper creates a directory — `chroma_path()` because opening a persistent Chroma
+client is what writes a store, `bm25_path()` for the same reason in reverse: both are asked for by
+*readers* looking for an index, and a read that creates what it could not find leaves an empty
+store behind every time a query fails. The build that writes an index creates its directory.
 
 `data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter calls
 `verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
@@ -158,7 +170,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash 1edbaf46  (chunk key 05d00726)
+config hash 7045a614  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -218,6 +230,98 @@ picks the route:
 
 Both are part of `dense_key`, so switching providers names a new collection instead of mixing two
 vector spaces in one.
+
+## BM25 index
+
+`ingest/build_bm25.py` tokenizes every chunk and pickles an Okapi BM25 index to
+`indexes/bm25_{bm25_key}.pkl` (gitignored: rebuildable, and never committed).
+
+```bash
+uv run python -m ingest.build_bm25
+```
+
+```
+config hash 7045a614  (bm25 key 877a6610)
+documents indexed      4502
+vocabulary             21500 terms
+terms emitted          298000  (mean 66.2 per chunk)
+k1 / b                 1.5 / 0.75
+elapsed                0.1s
+wrote                  indexes/bm25_877a6610.pkl  (6063 KB)
+```
+
+No API key, no network, no cost — which is the one design difference from the dense build. There is
+no `--dry-run` to price a run that is free and no idempotency check to skip one that is cheaper
+than deciding whether to skip it: every run rebuilds, and the write is atomic, so an interrupted
+one leaves the previous index rather than a truncated file under the name the next query opens.
+What it does keep is the dense side's freshness check on the corpus, through the same
+`ingest.chunk.check_chunks` — an index built from a stale `chunks.jsonl` is wrong the same way
+whichever retriever reads it. The index stores the `doc_id`, text and metadata of every chunk
+alongside the postings, so a query returns whole hits without opening `chunks.jsonl`.
+
+It is a **pickle**, so it is local-only: unpickling executes whatever the file says. This one is
+written by the command above, ignored by git and never fetched from anywhere — do not load one you
+did not build. The rank_bm25 version that wrote it is in the header, and a file that will not load
+is answered with the command that rewrites it.
+
+### Tokenizing
+
+`ingest/tokenize.py` is the one place text becomes terms — build side and query side both go
+through it, so a query can never be tokenized differently from the corpus. `bm25.tokenizer` picks
+the function and is hashed into the index name.
+
+`simple_v1` lowercases, splits on `\w+`, drops a small stopword list, and does two things that
+matter for a course catalog:
+
+**Course codes become three terms.** `CS 374` → `cs`, `374`, `cs374`, and so do `CS374` and
+`cs 374` — the code is matched as a unit before the text is split into words, so all three
+spellings produce the same terms and score identically. Without the glued term, `CS374` (one word)
+and `CS 374` (two) would share no term at all. `IS` is both a real subject and a stopword; because
+codes are matched first, `IS 407` keeps its `is`.
+
+**A course's own code is a different term from a code it cites.** Every chunk is indexed under a
+reserved term for its own code (`code:cs374`, from `metadata.code`), repeated `bm25.code_boost`
+times, and a query naming a code asks for it. The corpus is why: `ECE 374`'s entire description is
+"Same as CS 374. See CS 374." — one of 497 cross-reference-only descriptions ([#15](../../issues/15))
+— so for the query `CS 374` it is a 20-term document matching `cs374` twice while CS 374's own
+110-term chunk matches it once. BM25 is right on its own terms and ranks the stub first; it has no
+way to know that one of those documents *is* CS 374 and the other points at it. Measured on the
+live corpus, `CS 374` ranks the course itself 11th at `code_boost: 0`, 2nd at `1`, and 1st at `2`.
+The `:` in the prefix is a character `\w+` cannot produce, so the reserved namespace cannot collide
+with a term from the corpus.
+
+### Querying it
+
+```bash
+uv run python -m retrieval.bm25 "CS 374" -k 5
+uv run python -m retrieval.bm25 "CS 374" --terms     # also print the query's terms
+```
+
+```
+'CS 374'  ->  5 hits from bm25_877a6610
+  1. 29.034  CS 374 — Introduction to Algorithms & Models of Computation
+  2. 26.514  ECE 374 — Introduction to Algorithms & Models of Computation
+  3. 24.680  CS 477 — Formal Software Development Methods
+  4. 23.583  CS 476 — Program Verification
+  5. 21.471  CS 473 — Algorithms
+```
+
+```python
+from config import load_config
+from retrieval.bm25 import BM25Retriever
+
+BM25Retriever(load_config()).search("CS 374", 5)
+```
+
+`search` returns the same `Hit(doc_id, score, rank, text, metadata)` the dense side returns, with
+the metadata lists still lists. `score` is the raw BM25 sum: higher is better, unbounded above, and
+comparable only *within* one list — a 29 here says nothing about a cosine 0.9, which is why fusion
+works on `rank`. Documents that no query term touched score exactly 0 and are dropped rather than
+padded out to `k`: fusion ranks every list it is handed, and an untouched document has not been
+retrieved. Ties are broken by corpus order, so a ranking is the same on every run and machine.
+
+This is the half of the hybrid that can find a course by name. Embeddings put `CS 374` near
+"algorithms" and "theory of computation"; only the lexical side knows the string is a course code.
 
 ## Day 1 goal
 

@@ -36,7 +36,7 @@ from chromadb.errors import NotFoundError
 from config import Config, chroma_path, collection_name, load_config, rel_to_repo
 from embedding import Embedder, make_embedder
 from ingest.chunk import chunk_key, decode_chroma_metadata
-from retrieval.types import Hit, top_k_each
+from retrieval.types import Hit, format_hit, top_k_each
 
 #: The only distance function this module can turn into a similarity; see :func:`similarity`.
 COSINE = "cosine"
@@ -180,12 +180,6 @@ class DenseRetriever:
 
 
 # --- CLI ------------------------------------------------------------------------------------------
-
-
-def format_hit(hit: Hit) -> str:
-    """One line per hit: rank, score, and the chunk's first line (``CODE - Title``)."""
-    title = hit.text.splitlines()[0] if hit.text else hit.doc_id
-    return f"{hit.rank:>3}. {hit.score:.3f}  {title}"
 
 
 def main(argv: Sequence[str] | None = None) -> None:

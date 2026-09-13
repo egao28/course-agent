@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -51,12 +50,16 @@ from embedding import (
     estimate_cost,
     make_embedder,
 )
-from ingest.chunk import CHUNKS_META_PATH, CHUNKS_PATH, chroma_metadata, chunk_key
+from ingest.chunk import (
+    check_chunks,
+    chroma_metadata,
+    chunk_key,
+    load_chunks,
+    load_chunks_meta,
+)
 
 #: The distance function the collection is created with; see the module docstring.
 SPACE = "cosine"
-#: Keys every line of chunks.jsonl must carry.
-CHUNK_KEYS = frozenset({"doc_id", "text", "metadata"})
 
 
 class Tally(NamedTuple):
@@ -69,83 +72,6 @@ class Tally(NamedTuple):
     #: Embedding dimension, read off the vectors rather than assumed from the model name.
     dim: int | None
     seconds: float
-
-
-# --- inputs ---------------------------------------------------------------------------------------
-
-
-def load_chunks(path: Path | None = None) -> list[dict[str, Any]]:
-    """The chunk corpus, or a pointer at the command that writes it.
-
-    ``doc_id`` uniqueness is checked here because it is what makes ``len(chunks)`` the number of
-    rows a finished collection holds -- the signal the whole idempotency story rests on.
-    """
-    path = CHUNKS_PATH if path is None else Path(path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{rel_to_repo(path)} is missing; run `uv run python -m ingest.chunk` first"
-        )
-    chunks = []
-    seen: dict[str, int] = {}
-    with path.open(encoding="utf-8") as f:
-        for lineno, line in enumerate(f, start=1):
-            row = json.loads(line)
-            if CHUNK_KEYS - row.keys():
-                missing = ", ".join(sorted(CHUNK_KEYS - row.keys()))
-                raise ValueError(
-                    f"{rel_to_repo(path)}:{lineno} is missing {missing}; "
-                    "re-run `uv run python -m ingest.chunk`"
-                )
-            first = seen.get(row["doc_id"])
-            if first is not None:
-                raise ValueError(
-                    f"{rel_to_repo(path)}:{lineno} repeats doc_id {row['doc_id']!r} from line "
-                    f"{first}; two rows with one id are not two vectors -- Chroma keeps the first "
-                    "and drops the second without a word, so the build would pay for a chunk the "
-                    "collection does not hold. Re-run `uv run python -m ingest.chunk`"
-                )
-            seen[row["doc_id"]] = lineno
-            chunks.append(row)
-    if not chunks:
-        raise ValueError(f"{rel_to_repo(path)} is empty; re-run `uv run python -m ingest.chunk`")
-    return chunks
-
-
-def load_chunks_meta(path: Path | None = None) -> dict[str, Any]:
-    """The sidecar written beside the corpus, which says what it was chunked under."""
-    path = CHUNKS_META_PATH if path is None else Path(path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"{rel_to_repo(path)} is missing; run `uv run python -m ingest.chunk` first"
-        )
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
-
-
-def check_chunks(
-    chunks: Sequence[Mapping[str, Any]], meta: Mapping[str, Any], cfg: Mapping[str, Any]
-) -> None:
-    """Refuse a corpus that is not the one this config describes, before anything is embedded.
-
-    ``chunk_key`` covers only what decides a chunk's *content* (term, strategy, template, fields),
-    so tuning ``bm25`` or ``fusion`` between two runs does not read as a stale corpus -- see
-    ``ingest.chunk.chunk_key``. The sidecar's own count is compared too: a truncated
-    ``chunks.jsonl`` would otherwise build a collection that is short a few courses and says
-    nothing about it.
-    """
-    expected = chunk_key(cfg)
-    found = meta.get("chunk_key")
-    if found != expected:
-        raise ValueError(
-            f"{rel_to_repo(CHUNKS_PATH)} was written with chunk_key {found!r}, but config.yaml "
-            f"describes {expected!r}; re-run `uv run python -m ingest.chunk` before indexing"
-        )
-    if meta.get("chunks") != len(chunks):
-        raise ValueError(
-            f"{rel_to_repo(CHUNKS_META_PATH)} records {meta.get('chunks')} chunks but "
-            f"{rel_to_repo(CHUNKS_PATH)} holds {len(chunks)}; re-run "
-            "`uv run python -m ingest.chunk`"
-        )
 
 
 # --- the store ------------------------------------------------------------------------------------

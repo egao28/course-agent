@@ -27,6 +27,10 @@ Nothing else in the pipeline may build chunk text.
 Three properties the rest of Day 1 relies on, all asserted here rather than assumed downstream:
 every ``doc_id`` is unique, every course carries the term ``config.yaml`` claims, and no chunk
 exceeds the embedding input limit (#5 pays for a batch before the API rejects the long one).
+
+Both index builds read the corpus back through :func:`load_chunks` and :func:`check_chunks` below,
+rather than each parsing a file it did not write: the dense side (#5) and the BM25 side (#6) must
+agree on what a stale corpus is, and they index the same 4,502 lines.
 """
 
 from __future__ import annotations
@@ -446,6 +450,87 @@ def chunk(cfg: Config, encode: Callable[[str], Sequence[int]] | None = None) -> 
         "template_version": version,
         "stats": stats,
     }
+
+
+# --- reading it back -----------------------------------------------------------------------------
+
+
+#: Keys every line of chunks.jsonl must carry.
+CHUNK_KEYS = frozenset({"doc_id", "text", "metadata"})
+
+
+def load_chunks(path: Path | None = None) -> list[dict[str, Any]]:
+    """The chunk corpus, or a pointer at the command that writes it.
+
+    ``doc_id`` uniqueness is checked here because it is what makes ``len(chunks)`` the number of
+    rows a finished index holds -- the signal both builds' idempotency checks rest on.
+    """
+    path = CHUNKS_PATH if path is None else Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{rel_to_repo(path)} is missing; run `uv run python -m ingest.chunk` first"
+        )
+    chunks = []
+    seen: dict[str, int] = {}
+    with path.open(encoding="utf-8") as f:
+        for lineno, line in enumerate(f, start=1):
+            row = json.loads(line)
+            if CHUNK_KEYS - row.keys():
+                missing = ", ".join(sorted(CHUNK_KEYS - row.keys()))
+                raise ValueError(
+                    f"{rel_to_repo(path)}:{lineno} is missing {missing}; "
+                    "re-run `uv run python -m ingest.chunk`"
+                )
+            first = seen.get(row["doc_id"])
+            if first is not None:
+                raise ValueError(
+                    f"{rel_to_repo(path)}:{lineno} repeats doc_id {row['doc_id']!r} from line "
+                    f"{first}; two rows with one id are not two documents -- Chroma keeps the "
+                    "first and drops the second without a word, so the dense build would pay for "
+                    "a chunk the collection does not hold, and a BM25 hit would name an id that "
+                    "points at two texts. Re-run `uv run python -m ingest.chunk`"
+                )
+            seen[row["doc_id"]] = lineno
+            chunks.append(row)
+    if not chunks:
+        raise ValueError(f"{rel_to_repo(path)} is empty; re-run `uv run python -m ingest.chunk`")
+    return chunks
+
+
+def load_chunks_meta(path: Path | None = None) -> dict[str, Any]:
+    """The sidecar written beside the corpus, which says what it was chunked under."""
+    path = CHUNKS_META_PATH if path is None else Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{rel_to_repo(path)} is missing; run `uv run python -m ingest.chunk` first"
+        )
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def check_chunks(
+    chunks: Sequence[Mapping[str, Any]], meta: Mapping[str, Any], cfg: Mapping[str, Any]
+) -> None:
+    """Refuse a corpus that is not the one this config describes, before either index is built.
+
+    ``chunk_key`` covers only what decides a chunk's *content* (term, strategy, template, fields),
+    so tuning ``bm25`` or ``fusion`` between two runs does not read as a stale corpus -- see
+    :func:`chunk_key`. The sidecar's own count is compared too: a truncated ``chunks.jsonl`` would
+    otherwise build an index that is short a few courses and says nothing about it.
+    """
+    expected = chunk_key(cfg)
+    found = meta.get("chunk_key")
+    if found != expected:
+        raise ValueError(
+            f"{rel_to_repo(CHUNKS_PATH)} was written with chunk_key {found!r}, but config.yaml "
+            f"describes {expected!r}; re-run `uv run python -m ingest.chunk` before indexing"
+        )
+    if meta.get("chunks") != len(chunks):
+        raise ValueError(
+            f"{rel_to_repo(CHUNKS_META_PATH)} records {meta.get('chunks')} chunks but "
+            f"{rel_to_repo(CHUNKS_PATH)} holds {len(chunks)}; re-run "
+            "`uv run python -m ingest.chunk`"
+        )
 
 
 # --- size report ----------------------------------------------------------------------------------

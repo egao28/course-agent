@@ -6,7 +6,8 @@ space, that ``count()`` is what the idempotency check reads, that the flattened 
 round trip. Only the *embedder* is fake, since that is the part that costs money.
 
 ``redirect_paths`` is autouse and points the corpus, the sidecar and ``INDEXES_DIR`` into tmp_path:
-no test can read the live ``data/chunks.jsonl`` or write into the real ``indexes/chroma``.
+no test can read the live ``data/chunks.jsonl`` or write into the real ``indexes/chroma``. It
+patches them on ``ingest.chunk``, which owns both the writing and the reading of the corpus.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import config
 from config import Config, collection_name, load_config
 from embedding import Vectors
 from ingest import build_dense as bd
+from ingest import chunk as ch
 from ingest.chunk import chunk_key
 
 BASE_CONFIG = Path(__file__).parent / "fixtures" / "config_fixture.yaml"
@@ -93,7 +95,7 @@ def redirect_paths(tmp_path, monkeypatch) -> dict[str, Path]:
         "CHUNKS_META_PATH": tmp_path / "chunks.meta.json",
     }
     for name, path in paths.items():
-        monkeypatch.setattr(bd, name, path)
+        monkeypatch.setattr(ch, name, path)
     monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
     return paths
 

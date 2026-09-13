@@ -41,6 +41,18 @@ class Retriever(Protocol):
     def search(self, query: str, k: int | None = None) -> list[Hit]: ...
 
 
+def format_hit(hit: Hit) -> str:
+    """One line per hit, for a CLI: rank, score, and the chunk's first line (``CODE - Title``).
+
+    Shared by both retrievers' ``-m`` entry points so two rankings of the same corpus can be read
+    side by side. ``score`` is printed to three places whatever its scale -- a cosine similarity
+    just under 1, a BM25 score around 30 -- because the number is only ever meaningful against the
+    others in its own list.
+    """
+    title = hit.text.splitlines()[0] if hit.text else hit.doc_id
+    return f"{hit.rank:>3}. {hit.score:.3f}  {title}"
+
+
 def top_k_each(cfg: Mapping[str, Any]) -> int:
     """``fusion.top_k_each`` -- the recall depth every retriever defaults to.
 

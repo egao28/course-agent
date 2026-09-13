@@ -25,6 +25,10 @@ bm25:
   k1: 1.5
   b: 0.75
   tokenizer: simple_v1
+  # How many times a course's own code is repeated in its token stream, so that a query naming a
+  # code ranks the course that *is* that code above one that merely cites it. 0 disables it; see
+  # ingest/tokenize.py for why 2 and not 1.
+  code_boost: 2
 fusion:
   method: rrf
   rrf_k: 60
