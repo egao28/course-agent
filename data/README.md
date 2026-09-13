@@ -87,8 +87,9 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` — readable in a ranked list, and term-scoped so a second term can
 join the same collection without colliding. `text` is rendered by `render_chunk()` alone, under the
-template named by `chunk.template_version`; see [the chunking section of the top-level
-README](../README.md#chunking). `prereq_codes` is the **unfiltered** list, so a reference to a
+template named by `chunk.template_version` (`v1` renders the catalog fields as they stand, `v2`
+de-duplicates the requirements block and follows cross-references); see [the chunking section of
+the top-level README](../README.md#templates). `prereq_codes` is the **unfiltered** list, so a reference to a
 course not offered this term stays visible in metadata even though `prereqs.json` drops it.
 
 Neither file is committed, unlike the three above: they are rebuilt from those by one command with
@@ -129,7 +130,10 @@ Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every 
 
 - **497 descriptions are cross-references only** (`"Same as HIST 200. See HIST 200."`). They carry
   no topical text, so both retrievers will rank them poorly. Template `v1` renders them as they
-  are; following the reference is #15.
+  are; `v2` follows the `See` clause and borrows the target's description, which resolves 496 of
+  the 497 — the one that does not is `BADM 205`, pointing at `GGIS 205`, not offered this term.
+  Neither template can fix the underlying export: `prereqCodes`, `credits` and `attrs` of a
+  cross-listed course are still whatever the catalog filed under *its* code, not the target's.
 - **1 course has an empty description** (`CWL 593`).
 - **779 of 2,865 prerequisite references dangle** — a course mentioned in prerequisite text that is
   not offered in 2026-sp. They stay in `courses.json:prereqCodes` and are dropped from
