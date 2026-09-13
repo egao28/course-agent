@@ -183,12 +183,28 @@ def check_method(cfg: Mapping[str, Any]) -> str:
     return str(method)
 
 
-def fuse(rankings: Mapping[str, Sequence[Hit]], cfg: Mapping[str, Any]) -> list[Hit]:
-    """:func:`rrf` with the config's parameters, cut to ``fusion.top_k_final``.
+def check_limit(k: int) -> int:
+    """Refuse a result depth that is not a positive whole number.
+
+    Zero is refused here, unlike in :func:`check_k`: a fusion asked for no hits is a typo, where a
+    damping constant of zero is an ablation.
+    """
+    if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+        raise ValueError(f"k must be a positive integer, got {k!r}")
+    return k
+
+
+def fuse(
+    rankings: Mapping[str, Sequence[Hit]], cfg: Mapping[str, Any], k: int | None = None
+) -> list[Hit]:
+    """:func:`rrf` with the config's parameters, cut to ``k`` or to ``fusion.top_k_final``.
 
     What ``retrieve(query, "hybrid")`` (#8) calls, and the only function here that reads a config
     -- the truncation lives on this side of the line so that :func:`rrf` stays the formula and
-    nothing else.
+    nothing else. ``k`` is the caller's override of the final depth, for a ``retrieve(..., k=10)``
+    or a recall@k measurement; the damping constant and the method still come from ``cfg``, since
+    those are what the result is filed under.
     """
     check_method(cfg)
-    return rrf(rankings, rrf_k(cfg))[: top_k_final(cfg)]
+    limit = top_k_final(cfg) if k is None else check_limit(k)
+    return rrf(rankings, rrf_k(cfg))[:limit]

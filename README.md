@@ -34,7 +34,7 @@ course-agent/
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
-├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, retrieve(query, mode)
+├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
@@ -372,6 +372,83 @@ The module is **pure**: no index, no API key, no config in `rrf` itself. That is
 part of either retriever — the arithmetic that decides the final order is tested against numbers
 written out by hand, on rankings built in the test file. `fuse` is the one function that reads the
 `fusion` section (`method`, `rrf_k`, `top_k_final`), for `retrieve(query, "hybrid")`.
+
+## retrieve(query, mode)
+
+`retrieval/__init__.py` is the one entry point, and the one the Day 4 ablation calls — so the
+signature is frozen now and a mode is a *parameter*, never a different function with a different
+return shape:
+
+```python
+from retrieval import retrieve
+
+retrieve("machine learning")                   # mode="hybrid", k=fusion.top_k_final (5)
+retrieve("CS 374", "bm25", k=10)               # mode ∈ {dense, bm25, hybrid}
+retrieve("machine learning", "dense", cfg=my_cfg)
+```
+
+```bash
+uv run python -m retrieval "CS 374" --mode bm25
+uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 10
+```
+
+```
+'CS 374'  ->  5 hits, mode bm25, config 7045a614, 1.9 ms
+
+#  doc_id             score  name                                            sources
+1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
+2  2026-sp:ECE-374  26.5137  Introduction to Algorithms & Models of Comput…  bm25 2
+3  2026-sp:CS-477   24.6805  Formal Software Development Methods             bm25 3
+4  2026-sp:CS-476   23.5827  Program Verification                            bm25 4
+5  2026-sp:CS-473   21.4707  Algorithms                                      bm25 5
+
+(plus 79 ms opening the bm25 index, once per process -- not counted in the query time above)
+```
+
+| mode | what runs | needs |
+| --- | --- | --- |
+| `dense` | `DenseRetriever.search(query, k)` | `OPENAI_API_KEY` + the Chroma collection |
+| `bm25` | `BM25Retriever.search(query, k)` | the BM25 pickle |
+| `hybrid` | both, at `fusion.top_k_each` (20) → `fuse()` → `k` | both of the above |
+
+`k` defaults to `fusion.top_k_final` (5) in **every** mode, so switching modes cannot quietly
+change the length of the list a report is comparing. In `hybrid` it cuts the fused ranking, not
+either input: each retriever is still asked for the tuned `top_k_each`. Asking for more than that
+depth (`k=50`) deepens the recall instead of returning the ≤40 documents two 20-deep lists can hold
+between them.
+
+The result carries what a report has to quote next to the hits:
+
+```python
+RetrievalResult(query=…, mode="hybrid", config_hash="7045a614", hits=[Hit, …], latency_ms=128.4)
+```
+
+`config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
+configuration, including the fusion parameters, which name no index. `hits` are the same `Hit`
+whichever mode produced them — in `hybrid` each one's `sources` says which retrievers found it and
+where, and in the other two it is `None`, the mode already being the answer. The CLI fills the
+`sources` column in from the mode, so all three tables read the same way down the page.
+
+Retrievers are built on first use and cached in-process, keyed by the config hash: opening Chroma
+and unpickling 6 MB costs about a second each, and a smoke report or an ablation pays it once
+rather than per query. Keying on the full hash is stricter than it needs to be — an `rrf_k`
+ablation reopens two indexes whose contents did not change — but a cached retriever can then never
+outlive a setting the caller has since changed, which would not raise, it would answer. Nothing is
+loaded until a mode asks for it, so `retrieve(q, "bm25")` never opens Chroma, never imports
+`chromadb` or `openai`, and runs in a checkout with no API key and no dense index. `clear_cache()`
+drops the lot, for a process that rebuilt an index after querying it.
+
+`latency_ms` times the **query**, not the process warm-up: the retrievers are built before the
+clock starts, since a number that included a one-off index load on the first query and not on the
+next four would not be the latency of anything. The CLI prints the load on its own line when it
+happened.
+
+A fourth mode — `keyword`, the `searchCourses()` baseline from AlmaBot's `planner.ts`, which Day 4
+may want to compare against — is a builder in `BUILDERS` and an entry in `MODE_SOURCES`, and
+nothing else. That room is deliberate; the implementation is out of scope for Day 1.
+
+Real top-5s for the Day 1 queries, in all three modes, are [#9](../../issues/9)'s smoke report,
+once the dense index is built.
 
 ## Day 1 goal
 
