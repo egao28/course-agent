@@ -32,6 +32,7 @@ course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
+├── llm.py         # prompt → text: the one chat client the router and the answer node share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
@@ -56,10 +57,10 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "7045a614", frozen at load
+cfg.hash                         # "ade2f799", frozen at load
 collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
 bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_7045a614.md  dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_ade2f799.md  dir created on demand
 rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
@@ -174,7 +175,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash 7045a614  (chunk key 05d00726)
+config hash ade2f799  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -246,7 +247,7 @@ uv run python -m ingest.build_bm25
 ```
 
 ```
-config hash 7045a614  (bm25 key 877a6610)
+config hash ade2f799  (bm25 key 877a6610)
 documents indexed      4502
 vocabulary             21500 terms
 terms emitted          298000  (mean 66.2 per chunk)
@@ -398,7 +399,7 @@ uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 1
 ```
 
 ```
-'CS 374'  ->  5 hits, mode bm25, config 7045a614, 1.9 ms
+'CS 374'  ->  5 hits, mode bm25, config ade2f799, 1.9 ms
 
 #  doc_id             score  name                                            sources
 1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
@@ -425,7 +426,7 @@ between them.
 The result carries what a report has to quote next to the hits:
 
 ```python
-RetrievalResult(query=…, mode="hybrid", config_hash="7045a614", hits=[Hit, …], latency_ms=128.4)
+RetrievalResult(query=…, mode="hybrid", config_hash="ade2f799", hits=[Hit, …], latency_ms=128.4)
 ```
 
 `config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
@@ -454,6 +455,45 @@ nothing else. That room is deliberate; the implementation is out of scope for Da
 
 Real top-5s for the Day 1 queries, in all three modes, are [#9](../../issues/9)'s smoke report,
 once the dense index is built.
+
+## Chat client
+
+`llm.py` is to the chat model what `embedding.py` is to the encoder: the one place a prompt becomes
+text. Day 2's two model calls — the intent router and the answer node — both take their client from
+`make_chat(cfg)`, so neither names a model of its own. Nothing on Day 1's path calls it.
+
+```yaml
+llm:
+  provider: openai          # the only route implemented; `local` is an embedding-only axis
+  model: gpt-4o-mini
+  temperature: 0            # a classification and a grounded answer are both deterministic tasks
+  max_tokens: 800
+```
+
+```python
+from config import load_config
+from llm import make_chat
+
+chat = make_chat(load_config())
+chat.complete("How many credits is CS 374?", system="Reply with one label.")  # -> "course_fact"
+```
+
+`Chat` is a two-member protocol (`model`, `complete`), and that is the point: **the client is
+injectable everywhere.** `make_chat(cfg, client=…)` swaps the SDK object underneath `OpenAIChat`
+for a stub, and any object with a `complete` method is a `Chat`. Not a nicety — the OpenAI account
+behind this repo has no credits (every call returns 429 `insufficient_quota`), so each node's logic
+is built and tested against a fake, and the live run is the last step of Day 2 instead of a
+prerequisite for any of it.
+
+`complete()` returns a plain `str`, so a fake is three lines long, and raises rather than returning
+one when a completion arrives with no answer in it: no choices, an empty or refused message, or a
+reply cut off at `max_tokens`. The last matters most for the answer node — a truncated answer keeps
+its citation and loses the claim that citation was supporting, which is the one failure a
+post-generation citation check cannot see.
+
+The section is part of the full config hash and reaches neither index key, so adding it renamed the
+reports (`7045a614` → `ade2f799`) and left the dense collection (`094143d8`) and the BM25 pickle
+(`877a6610`) exactly where they were.
 
 ## Day 1 goal
 

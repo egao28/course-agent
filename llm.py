@@ -1,0 +1,192 @@
+"""Prompt to text: the one chat client both of the agent's model calls go through.
+
+``agent.nodes.route_intent`` classifies a query into one of five intents and ``agent.nodes.answer``
+writes the grounded answer from the evidence. Those are the only two places this repo asks for a
+chat completion, and neither names a model of its own -- the arrangement ``embedding.py`` already
+has for the one encoder the build side and the query side share. What model that is comes from
+``llm`` in ``config.yaml``::
+
+    llm:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0        # a classification and a grounded answer are both deterministic tasks
+      max_tokens: 800
+
+That section is part of the config hash, so a report is named after the prompt settings that
+produced it. It reaches **neither index key** -- ``dense_key`` hashes the chunk text and the
+encoder, ``bm25_key`` the chunk text and the ``bm25`` section -- which is the point: adding a chat
+model to this repo must not rename, and so orphan, an index that cost money to build.
+
+Every call is injectable, and that is not a nicety. The account behind this repo has no credits
+(an API call returns 429 ``insufficient_quota``), so until it has, the agent's nodes run against a
+fake: anything with a ``complete`` method is a :class:`Chat`, and ``make_chat(cfg, client=...)``
+replaces the SDK object underneath :class:`OpenAIChat` with a stub. Prompt assembly, label
+validation and the citation check are therefore all testable with no network and no
+``OPENAI_API_KEY``; the live run is the last step of Day 2, not a prerequisite for any of it.
+
+:meth:`OpenAIChat.complete` returns a plain ``str`` rather than a response object precisely so that
+such a fake is three lines long. Nothing here counts tokens: an embedding run bills per corpus and
+is worth a cost line, while a chat run bills per query and the usage page is the honest source.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, Protocol
+
+# One key, one message for a missing one: embedding.py made the first API call in this repo and
+# owns that check, so this module reuses it instead of writing a second sentence about .env.
+from embedding import openai_client
+
+#: The ``llm.provider`` values this module implements. ``embedding.provider`` also honours
+#: ``local``, deliberately not mirrored here: the models that fit on this laptop route badly and
+#: answer worse, so a config asking for a local chat route would name a run that cannot happen.
+PROVIDERS = ("openai",)
+
+
+class Chat(Protocol):
+    """What the router and the answer node need: a model name, one prompt in, one string out."""
+
+    model: str
+
+    def complete(self, prompt: str, *, system: str | None = None) -> str: ...
+
+
+# --- config ---------------------------------------------------------------------------------------
+
+
+def check_llm_config(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Validate the ``llm`` section against what this module implements; return it.
+
+    Reported as a sentence naming the offending key and the file to fix it in, never as a
+    ``KeyError`` from whichever line happened to read it first -- the rule
+    :func:`embedding.check_embedding_config` follows, for the same reason: these values are hashed
+    into every report name, so a config describing a run that cannot happen is worth refusing
+    before the run rather than after it.
+    """
+    if "llm" not in cfg:
+        raise ValueError(
+            "config has no `llm` section; it must set provider, model, temperature and max_tokens "
+            "(see config.yaml) -- the intent router and the answer node both read it"
+        )
+    section = cfg["llm"]
+    missing = [
+        key for key in ("provider", "model", "temperature", "max_tokens") if key not in section
+    ]
+    if missing:
+        raise ValueError(
+            f"config llm section is missing {', '.join(missing)}; it must set provider, model, "
+            "temperature and max_tokens (see config.yaml)"
+        )
+    provider = section["provider"]
+    if provider not in PROVIDERS:
+        raise ValueError(
+            f"unknown llm.provider {provider!r}; known providers: {', '.join(PROVIDERS)}"
+        )
+    model = section["model"]
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError(f"llm.model must be a non-empty string, got {model!r}")
+    temperature = section["temperature"]
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not 0 <= temperature <= 2
+    ):
+        raise ValueError(f"llm.temperature must be a number in [0, 2], got {temperature!r}")
+    max_tokens = section["max_tokens"]
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
+        # True is an int in Python and would cap every completion at a single token.
+        raise ValueError(f"llm.max_tokens must be a positive integer, got {max_tokens!r}")
+    return section
+
+
+# --- providers ------------------------------------------------------------------------------------
+
+
+class OpenAIChat:
+    """One chat completion per :meth:`complete`, and no conversation state between them.
+
+    Both callers are single-turn -- a classification, and an answer written from the evidence it is
+    given -- so there is no history worth keeping, and keeping none means a query cannot inherit
+    anything from the one before it.
+
+    ``max_retries`` is above the SDK default for the reason ``OpenAIEmbedder`` raises it too: a
+    smoke run is ten queries and two calls each, and a rate-limited request that gives up costs
+    the report a row rather than a retry.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 800,
+        client: Any | None = None,
+        max_retries: int = 5,
+    ) -> None:
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._client = openai_client(max_retries=max_retries) if client is None else client
+
+    def complete(self, prompt: str, *, system: str | None = None) -> str:
+        """The model's reply to ``prompt``, stripped; ``system`` leads the message list if given.
+
+        The reply comes back stripped because one caller compares it against five exact labels and
+        the other renders it as markdown, so neither has a use for leading whitespace.
+
+        Three ways a completion can arrive without an answer in it, all raised rather than returned
+        as a string the caller would have to re-inspect: no choices at all, a cut-off completion,
+        and an empty (or refused) message. The cut-off case matters most for the answer node: a
+        truncated answer keeps its citation and loses the claim the citation was supporting, which
+        is exactly the failure the citation check cannot see.
+        """
+        messages: list[dict[str, str]] = []
+        if system is not None:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            raise RuntimeError(f"chat completion for model {self.model!r} returned no choices")
+        choice = choices[0]
+        if getattr(choice, "finish_reason", None) == "length":
+            raise RuntimeError(
+                f"chat completion was cut off at the max_tokens ceiling ({self.max_tokens}); "
+                "raise llm.max_tokens in config.yaml rather than use a half-written answer"
+            )
+        message = choice.message
+        content = getattr(message, "content", None)
+        if content is None or not content.strip():
+            refusal = getattr(message, "refusal", None)
+            raise RuntimeError(
+                f"chat completion for model {self.model!r} came back empty"
+                + (f" (refusal: {refusal})" if refusal else "")
+            )
+        return content.strip()
+
+
+def make_chat(cfg: Mapping[str, Any], client: Any | None = None) -> Chat:
+    """The chat client ``config.yaml`` asks for, validated first.
+
+    ``client`` replaces the SDK object inside :class:`OpenAIChat`, so a caller gets the real prompt
+    assembly and the real error handling over a stub transport -- and skips the
+    ``OPENAI_API_KEY`` check, because nothing will be sent. That is how every node is tested, and
+    how the smoke run works at all while the account has no credits.
+    """
+    section = check_llm_config(cfg)
+    if section["provider"] == "openai":
+        return OpenAIChat(
+            section["model"],
+            temperature=float(section["temperature"]),
+            max_tokens=int(section["max_tokens"]),
+            client=client,
+        )
+    # Unreachable through check_llm_config: here so that adding a PROVIDERS entry without adding a
+    # client for it fails by name instead of quietly returning an OpenAI one.
+    raise ValueError(f"llm.provider {section['provider']!r} has no client in llm.py")
