@@ -91,19 +91,42 @@ def exported(cfg, redirect_outputs) -> dict:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("3 hours.", 3.0),
-        ("4 hours.", 4.0),
-        ("3 OR 4 hours.", 3.0),
-        ("1 TO 5 hours.", 1.0),
-        ("0 TO 4 hours.", 4.0),  # a zero lower bound means "up to", so keep the maximum
-        ("1.5 hours.", 1.5),
-        ("", 0.0),
-        (None, 0.0),
-        ("hours to be arranged.", 0.0),
+        ("3 hours.", (3.0, 3.0, "")),
+        ("4 hours.", (4.0, 4.0, "")),
+        ("1.5 hours.", (1.5, 1.5, "")),
+        ("0 hours.", (0.0, 0.0, "")),  # 69 real courses; not the same as "unknown"
+        # Both ends survive, whichever end the range starts at. The old parse_credits kept the
+        # first number unless it was 0 -- the low end of 1,211 courses, the high end of 204.
+        ("3 OR 4 hours.", (3.0, 4.0, "OR")),
+        ("1 TO 5 hours.", (1.0, 5.0, "TO")),
+        ("0 TO 4 hours.", (0.0, 4.0, "TO")),
+        ("0 TO 20 hours.", (0.0, 20.0, "TO")),
+        ("0 OR 1 hours.", (0.0, 1.0, "OR")),
+        # Tolerated spellings: the catalog writes the connector upper-case and "hours." with the
+        # stop, but neither is load-bearing.
+        ("2 or 3 hours", (2.0, 3.0, "OR")),
+        ("1 hour.", (1.0, 1.0, "")),
     ],
 )
-def test_parse_credits(raw, expected):
-    assert ex.parse_credits(raw) == expected
+def test_parse_credit_hours_keeps_both_ends_of_a_range(raw, expected):
+    credits = ex.parse_credit_hours(raw)
+    assert (credits.low, credits.high, credits.connector) == expected
+    assert credits.raw == raw.strip()
+
+
+@pytest.mark.parametrize("raw", ["", None, "   ", "hours to be arranged.", "3 to 4 credits"])
+def test_parse_credit_hours_reports_an_unreadable_value_as_no_bounds(raw):
+    # No invented number: the text is kept and the bounds stay empty, which check_credits then
+    # refuses to export rather than shipping a course no credit filter can see.
+    credits = ex.parse_credit_hours(raw)
+    assert (credits.low, credits.high) == (None, None)
+    assert credits.raw == (raw or "").strip()
+
+
+def test_parse_credit_hours_orders_the_bounds(by_code):
+    # The field names promise min <= max; the catalog never writes a range the other way round.
+    assert all(c["creditsMin"] <= c["creditsMax"] for c in by_code.values())
+    assert ex.parse_credit_hours("4 TO 2 hours.")[1:3] == (2.0, 4.0)
 
 
 @pytest.mark.parametrize(
@@ -275,6 +298,47 @@ def test_course_fields_cover_the_chunk_template(by_code):
     assert set(fields) <= set(by_code["CS 374"])
 
 
+def test_credit_hours_are_exported_raw_and_as_bounds(by_code):
+    # The lossless string plus the two numbers a filter compares against. A fixed-credit course
+    # gets equal bounds, so one comparison covers both kinds.
+    assert by_code["CS 173"]["creditsRaw"] == "3 OR 4 hours."
+    assert (by_code["CS 173"]["creditsMin"], by_code["CS 173"]["creditsMax"]) == (3.0, 4.0)
+    assert by_code["CWL 593"]["creditsRaw"] == "1 TO 5 hours."
+    assert (by_code["CWL 593"]["creditsMin"], by_code["CWL 593"]["creditsMax"]) == (1.0, 5.0)
+    assert by_code["CS 374"]["creditsRaw"] == "4 hours."
+    assert (by_code["CS 374"]["creditsMin"], by_code["CS 374"]["creditsMax"]) == (4.0, 4.0)
+    assert "credits" not in by_code["CS 374"]  # the flattened field is gone, not renamed
+
+
+def test_a_credit_filter_finds_every_course_that_can_be_taken_for_four(by_code):
+    # #17's acceptance question, asked the way a consumer asks it: one comparison against the
+    # pair, covering fixed-credit and variable-credit courses alike.
+    four = sorted(c["code"] for c in by_code.values() if c["creditsMin"] <= 4 <= c["creditsMax"])
+    assert four == [
+        "ANTH 390",  # 2 TO 4
+        "BADM 537",
+        "CS 173",  # 3 OR 4
+        "CS 225",
+        "CS 233",
+        "CS 374",
+        "CS 421",  # 3 OR 4
+        "CWL 593",  # 1 TO 5
+        "ECON 102",  # 0 TO 4
+        "PHYS 211",
+        "STAT 425",  # 3 OR 4
+    ]
+
+    def flattened(raw: str) -> float:
+        """What the old single ``credits`` field held: the first number unless it was 0."""
+        nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", raw)]
+        return nums[0] if nums[0] > 0 else max(nums)
+
+    # Five of the eleven were invisible to `credits == 4`, and ECON 102 only made it in because
+    # its range starts at zero -- the inconsistency this issue is about.
+    missed = set(four) - {c["code"] for c in by_code.values() if flattened(c["creditsRaw"]) == 4}
+    assert missed == {"ANTH 390", "CS 173", "CS 421", "CWL 593", "STAT 425"}
+
+
 def test_prereq_codes_are_unfiltered_on_the_course_record(by_code):
     # MATH 213 is not in this catalog but stays here; prereqs.json is where it gets dropped.
     assert by_code["CS 374"]["prereqCodes"] == ["CS 173", "CS 225", "MATH 213"]
@@ -345,6 +409,41 @@ def test_check_terms_error_names_the_offending_row_counts(cfg, tmp_path):
     )
     with pytest.raises(ValueError, match=r"2025-fa \(7 rows\)"):
         ex.check_terms(catalog, cfg)
+
+
+# --- check_credits ---------------------------------------------------------------------------
+
+
+def test_check_credits_accepts_the_fixture_catalog(catalog):
+    ex.check_credits(catalog)
+
+
+def test_check_credits_rejects_a_value_it_cannot_read(catalog):
+    broken = catalog._replace(
+        courses=[
+            {**catalog.courses[0], "creditsRaw": "hours TBD", "creditsMin": None},
+            *catalog.courses[1:],
+        ]
+    )
+    with pytest.raises(ValueError, match="Credit Hours value this export cannot read"):
+        ex.check_credits(broken)
+
+
+def test_check_credits_error_names_the_offending_course_and_value(catalog):
+    broken = catalog._replace(
+        courses=[{"code": "CS 999", "creditsRaw": "hours TBD", "creditsMin": None}]
+    )
+    with pytest.raises(ValueError, match=r"CS 999 \('hours TBD'\)"):
+        ex.check_credits(broken)
+
+
+def test_export_runs_the_credit_check(cfg, tmp_path, monkeypatch, redirect_outputs):
+    # The guard has to run inside export(), not just be available: a corpus with null bounds
+    # must never reach data/.
+    monkeypatch.setattr(ex, "parse_credit_hours", lambda raw: ex.CreditHours("?", None, None, ""))
+    with pytest.raises(ValueError, match="Credit Hours value this export cannot read"):
+        ex.export(cfg)
+    assert not redirect_outputs["COURSES_PATH"].exists()
 
 
 # --- build_prereqs ---------------------------------------------------------------------------
@@ -606,6 +705,8 @@ def test_summary_reports_description_quality(exported):
     assert "resolved in catalog  6" in text
     assert "dangling (dropped)   5" in text
     assert "corequisite edges      1" in text  # CS 233 -> CS 173
+    assert "credit hours fixed     11" in text
+    assert "variable             6  (3 'X TO Y', 3 'X OR Y')" in text  # 11 fixed of 17
     assert "Quantitative Reasoning I" in text
 
 

@@ -88,7 +88,7 @@ known data quality issues.
 
 ## Chunking
 
-One course is one chunk — descriptions are short (p50 111 tokens, max 523, against an 8191-token
+One course is one chunk — descriptions are short (p50 112 tokens, max 526, against an 8191-token
 embedding limit), so splitting would only scatter a course's facts across several vectors.
 
 ```bash
@@ -98,7 +98,7 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```
 doc_id   2026-sp:CS-374
-metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
+metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits_min": 4.0, "credits_max": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
 chroma   {"code": "CS 374", …, "prereq_codes": "CS 173|CS 225|MATH 213", "gened_ids": ""}
 text
 CS 374 — Introduction to Algorithms & Models of Computation
@@ -109,7 +109,10 @@ Prerequisites: One of CS 173, MATH 213; CS 225.
 Degree Attributes: None
 ```
 
-The requirements block appears twice there: the catalog runs it to the end of the description, so
+The `Credits` line renders the catalog's whole range (`Credits: 3 or 4`, `Credits: 1 to 5`), not
+one end of it, keeping whichever connector the catalog wrote: a `3 OR 4` course is worth one of the
+two, a `1 TO 5` course anything between. The requirements block appears twice there: the catalog
+runs it to the end of the description, so
 `prereqRaw` is a suffix of `desc` — true of 2,732 courses, and what `v1` was specified to render.
 Changing it is a template change, measured in #15 rather than baked into the baseline. The last
 line is labelled the way the catalog labels the column, *not* "Gen Ed": it also carries non-Gen-Ed
@@ -125,7 +128,9 @@ otherwise, so the hash can never describe a corpus that was not built. It also r
 chunk over the 8191-token limit, rather than letting the embedding call discover it mid-batch.
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
-credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
+credits_min, credits_max, term, prereq_codes, gened_ids` for filtering — credits as a *pair*, because
+1,415 courses (31%) are variable-credit and one number could only ever name one end of the range
+(#17), so `credits_min <= n <= credits_max` is the filter for "can I take this for n credits". `chunks.jsonl` is **not** committed: unlike
 the exported `data/*.json`, it is rebuilt from them by the command above with no private input.
 Its `chunks.meta.json` sidecar records a `chunk_key` — a hash of just the term, strategy, template
 version and field list — so an index build can detect chunks left over from another template while
