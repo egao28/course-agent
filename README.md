@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, graph.py   (Day 2)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -715,6 +715,82 @@ Verified over a real stdio client, not only in-memory: 3 tools listed, `get_cour
 in-memory equivalent runs on every commit — `tests/test_mcp_server.py` lists the tools through a
 real `fastmcp.Client` and asserts each call returns the same dict the Python call does, so a schema
 that will not generate or a model that will not serialize fails in CI rather than in a client.
+
+## Agent graph
+
+`agent/state.py` + `agent/graph.py`: one message in, one of three exits out.
+
+```
+route_intent ──► out_of_scope ──────────────────────────────► END
+     │
+     └────────► dispatch ──► check_evidence ──► answer ─────► END
+                                  │              │
+                                  └──────────────┴► refuse_handoff ──► END
+```
+
+```python
+from agent.graph import run
+
+state = run("What do I need before CS 374?")
+state["exit"]       # 'answer' | 'refuse_handoff' | 'out_of_scope'
+state["answer"]     # the text a person reads, on all three
+state["signals"]    # every number the run measured on the way
+```
+
+`run(query, cfg=None, nodes=None)` is the whole public surface — the CLI ([#39](../../issues/39))
+and every test call that, not the compiled graph, so compilation, the config plumbing and the
+final-state check have one home. Four of the six nodes are stubs until
+[#35](../../issues/35)–[#38](../../issues/38) land; `nodes=` replaces any of them by name, which is
+how the three exits are exercised today and how each node will be tested on its own tomorrow.
+
+**`docs` is one record shape whatever produced it.** A retrieval `Hit` and a tool result both
+become `Evidence(doc_id, text, score, source)` in the dispatch node, so the answer node has a
+single input format and its citation check works the same for both. `score=None` marks an exact
+catalog lookup and is what lets the evidence gate skip the threshold for it — there is no ranking
+to be unsure about. Passing a raw `Hit` through is refused: it has `doc_id`, `text` and `score`, so
+everything downstream would work except the one field the gate needs.
+
+**Which exit a run took is a field, not an inference.** `exit` is written by the node that ends the
+run, rather than guessed from which of `answer` / `evidence_ok` / `docs` happen to be set — #39's
+report counts exits, and inference would make that count a guess.
+
+**`signals` has a declared key set.** Seven keys, prefilled with `None`, listed in one place
+(`SIGNAL_KEYS`) and enforced: a node that writes an undeclared signal is refused. Day 5 calibrates
+on these across many runs, so the record has to be rectangular — a dict that grows keys ad hoc over
+five days gives it a ragged table. It is also the only state key with a reducer: four nodes each
+write one signal, and without one the last update would erase the rest.
+
+**No node reaches into another's state key.** `NODE_WRITES` says who owns what — routing writes
+`intent`, dispatch writes `docs`, the gate writes `evidence_ok`, the three exits write `answer` and
+`exit`, nobody rewrites `query` — and every node is wrapped in a check that refuses anything else.
+LangGraph enforces none of this: an update naming a key the state does not have is **silently
+dropped**, and a node writing another node's key simply wins by running later. Both are the same
+bug, so both fail at the node that caused them.
+
+**The two refusals are fixed text, not completions.** `out_of_scope` and `refuse_handoff` never
+call a model: nothing grounds a generated refusal, and a model asked to write one will argue itself
+into a partial answer with a hedge in front of it. The hand-off message says what was asked, where
+the run stopped and what would get it answered — the middle line read off `signals`, which is the
+second reason those are recorded rather than compared and dropped:
+
+```
+I could not answer this from the 2026-sp course catalog, so I am handing it over rather than guessing.
+
+What you asked: What are the prerequisites?
+Where I stopped: the question does not name a course, and which one was meant is not something to
+guess at -- answering confidently about the wrong course is worse than not answering
+What would get it answered: name it by code: 'CS 374', 'cs 374' and 'CS374' all reach the same
+catalog record
+
+An academic advisor can also see what this catalog export cannot -- your transcript, program
+requirements outside the Gen Eds, and sections as they actually fill.
+```
+
+**The stubs raise rather than answer.** A stub that returned `intent="course_fact"` or an `answer`
+string would let the graph run end to end today, and #39's smoke report would come out of it: ten
+queries, three exits, a table of numbers, and not one model call or catalog lookup behind any row.
+`build_graph()` still compiles with all four in place — the wiring, the routing and the two exits
+are testable without them — and a `run()` that reaches one raises, naming the issue that fills it.
 
 ## Day 1 goal
 
