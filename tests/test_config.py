@@ -35,7 +35,17 @@ from config import (
 FIXTURE = Path(__file__).parent / "fixtures" / "config_fixture.yaml"
 HEX8 = re.compile(r"^[0-9a-f]{8}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_SECTIONS = {"seed", "data", "chunk", "embedding", "bm25", "fusion", "llm", "agent"}
+REQUIRED_SECTIONS = {
+    "seed",
+    "data",
+    "chunk",
+    "embedding",
+    "bm25",
+    "fusion",
+    "llm",
+    "agent",
+    "evidence",
+}
 
 
 @pytest.fixture

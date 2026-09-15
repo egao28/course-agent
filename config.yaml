@@ -51,3 +51,33 @@ agent:
   # index exists; it is still empty (#5 is blocked on OpenAI credits), so bm25 is the only mode that
   # answers today, and a default nothing can run is not a default — it is a crash on query one.
   retrieval_mode: bm25
+# The evidence gate (#37): is there enough here to answer from at all? Day 5 replaces this whole
+# section with conformal prediction; Day 2's version is a threshold, one per source — retrieve()'s
+# three modes score on three unrelated scales (see retrieval/types.py), so a single number cannot
+# serve all three. Hashed like everything else here, and it reaches no index key.
+evidence:
+  # top_score — the best-scoring block, against the threshold for the source that produced it.
+  # Day 5 adds "conformal", which is why this is a named method and not an implied one.
+  method: top_score
+  # A block passes when its score is >= the threshold for its source. A tool result carries no
+  # score and is never compared: an exact catalog lookup has no ranking to be unsure about.
+  thresholds:
+    # Okapi BM25, unbounded and query-length-dependent. Measured on the live index: "CS 374" 29.03,
+    # "How many credits is MATH 241?" 30.91, "Which intro machine learning course should I take?"
+    # 18.27 — against "What does the algorithms course cover?" 11.79 and "Is there a course about
+    # quantum origami?" 11.06, neither of which should answer. 15 sits between them with room on
+    # both sides. It is a cutoff on this corpus, not a confidence: see the inversions in
+    # agent/nodes/check_evidence.py before reading any meaning into the number.
+    bm25: 15.0
+    # 1 - cosine distance. UNMEASURED: the dense collection is still empty (#5 is blocked on OpenAI
+    # credits), so this is the middle of the 0.2–0.6 band text-embedding-3-small gives on short
+    # documents, and it must be re-set from real scores before any dense or hybrid result is
+    # reported as tuned.
+    dense: 0.35
+    # RRF, the sum of 1/(rrf_k + rank) over the retrievers that returned the document. 0.025 is
+    # exactly 2/(rrf_k + top_k_each) = 2/(60 + 20), the score of a document both retrievers
+    # returned at the worst rank either of them reports — so this threshold asks "did the two
+    # retrievers agree?", not "how good is the match?". Chosen knowingly (the issue's point): one
+    # retriever alone tops out at 1/61 = 0.0164 and can never clear it, so a hybrid run in which
+    # one retriever is silent refuses everything. Day 5 needs to know that is what it replaces.
+    hybrid: 0.025
