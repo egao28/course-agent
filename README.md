@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # tools/ (get_course …), graph.py   (Day 2)
+├── agent/         # tools/ (get_course, get_prereq_chain …), graph.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -534,6 +534,57 @@ in-process — there is no stdio subprocess between the graph and its own tools.
 > of the 4,502 courses have a credit *range*. Whichever merges second updates the model —
 > `build_index()` raises on a corpus that has already moved rather than report `credits=None` 4,502
 > times.
+
+## Prerequisite chain
+
+`agent/tools/prereqs.py` is the second tool. "What do I need before SE 495?" is neither a lookup
+nor a search — the answer is a walk over `data/prereqs.json`, which the export already filtered to
+courses this catalog offers.
+
+```python
+from agent.tools.prereqs import get_prereq_chain
+
+chain = get_prereq_chain("cs 374")
+[[n.code for n in level] for level in chain.levels]
+# -> [['CS 173', 'CS 225', 'MATH 213'],                       # level 0 = immediate
+#     ['CS 124', 'CS 128', 'CS 413', 'ECE 220', 'MATH 220', 'MATH 314', 'MATH 412', 'MATH 413'],
+#     ['ECE 120', 'MATH 112', 'MATH 115', 'MATH 241'], ['MATH 231']]
+chain.cycle_detected                       # -> True   (CS 225 -> MATH 412 -> CS 374 -> CS 225)
+get_prereq_chain("SE 495").truncated       # -> False  (27 courses, walked to exhaustion)
+get_prereq_chain("CS 374", max_depth=1)    # -> the immediate three, truncated=True
+```
+
+**Every walk carries a visited set, because the graph is not acyclic.** Building the DAG from
+`prereqs` only — as `data/README.md` said — is necessary and not sufficient: the prerequisite edges
+alone contain seven strongly-connected components over 19 courses. Sixteen of those 19 are
+corequisites stated *inside* the prerequisite sentence ("SE 310; concurrent registration in
+SE 312."), where the export's corequisite pass cannot see them; the other three are disjunction
+members (`MATH 412` is one alternative in `CS 225`'s "one of …", and lists `CS 374`, which requires
+`CS 225`). `data/README.md` is corrected in this branch.
+
+**No depth cap by default.** `dag.ts`'s `allPrereqs(code, depth = 6)` drops a prerequisite outright
+for 113 of the 1,135 courses — cosmetic in a diagram, a wrong answer in a sentence. One visited set
+across the whole walk expands each course once, which bounds a call by the graph (1,442 courses,
+2,086 edges) and in practice by the largest closure in it (47 courses, `IS 557`; median 4), so
+exhaustion is affordable. `max_depth` stays as something a caller can ask for, and `truncated`
+reports when it bit.
+
+**Level 0 is the immediate prerequisites**, and each course sits at its shortest distance from the
+queried one — the contract the answer node needs. `dag.ts::buildSubgraph` layers by longest chain
+instead, so the levels here are not a schedule; `edges` carries the full `(prereq, dependent)`
+structure, cycle-closing edges included, and both endpoints of every edge are always courses the
+result reports.
+
+**Every node carries its raw requirement sentence.** 744 of the 1,135 statements contain a
+disjunction and 397 of those resolve to more than one code, so the code list is not a conjunction:
+`ABE 228` exports `["MATH 220", "MATH 234"]` from "One of MATH 220, MATH 221, MATH 234." The prompt
+quotes the sentence rather than asserting the list; parsing it into an AND/OR tree is Day 3+ work.
+
+`found=False` is delegated whole to `get_course`, so the two tools can never disagree about what is
+in the catalog. A course that *is* in it with no prerequisites returns `found=True` and empty levels
+— that is an answer — and `chain.raw` still quotes its requirements block, which matters for the
+1,608 courses that have one and no chain at all, because every course it names is either not
+offered this term or only a corequisite (`PHYS 211`: "PHYS 211 placement test or MATH 221.").
 
 ## Day 1 goal
 
