@@ -1,14 +1,16 @@
 """Tests for agent/graph.py and the two fixed exits: the wiring, the routing, the three exits.
 
-Every node here is injected. Four of the six are stubs until #35-#38 land, so the graph is driven
+Every node here is injected. Three of the six are stubs until #36-#38 land, so the graph is driven
 with fakes -- which is not a workaround but the acceptance for #34: the skeleton is correct if a
 run reaches each of the three exits and the final state says which one it took, whatever the nodes
-themselves do. It is also how #35-#38 will each be tested before any two of them can run together,
-and how #39's CLI runs at all while the account has no OpenAI credits.
+themselves do. It is also how #36-#38 will each be tested before any two of them can run together,
+and how #39's CLI runs at all while the account has no OpenAI credits. The real router (#35) has
+its own file, ``tests/test_route_intent.py``; here it is a fake like the rest.
 
-``cfg`` is a two-key synthetic config, not the live ``config.yaml``: the only thing the skeleton
-reads from it is ``data.term``, for the two exit messages. One section at the end runs against the
-live config, to prove the default ``run(query)`` path resolves it.
+``cfg`` is a synthetic config, not the live ``config.yaml``: the skeleton reads ``data.term`` from
+it for the two exit messages, and the ``llm`` section is what the router validates when it is built
+(no key is read and no client is made -- see ``agent/nodes/route_intent.py``). One section at the
+end runs against the live config, to prove the default ``run(query)`` path resolves it.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from agent.state import Evidence, initial_state
 from config import Config
 
 TERM = "2026-sp"
+LLM = {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0, "max_tokens": 800}
 LOOKUP = Evidence(
     doc_id="CS 374", text="CS 374 - Algorithms. 4 hours.", score=None, source="get_course"
 )
@@ -33,7 +36,7 @@ CHUNK = Evidence(doc_id="2026-sp:CS-374", text="CS 374 - Algorithms", score=29.0
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config({"data": {"term": TERM}})
+    return Config({"data": {"term": TERM}, "llm": LLM})
 
 
 @pytest.fixture(autouse=True)
@@ -101,8 +104,8 @@ ANSWERING = {
 # --- the shape of the graph -----------------------------------------------------------------------
 
 
-def test_build_graph_compiles_with_every_node_still_a_stub(cfg):
-    # #34's first acceptance: the skeleton stands up before any node behind it exists.
+def test_build_graph_compiles_with_the_remaining_nodes_still_stubs(cfg):
+    # #34's first acceptance: the skeleton stands up before the nodes behind it exist.
     compiled = ag.build_graph(cfg)
     assert sorted(compiled.get_graph().nodes) == [
         "__end__",
@@ -352,9 +355,9 @@ def test_route_after_answer_ends_the_run_on_a_kept_answer():
 # --- the stubs ------------------------------------------------------------------------------------
 
 
-def test_the_four_pending_nodes_are_the_four_issues_still_open():
+def test_the_pending_nodes_are_the_issues_still_open():
+    # One line shorter than it was: #35 landed, so route_intent is no longer among them.
     assert {name: issue for name, (issue, _) in stubs.PENDING.items()} == {
-        "route_intent": 35,
         "dispatch": 36,
         "check_evidence": 37,
         "answer": 38,
@@ -364,8 +367,10 @@ def test_the_four_pending_nodes_are_the_four_issues_still_open():
 def test_a_stub_names_its_issue_and_the_key_it_owes(cfg):
     # It raises rather than returning something plausible: a stub that answered would let #39
     # produce a smoke report with no model call and no lookup behind any of its rows.
-    with pytest.raises(NotImplementedError, match=r"'route_intent' node is a stub.*#35"):
-        ag.run("How many credits is CS 374?", cfg=cfg)
+    with pytest.raises(NotImplementedError, match=r"'dispatch' node is a stub.*#36"):
+        ag.run(
+            "How many credits is CS 374?", cfg=cfg, nodes={"route_intent": router("course_fact")}
+        )
 
 
 def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
@@ -408,8 +413,8 @@ def test_an_override_replaces_one_node_and_leaves_the_other_five(cfg):
 
 
 def test_an_overridden_node_is_never_built(cfg, monkeypatch):
-    # Once #35 and #38 are real, their builders open a chat client. Building one only to discard
-    # it would make the injected fake need the key it exists to do without.
+    # The router validates the `llm` config section when it is built, and #38 will open a chat
+    # client. Building one only to discard it would make an injected fake depend on both.
     def explode(_cfg):
         raise AssertionError("the real builder ran for a node that was overridden")
 
@@ -429,7 +434,7 @@ def test_a_typo_in_an_override_is_refused_rather_than_ignored(cfg):
 
 def test_the_graph_is_compiled_once_per_config(cfg):
     assert ag.get_graph(cfg) is ag.get_graph(cfg)
-    other = Config({"data": {"term": "2026-fa"}})
+    other = Config({"data": {"term": "2026-fa"}, "llm": LLM})
     assert ag.get_graph(other) is not ag.get_graph(cfg)
 
 
@@ -454,7 +459,7 @@ def test_run_refuses_an_empty_query_before_it_builds_anything(query, cfg):
 
 
 def test_run_accepts_a_plain_mapping_as_config():
-    state = ag.run("q", cfg={"data": {"term": "2026-sp"}}, nodes=ANSWERING)
+    state = ag.run("q", cfg={"data": {"term": "2026-sp"}, "llm": LLM}, nodes=ANSWERING)
     assert state["exit"] == "answer"
 
 

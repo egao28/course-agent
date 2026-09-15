@@ -106,9 +106,9 @@ class RequirementQuery(BaseModel):
     """A program, and the courses already completed.
 
     Declared as a model for the same reason the other two tools' queries are: #33 hands this schema
-    to an MCP client and #35's router fills it from free text, so the descriptions below are the
-    only instruction either one gets -- including the one that names the programs that can be
-    audited, which is what keeps a router from confidently asking for one of the other 248.
+    to an MCP client and #36's dispatch node fills it from free text, so the descriptions below
+    are the only instruction either one gets -- including the one that names the programs that can
+    be audited, which is what keeps a caller from confidently asking for one of the other 248.
     """
 
     model_config = ConfigDict(extra="forbid")

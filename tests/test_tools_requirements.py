@@ -280,7 +280,7 @@ def test_a_course_outside_the_catalog_is_reported_not_dropped(corpus):
 
 
 def test_a_string_that_is_not_a_code_is_reported_too(corpus):
-    # Pulling a code out of "intro psych" is #35's job; what this tool must not do is drop it.
+    # Pulling a code out of "intro psych" is #36's job; what this tool must not do is drop it.
     assert tr.check_requirement("gened", ["intro psych"]).unknown_courses == ["intro psych"]
 
 
@@ -623,7 +623,7 @@ def test_a_result_requires_only_whether_it_is_supported_and_what_was_asked():
 
 
 def test_the_query_schema_names_the_programs_a_router_may_ask_for():
-    # #35's router fills this from free text and this description is all the instruction it gets.
+    # #36's dispatch fills this from free text and this description is all the instruction it gets.
     # Before #32 it said no degree could be audited; saying so now would cost two real answers.
     description = tr.RequirementQuery.model_json_schema()["properties"]["major"]["description"]
     assert "Computer Science, BS" in description

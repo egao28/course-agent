@@ -36,9 +36,9 @@ classification silently routed to ``out_of_scope`` would look exactly like a cor
 #39's report.
 
 Nodes are built from the config once per compiled graph and the graph is cached per config hash,
-the way :func:`retrieval.get_retriever` caches retrievers: #39 runs ten queries in one process and
-#35/#38 each open a chat client. A graph built with injected nodes is never cached -- a fake must
-not outlive the test that made it.
+the way :func:`retrieval.get_retriever` caches retrievers: #39 runs ten queries in one process, and
+the router (#35) and the answer node (#38) each open a chat client on their first query. A graph
+built with injected nodes is never cached -- a fake must not outlive the test that made it.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.nodes import Node, NodeBuilder
 from agent.nodes.exits import out_of_scope_node, refuse_handoff_node
+from agent.nodes.route_intent import route_intent_node
 from agent.nodes.stubs import stub_builder
 from agent.state import (
     EXITS,
@@ -63,11 +64,11 @@ from agent.state import (
 )
 from config import Config, load_config
 
-#: How to build each of the six nodes. Four are stubs today; #35-#38 each replace one entry with
+#: How to build each of the six nodes. Three are stubs today; #36-#38 each replace one entry with
 #: its real builder and delete its line from :data:`agent.nodes.stubs.PENDING`. A test passes
 #: already-built nodes to :func:`build_graph` instead of patching this.
 NODE_BUILDERS: dict[str, NodeBuilder] = {
-    "route_intent": stub_builder("route_intent"),
+    "route_intent": route_intent_node,
     "dispatch": stub_builder("dispatch"),
     "check_evidence": stub_builder("check_evidence"),
     "answer": stub_builder("answer"),
@@ -87,9 +88,9 @@ def build_nodes(cfg: Config, nodes: Mapping[str, Node] | None = None) -> dict[st
     real graph while #36-#38 are still stubs. An unknown name is refused rather than ignored --
     a typo'd override would otherwise be a fake that never ran and a test that passed anyway.
 
-    An overridden node is never *built*: once #35 and #38 are real, their builders construct a
-    chat client, and constructing one to throw it away would make the injected fake need the
-    ``OPENAI_API_KEY`` it exists to avoid.
+    An overridden node is never *built*: the router validates the ``llm`` config section when
+    it is built (and #38 will too), so building one only to throw it away would make an injected
+    fake depend on a config section it does not use.
     """
     unknown = sorted(set(nodes or ()) - set(NODE_BUILDERS))
     if unknown:
@@ -267,7 +268,7 @@ def run(
     to their own dict cannot change what a cached graph was built from.
 
     ``nodes`` replaces individual nodes for the duration of one call and bypasses the graph cache
-    entirely, which is how the three exits are exercised while #35-#38 are stubs. A stubbed node
+    entirely, which is how the three exits are exercised while #36-#38 are stubs. A stubbed node
     that is actually reached raises :class:`NotImplementedError` naming its issue.
     """
     state = initial_state(query)

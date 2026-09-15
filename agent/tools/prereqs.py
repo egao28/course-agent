@@ -83,8 +83,8 @@ class PrereqQuery(BaseModel):
     """One course code, and optionally how far back to walk.
 
     Declared as a model for the same reason :class:`~agent.tools.courses.CourseQuery` is: #33 hands
-    this schema to an MCP client and #35's router fills it from free text, so the descriptions
-    below are the only instruction either one gets.
+    this schema to an MCP client and #36's dispatch node fills it from free text, so the
+    descriptions below are the only instruction either one gets.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key, prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -525,7 +525,8 @@ cannot find, and nothing would report the divergence.
 (`clear_cache()` drops it). 4,502 records and 2.9 MB of JSON, several tool calls per query.
 
 The whole argument has to be one code: `"CS 374 or ECE 374"` and `"what is cs 374 about"` are both
-`found=False`. Pulling a code out of a sentence is the router's job ([#35](../../issues/35)).
+`found=False`. Pulling a code out of a sentence belongs to the dispatch node
+([#36](../../issues/36)); the router ([#35](../../issues/35)) only labels the question.
 
 Both models are Pydantic and `extra="forbid"`: the [MCP server](#mcp-server) publishes the schemas,
 while [#36](../../issues/36) imports `get_course` and calls it in-process — there is no stdio
@@ -739,9 +740,10 @@ state["signals"]    # every number the run measured on the way
 
 `run(query, cfg=None, nodes=None)` is the whole public surface — the CLI ([#39](../../issues/39))
 and every test call that, not the compiled graph, so compilation, the config plumbing and the
-final-state check have one home. Four of the six nodes are stubs until
-[#35](../../issues/35)–[#38](../../issues/38) land; `nodes=` replaces any of them by name, which is
-how the three exits are exercised today and how each node will be tested on its own tomorrow.
+final-state check have one home. The router is real (see [below](#intent-router)); the three nodes
+behind it are stubs until [#36](../../issues/36)–[#38](../../issues/38) land. `nodes=` replaces any
+of them by name, which is how the three exits are exercised today and how each node is tested on
+its own.
 
 **`docs` is one record shape whatever produced it.** A retrieval `Hit` and a tool result both
 become `Evidence(doc_id, text, score, source)` in the dispatch node, so the answer node has a
@@ -786,11 +788,76 @@ An academic advisor can also see what this catalog export cannot -- your transcr
 requirements outside the Gen Eds, and sections as they actually fill.
 ```
 
-**The stubs raise rather than answer.** A stub that returned `intent="course_fact"` or an `answer`
-string would let the graph run end to end today, and #39's smoke report would come out of it: ten
-queries, three exits, a table of numbers, and not one model call or catalog lookup behind any row.
-`build_graph()` still compiles with all four in place — the wiring, the routing and the two exits
-are testable without them — and a `run()` that reaches one raises, naming the issue that fills it.
+**The stubs raise rather than answer.** A stub that returned an `answer` string or
+`evidence_ok=True` would let the graph run end to end today, and #39's smoke report would come out
+of it: ten queries, three exits, a table of numbers, and not one catalog lookup behind any row.
+`build_graph()` still compiles with all three in place — the wiring, the routing, the two exits and
+the router are testable without them — and a `run()` that reaches one raises, naming the issue that
+fills it.
+
+## Intent router
+
+`agent/nodes/route_intent.py` + `agent/prompts.py`: the first node, and the only place a sentence
+becomes a decision. Five labels, a few-shot prompt, and a validator that trusts none of it.
+
+```python
+from agent.nodes.route_intent import route_intent_node
+
+node = route_intent_node(cfg)                          # the real classifier
+node = route_intent_node(cfg, chat=fake)               # anything with .complete() — how it is tested
+node = route_intent_node(cfg, forced="prereq_chain")   # #39's --intent: no model call at all
+```
+
+| label | what it covers | example |
+|---|---|---|
+| `course_fact` | one course, one attribute | "How many credits is CS 374?" |
+| `prereq_chain` | what comes before a course | "What do I need before SE 495?" |
+| `degree_requirement` | progress against a program | "Which Gen Eds do I still need?" |
+| `compare_recommend` | open-ended, several candidates | "Which intro ML course should I take?" |
+| `out_of_scope` | not about this catalog | "What's the weather in Champaign?" |
+
+**The completion is validated, never trusted.** The model's string is compared against the five
+literals and nothing else is accepted: a sentence, a label with a period on the end, an invented
+sixth category all become `out_of_scope` with `signals["intent_unparsed"] = True` and the raw
+string kept in `signals["intent_raw"]`. Free text must never reach the dispatch table — it indexes
+a table by this value — and a classification that could not be read has to be **countable**
+afterwards rather than absorbed.
+
+**The strictness has a price and the price is recorded.** `Course_fact` and `course_fact.` are
+in-scope classifications this parser refuses, and a refused in-scope query reaches the person as
+"outside what I can answer". Lowercasing and stripping punctuation would buy those back and hide
+how often the model ignored the format — which is the number Day 5 needs in order to decide
+whether the prompt or the parser is what should change. So the parser stays exact and `intent_raw`
+keeps what came back.
+
+**The router does not decide what the catalog has.** A question about a course that was never
+offered is still a question *about a course*, and its refusal belongs to the node that looked and
+came back empty — the hand-off exit, not the out-of-scope one. Two of the prompt's four rules say
+so, because "I do not do that" and "I looked and could not find it" are different sentences, and
+only one of them is honest about a missing course.
+
+**An API failure is not a classification.** A 429, a timeout or a cut-off completion propagates.
+Turning those into `out_of_scope` would put a billing problem into #39's report as a routing
+decision, and would mix infrastructure failures into the `intent_unparsed` count.
+
+**`intent_raw is None` means no model was asked.** `forced=` skips the call and writes the label it
+was given, which is what `--intent` is built from; no other path through the node leaves the raw
+signal empty, so a row in #39's report with an empty raw column is a row with no model behind its
+label.
+
+**The prompt is one versioned constant**, assembled in `agent/prompts.py` from the label list in
+`agent/state.py` — a label added to the state with no gloss and no examples fails at import, so
+the prompt and the validator cannot teach different vocabularies. The version is a module constant
+rather than a config key: a chunk template decides what is *in* the index, while a router prompt is
+built per query and thrown away, and hashing it into the config would rename both index keys and
+every report name to record that an example sentence was reworded. A digest test pins the text to
+its version, so editing one without the other fails rather than publishing a second "v1".
+
+The chat client is built on the **first query**, not when the node is built, and `llm` is imported
+there — it reaches `openai` and `OPENAI_API_KEY` through `embedding.py`, and `build_graph()` has to
+stay callable in a checkout with no key. The `llm` config section *is* validated at build time:
+that costs nothing, and a config naming a provider with no client should not survive until the
+first query.
 
 ## Day 1 goal
 

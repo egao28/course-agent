@@ -68,7 +68,7 @@ def test_normalize_code_returns_none_for_what_is_not_a_code(text):
 
 def test_a_sentence_mentioning_a_code_is_not_a_code():
     # The whole string has to be one code: 'CS 374 or ECE 374' names two, and picking one of them
-    # here would be a retrieval decision hiding in a lookup. #35's router extracts the code.
+    # here would be a retrieval decision hiding in a lookup. #36's dispatch extracts the code.
     assert tc.normalize_code("what is cs 374 about") is None
     assert tc.normalize_code("CS 374 or ECE 374") is None
 
