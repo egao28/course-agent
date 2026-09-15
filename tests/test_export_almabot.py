@@ -71,8 +71,16 @@ def by_code(courses) -> dict[str, dict]:
 
 
 @pytest.fixture
-def exported(cfg, redirect_outputs) -> dict:
-    """Run the full export into tmp_path and return the parsed files plus the result dict."""
+def exported(cfg, redirect_outputs, monkeypatch) -> dict:
+    """Run the full export into tmp_path and return the parsed files plus the result dict.
+
+    :func:`ingest.majors.check_coverage` is stubbed out for the run. It asks whether this catalog
+    still offers the courses the hand-encoded degrees require, and a 17-course fixture offers
+    almost none of them by construction -- PHYS 211 is not in it, and that says nothing about the
+    encoding. Whether the real corpus covers those programs is ``tests/test_majors.py``'s question,
+    against ``data/courses.json``.
+    """
+    monkeypatch.setattr(ex, "check_coverage", lambda majors, where: None)
     result = ex.export(cfg)
     return {
         "result": result,
@@ -486,7 +494,8 @@ def test_requirements_shape(courses, cfg):
     req = ex.build_requirements(courses, cfg)
     assert req["term"] == "2026-sp"
     assert len(req["genEd"]) == 13
-    assert req["majors"] == []
+    # #32 filled majors in from ingest/majors.json; tests/test_majors.py is where its shape lives.
+    assert [m["id"] for m in req["majors"]] == ["cs-bs", "statistics-bslas"]
     assert "not present in course-catalog.csv" in req["notes"]["majors"]
     assert req["notes"]["culturalStudies"]
     first = req["genEd"][0]
@@ -609,12 +618,15 @@ def test_summary_reports_description_quality(exported):
     assert "Quantitative Reasoning I" in text
 
 
-def test_cli_runs_the_export_and_prints_stats(cfg, tmp_path, capsys):
+def test_cli_runs_the_export_and_prints_stats(cfg, tmp_path, capsys, monkeypatch):
+    # Stubbed for the same reason the `exported` fixture stubs it: a 17-course catalog.
+    monkeypatch.setattr(ex, "check_coverage", lambda majors, where: None)
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(json.dumps(cfg.to_dict()), encoding="utf-8")  # JSON is valid YAML
     ex.main(["--config", str(cfg_file)])
     out = capsys.readouterr().out
     assert "catalog_sample.csv" in out
     assert "courses                17" in out
+    assert "Computer Science, BS  (2025-2026 catalog)" in out  # the degrees are summarized too
     assert out.count("wrote    ") == 3
     assert str(Path.home()) not in out  # paths go through rel_to_repo()

@@ -1,0 +1,271 @@
+{
+  "catalogYear": "2025-2026",
+  "source": "https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/",
+  "transcribedOn": "2026-09-15",
+  "note": "Hand-transcribed from the program pages named below, one row per row of the catalog's own course lists. Two programs out of the roughly 250 the campus offers: this file makes the degree_requirement intent real, it does not make the agent a degree auditor. The catalog year is the one in force for the 2026-sp catalog export, not the newest edition (2026-2027) -- a student enrolled that spring is audited against the year they are under. Every rule a course list cannot decide (hours, GPA, approved lists, placement) is kind 'advising': reported, never counted.",
+  "majors": [
+    {
+      "id": "cs-bs",
+      "label": "Computer Science, BS",
+      "college": "The Grainger College of Engineering",
+      "source": "https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/engineering/computer-science-bs/",
+      "aliases": [
+        "cs",
+        "cs bs",
+        "cs major",
+        "cs degree",
+        "computer science",
+        "computer science bs",
+        "computer science major",
+        "bs in computer science",
+        "bachelor of science in computer science"
+      ],
+      "groups": [
+        {
+          "id": "gened",
+          "label": "Campus General Education requirements",
+          "group": "General Education",
+          "rule": {"kind": "advising"},
+          "note": "The program follows the campus Gen Ed requirements; required courses cover some of them (PHYS 211 and PHYS 212 for Natural Sciences & Technology, and MATH 220 or MATH 221, MATH 231, MATH 241, PHYS 211, PHYS 212, CS 124, CS 128, CS 225 for Quantitative Reasoning). Ask this tool for 'gened' with the same transcript to audit that half."
+        },
+        {
+          "id": "language",
+          "label": "Language other than English, third semester",
+          "group": "General Education",
+          "rule": {"kind": "advising"},
+          "note": "Completion of the third semester or equivalent of a language other than English, worth 0-15 hours depending on placement. Placement level and transfer credit decide it, and neither is a course code."
+        },
+        {
+          "id": "orientation",
+          "label": "Engineering orientation seminar",
+          "group": "Orientation and Professional Development",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["ENG 100", "ENG 300"]},
+          "note": "ENG 100; external transfer students take ENG 300 instead."
+        },
+        {
+          "id": "ethics",
+          "label": "Ethical and professional issues",
+          "group": "Orientation and Professional Development",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["CS 210", "CS 211"]}
+        },
+        {
+          "id": "calculus-i",
+          "label": "Calculus I",
+          "group": "Foundational Mathematics and Science",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["MATH 221", "MATH 220"]},
+          "note": "MATH 220 may be substituted for MATH 221; 4 of its 5 credit hours count toward the degree."
+        },
+        {
+          "id": "calculus-sequence",
+          "label": "Calculus II and Calculus III",
+          "group": "Foundational Mathematics and Science",
+          "rule": {"kind": "all_of", "courses": ["MATH 231", "MATH 241"]}
+        },
+        {
+          "id": "linear-algebra",
+          "label": "Linear algebra",
+          "group": "Foundational Mathematics and Science",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["MATH 257", "MATH 415", "MATH 416"]}
+        },
+        {
+          "id": "physics",
+          "label": "University physics: mechanics, and electricity & magnetism",
+          "group": "Foundational Mathematics and Science",
+          "rule": {"kind": "all_of", "courses": ["PHYS 211", "PHYS 212"]}
+        },
+        {
+          "id": "science-elective",
+          "label": "Science elective, 3 hours",
+          "group": "Foundational Mathematics and Science",
+          "rule": {"kind": "advising"},
+          "note": "One course from the Natural Science & Technology list beyond those used for General Education, and allowed for credit by The Grainger College of Engineering. ASTR 100, PHYS 101, PHYS 102 and CHEM 101 are excluded. The approved list is not part of this catalog export, so which course qualifies cannot be decided here."
+        },
+        {
+          "id": "cs-core",
+          "label": "Computer science technical core, 35 hours",
+          "group": "Computer Science Technical Core",
+          "rule": {
+            "kind": "all_of",
+            "courses": [
+              "CS 124", "CS 128", "CS 173", "CS 222", "CS 225", "CS 233",
+              "CS 341", "CS 357", "CS 361", "CS 374", "CS 421"
+            ]
+          }
+        },
+        {
+          "id": "technical-electives",
+          "label": "Six technical electives",
+          "group": "Technical Electives",
+          "rule": {
+            "kind": "n_of_matching",
+            "n": 6,
+            "match": {
+              "subjects": ["CS"],
+              "numberMin": 400,
+              "numberMax": 499,
+              "include": ["CS 397"],
+              "exclude": ["CS 400", "CS 401", "CS 402", "CS 403", "CS 421", "CS 491"]
+            }
+          },
+          "note": "Six additional CS courses, chosen from CS 397 and the CS 400-level courses other than CS 400, CS 401, CS 402, CS 403 and CS 491. CS 421 is excluded here as well because the technical core already requires it and a course counts once. Three parts of this requirement are not checked: the 18 cumulative credit hours (a transcript of codes carries no hours), the six-hour cap on CS 397 and CS 499 together, and the CS Academic Office permissions that let a CS 500-level course or one 'CS-like' course in another department count."
+        },
+        {
+          "id": "technical-elective-team-project",
+          "label": "One technical elective from the team project list",
+          "group": "Technical Electives",
+          "rule": {
+            "kind": "n_of",
+            "n": 1,
+            "courses": [
+              "CS 411", "CS 415", "CS 417", "CS 425", "CS 427", "CS 428", "CS 429",
+              "CS 437", "CS 465", "CS 467", "CS 493", "CS 494", "CS 497"
+            ]
+          },
+          "note": "The team project course is one of the six technical electives, not a seventh course. CS 425 counts only in its 4-hour section, which a course code cannot distinguish."
+        },
+        {
+          "id": "technical-elective-focus-area",
+          "label": "Three technical electives from a single focus area",
+          "group": "Technical Electives",
+          "rule": {"kind": "advising"},
+          "note": "Eight focus areas, each a list of CS courses on the program page; the team project course may be one of the three. CS 498 and CS 598 sections may be added to a focus area by department approval, so the lists are not fixed and the choice of area is the student's."
+        },
+        {
+          "id": "free-electives",
+          "label": "Free electives, 24-25 hours",
+          "group": "Free Electives",
+          "rule": {"kind": "advising"},
+          "note": "Whatever course work brings the degree to 128 hours, subject to The Grainger College of Engineering's restrictions on free electives."
+        },
+        {
+          "id": "upper-division-hours",
+          "label": "40 hours of upper-division course work",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "A university requirement, generally 300- and 400-level, drawn from every part of the degree. It is an hour total, and hours are not in this data."
+        },
+        {
+          "id": "technical-gpa",
+          "label": "Technical GPA of at least 2.0",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "Over the CS and MATH courses. Grades are not part of a transcript of course codes."
+        },
+        {
+          "id": "total-hours",
+          "label": "128 hours to graduate",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "The degree total. Counting it needs credit hours for every course the student has taken, including those this one-term catalog does not list."
+        }
+      ]
+    },
+    {
+      "id": "statistics-bslas",
+      "label": "Statistics, BSLAS",
+      "college": "College of Liberal Arts & Sciences",
+      "source": "https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/las/statistics-bslas/",
+      "aliases": [
+        "stat",
+        "stats",
+        "statistics",
+        "statistics bslas",
+        "statistics bs",
+        "statistics major",
+        "stat major",
+        "bs in statistics",
+        "bachelor of science in statistics"
+      ],
+      "groups": [
+        {
+          "id": "gened",
+          "label": "Campus General Education requirements",
+          "group": "General Education",
+          "rule": {"kind": "advising"},
+          "note": "The program follows the campus Gen Ed requirements; required courses cover some of them (MATH 241, and STAT 107 or STAT 200 or STAT 212, for Quantitative Reasoning). Ask this tool for 'gened' with the same transcript to audit that half."
+        },
+        {
+          "id": "language",
+          "label": "Language other than English, fourth semester",
+          "group": "General Education",
+          "rule": {"kind": "advising"},
+          "note": "The fourth semester or equivalent of one language other than English, or the third semester of two different languages, worth 0-20 hours depending on placement."
+        },
+        {
+          "id": "calculus-i",
+          "label": "Calculus I",
+          "group": "Introductory and Preparatory Coursework",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["MATH 221", "MATH 220"]},
+          "note": "The calculus sequence through MATH 241 is 11-12 hours; MATH 220 is the five-hour entry into it."
+        },
+        {
+          "id": "calculus-sequence",
+          "label": "Calculus II and Calculus III",
+          "group": "Introductory and Preparatory Coursework",
+          "rule": {"kind": "all_of", "courses": ["MATH 231", "MATH 241"]}
+        },
+        {
+          "id": "intro-statistics",
+          "label": "Introductory statistics",
+          "group": "Introductory and Preparatory Coursework",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["STAT 107", "STAT 200", "STAT 212"]}
+        },
+        {
+          "id": "linear-algebra",
+          "label": "Linear algebra",
+          "group": "Introductory and Preparatory Coursework",
+          "rule": {"kind": "n_of", "n": 1, "courses": ["MATH 257", "MATH 415", "MATH 416"]}
+        },
+        {
+          "id": "stat-core",
+          "label": "Statistical core course work, 13 hours",
+          "group": "Statistical Core Coursework",
+          "rule": {"kind": "all_of", "courses": ["STAT 400", "STAT 410", "STAT 425", "STAT 426"]}
+        },
+        {
+          "id": "advanced-electives",
+          "label": "Four advanced statistics electives, 12 hours",
+          "group": "Advanced Statistics Electives",
+          "rule": {
+            "kind": "n_of",
+            "n": 4,
+            "courses": [
+              "STAT 385", "STAT 424", "STAT 427", "STAT 428", "STAT 429", "STAT 430",
+              "STAT 431", "STAT 432", "STAT 433", "STAT 434", "STAT 440", "STAT 443",
+              "STAT 447", "STAT 448", "STAT 480", "MATH 444", "MATH 447"
+            ]
+          },
+          "note": "The catalog lists MATH 444 and MATH 447 as one option between them ('MATH 444 or MATH 447'), so a student who took both is credited twice here and should not be: four distinct rows of the list are what the requirement asks for."
+        },
+        {
+          "id": "major-hours",
+          "label": "70-72 hours of major and supporting course work",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "The hour total the course lists above normally come to. Hours are not in this data."
+        },
+        {
+          "id": "residency-hours",
+          "label": "12 hours of 300- and 400-level work in the major on this campus",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "Where a course was taken is not a course code, so this cannot be checked from a transcript of codes."
+        },
+        {
+          "id": "upper-division-hours",
+          "label": "40 hours of upper-division course work",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "A university requirement, generally 300- and 400-level, drawn from every part of the degree."
+        },
+        {
+          "id": "total-hours",
+          "label": "120 hours to graduate",
+          "group": "Graduation Requirements",
+          "rule": {"kind": "advising"},
+          "note": "The degree total. Counting it needs credit hours for every course the student has taken, including those this one-term catalog does not list."
+        }
+      ]
+    }
+  ]
+}
