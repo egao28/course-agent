@@ -15,9 +15,9 @@ node is a one-argument function, which is the only thing LangGraph has to know a
 
 ``agent.graph`` holds the registry (:data:`~agent.graph.NODE_BUILDERS`), wires the six nodes
 together and wraps each one in :func:`~agent.state.check_update`. The router is
-:mod:`agent.nodes.route_intent` and the two fixed exits are :mod:`agent.nodes.exits`; the three
-nodes that are somebody else's issue are stubs in :mod:`agent.nodes.stubs` until #36-#38 replace
-them.
+:mod:`agent.nodes.route_intent`, the dispatcher :mod:`agent.nodes.dispatch` and the two fixed
+exits :mod:`agent.nodes.exits`; the two nodes that are somebody else's issue are stubs in
+:mod:`agent.nodes.stubs` until #37-#38 replace them.
 """
 
 from __future__ import annotations

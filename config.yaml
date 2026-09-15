@@ -42,3 +42,12 @@ llm:
   model: gpt-4o-mini
   temperature: 0              # routing and grounded answering are both deterministic tasks
   max_tokens: 800
+# How the agent gathers evidence (#36). The dispatch table sends a lookup-shaped question to one of
+# the three tools and everything else to retrieve(), and this is the mode it asks for. Hashed like
+# the rest of this file — a report is named after the retrieval that produced it — and it reaches no
+# index key, so switching it orphans nothing.
+agent:
+  # dense | bm25 | hybrid. hybrid is Day 1's tuned pipeline and is what this says once the dense
+  # index exists; it is still empty (#5 is blocked on OpenAI credits), so bm25 is the only mode that
+  # answers today, and a default nothing can run is not a default — it is a crash on query one.
+  retrieval_mode: bm25
