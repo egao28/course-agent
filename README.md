@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -740,10 +740,10 @@ state["signals"]    # every number the run measured on the way
 
 `run(query, cfg=None, nodes=None)` is the whole public surface — the CLI ([#39](../../issues/39))
 and every test call that, not the compiled graph, so compilation, the config plumbing and the
-final-state check have one home. The router, the dispatcher and the evidence gate are real (see
-[below](#intent-router)); the answer node is a stub until [#38](../../issues/38) lands. `nodes=`
-replaces any of them by name, which is how the three exits are exercised today and how each node is
-tested on its own.
+final-state check have one home. All six nodes are real as of [#38](../../issues/38) — the router,
+the dispatcher, the evidence gate and the answer node each have a section below. `nodes=` replaces
+any of them by name, which is how the three exits are exercised with no OpenAI credits and how each
+node is tested on its own.
 
 **`docs` is one record shape whatever produced it.** A retrieval `Hit` and a tool result both
 become `Evidence(doc_id, text, score, source)` in the dispatch node, so the answer node has a
@@ -756,11 +756,11 @@ everything downstream would work except the one field the gate needs.
 run, rather than guessed from which of `answer` / `evidence_ok` / `docs` happen to be set — #39's
 report counts exits, and inference would make that count a guess.
 
-**`signals` has a declared key set.** Seven keys, prefilled with `None`, listed in one place
+**`signals` has a declared key set.** Eight keys, prefilled with `None`, listed in one place
 (`SIGNAL_KEYS`) and enforced: a node that writes an undeclared signal is refused. Day 5 calibrates
 on these across many runs, so the record has to be rectangular — a dict that grows keys ad hoc over
 five days gives it a ragged table. It is also the only state key with a reducer: four nodes each
-write one signal, and without one the last update would erase the rest.
+write their own signals, and without one the last update would erase the rest.
 
 **No node reaches into another's state key.** `NODE_WRITES` says who owns what — routing writes
 `intent`, dispatch writes `docs`, the gate writes `evidence_ok`, the three exits write `answer` and
@@ -788,11 +788,11 @@ An academic advisor can also see what this catalog export cannot -- your transcr
 requirements outside the Gen Eds, and sections as they actually fill.
 ```
 
-**The stub raises rather than answers.** A stub that returned an `answer` string would let the
-graph run end to end today, and #39's smoke report would come out of it: ten queries, three exits, a
-table of numbers, and not one model call behind any row. `build_graph()` still compiles with it in
-place — the wiring, the routing, the two exits, the router, the dispatcher and the gate are all
-testable without it — and a `run()` that reaches it raises, naming the issue that fills it.
+**Until #38 the answer node was a stub that raised**, rather than one that returned a plausible
+`answer` string: a stand-in that answered would have let the graph run end to end and #39's smoke
+report come out of it — ten queries, three exits, a table of numbers, and not one model call behind
+any row. The rule outlived the stub, and it is why the two refusal exits are fixed text and why a
+draft whose citations do not check out is discarded rather than shown with a caveat.
 
 ## Intent router
 
@@ -1048,6 +1048,138 @@ out_of_scope    None         —          —          —                 Who i
 Five answers (four of them exact lookups that never reached a threshold), four hand-offs, one out
 of scope. Adding the section moved the full hash (`51939bdf` → `e0d6ff30`) and left `chunk_key`
 `05d00726`, `dense_key` `094143d8` and `bm25_key` `877a6610` exactly where they were.
+
+## Answer node
+
+`agent/nodes/answer.py` + the second prompt in `agent/prompts.py` ([#38](../../issues/38)): the
+last node, and the only one that puts a model's words in front of a person.
+
+```python
+from agent.nodes.answer import answer_node, verify_citations
+
+node = answer_node(cfg)              # the real client, built on the first query
+node = answer_node(cfg, chat=fake)   # anything with .complete() — how it is tested
+```
+
+Three constraints, which are the whole reason it is a module and not one call:
+
+1. **Answer only from the evidence.** The model knows these courses from pretraining, all of it
+   from some other year of the catalog and none of it checkable against this export. The evidence
+   blocks are the only course data in the message, and there is no second turn and no tool.
+2. **If the evidence does not contain it, say so** — as a normal answer, "the catalog entry for
+   CS 374 doesn't list who teaches it", not an apology and not a value that is probably right.
+3. **Cite `doc_id`, then verify the citation.** Every id the answer cites must be a `doc_id` this
+   run actually retrieved. One that is not discards the whole answer for the hand-off exit: a model
+   that invented a citation invented the claim behind it, and an *unchecked* citation is worse than
+   none, because it looks like verification.
+
+The evidence is rendered numbered, each block headed by its own id, and neither `score` nor
+`source` reaches the prompt — a score means nothing outside the retriever that produced it, and a
+model shown one will weigh the blocks by it. Whether there is enough here was already decided, by
+the gate:
+
+```
+Question: Which intro machine learning course should I take?
+
+Evidence:
+
+Evidence 1 of 5
+doc_id: 2026-sp:IS-557
+---
+IS 557 — Applied Machine Learning: Team Projects
+Credits: 4
+Term: 2026-sp
+Description: A comprehensive exploration of the applied machine learning workflow …
+Prerequisites: Students should have demonstrated ability, and must have taken one of …
+
+Evidence 2 of 5
+doc_id: 2026-sp:IS-327
+---
+…
+
+Answer:
+```
+
+**The citation check is a set lookup, not a judgement.** A bracketed id matches a block when the
+two strings are equal after collapsing whitespace and folding case, and nothing looser:
+
+| the answer says | `docs` holds | outcome |
+|---|---|---|
+| `[CS 374]`, `[cs 374]` | `CS 374` | verified — an id is an identifier, and case is not a claim |
+| `[2026-sp:CS-374]` | `2026-sp:CS-374` | verified |
+| `[Computer Science, BS]` | `Computer Science, BS` | verified — a bracket is matched **whole** before it is split on commas |
+| `[CS 374, CS 225]` | both | two citations — the split is the fallback, not the rule |
+| `[CS 374]` | `2026-sp:CS-374` | **unknown** — never resolved by containment |
+| `[1]` | (the first block) | **unknown** — the prompt says cite the id, not the number |
+| `[CS 999]` | anything else | **unknown** — the fabrication the node exists to catch |
+
+Resolving `[CS 374]` against a chunk id that contains it is the tempting rule and the wrong one: an
+answer about CS 225 that cites the CS 374 chunk would pass it, with a reassuring bracket after the
+wrong claim. The near misses strictness costs are recorded as themselves in
+`signals["citations_unknown"]`, so Day 5 can count them and decide whether the prompt or the parser
+is what should change — the same argument as the router's exact label match, one node later.
+
+**Two ways a draft is discarded, and they are distinguishable afterwards:**
+
+| `citations_verified` | `citations_unknown` | exit | what happened |
+|---|---|---|---|
+| `["CS 374"]` | `None` | `answer` | every citation checks out; the draft is the answer |
+| `["CS 374"]` | `["CS 999"]` | `refuse_handoff` | one invented citation; the whole draft goes |
+| `[]` | `None` | `refuse_handoff` | it cited nothing at all — nothing invented, nothing traceable |
+| `None` | `None` | (any) | this node never ran |
+
+The uncited case is not pedantry: rule 4 of the prompt asks even "the catalog does not say" to cite
+the block it looked in, so every answer the node can accept is able to carry a citation, and a
+draft with none is not a modest answer but an untraceable one. Either way **the discarded draft is
+dropped, not shown with a warning**, and this node writes no refusal of its own — it claims the
+hand-off exit and `agent/nodes/exits.py` mints the sentence, so the message a person reads is
+written in one place however the run got there:
+
+```
+Where I stopped: I drafted an answer, but it cited CS 999, which is not in the evidence I
+retrieved -- a citation I cannot check is not one I will pass on, so I dropped the answer
+```
+
+**The prompt is a second versioned constant** (`ANSWER_PROMPT_VERSION`, digest-pinned like the
+router's), and there is **one** of it rather than one per intent: the four intents differ in what
+their evidence *is*, not in what is to be done with it, and four variants would be four texts that
+drift and four things Day 4 has to ablate. It names no term either — the term is in the blocks
+themselves, off the catalog record.
+
+The ten handwritten queries through the whole graph — real dispatch, real gate, real answer node,
+the router forced to each label (what #39's `--intent` drives), over the live corpus and the live
+BM25 index. The **model is a stand-in**: it answers with the first line of block 1 and cites that
+block's id, so the wording is canned and everything around it — the prompt sent, the citation
+written, the verdict on it — is real:
+
+```
+exit            ev_ok  top score    thresh  tool_error         cited              query
+answer          True           —         —  —                  MATH 241           How many credits is MATH 241?
+answer          True           —         —  —                  CS 374             What do I need before CS 374?
+answer          True           —         —  —                  General Education  Which Gen Eds do I still need if I have taken RHET 105 and MATH 241?
+answer          True     18.2746      15.0  —                  2026-sp:IS-557     Which intro machine learning course should I take?
+refuse_handoff  False    11.7914      15.0  —                  —                  What does the algorithms course cover?
+answer          True           —         —  —                  Statistics, BSLAS  What is left for the Statistics major if I have taken STAT 200?
+refuse_handoff  False          —         —  no_course_code     —                  What are the prerequisites?
+refuse_handoff  False          —         —  course_not_found   —                  How many credits is CS 999?
+refuse_handoff  False    11.0561      15.0  —                  —                  Is there a course about quantum origami?
+out_of_scope    None           —         —  —                  —                  Who is the head football coach at Illinois?
+```
+
+Five answers, four hand-offs, one out of scope — and five model calls, one per run that got past
+the gate. All three `doc_id` shapes this repo produces are cited and verified there: a course code
+(`MATH 241`), a chunk id (`2026-sp:IS-557`) and a program label with a comma in it
+(`Statistics, BSLAS`). Feeding the same first row a fabricated `[CS 999]` flips it to
+`refuse_handoff` with `evidence_ok` still `True` — which is exactly how #39's table will tell a
+citation downgrade from a gate refusal.
+
+Measured for #39's cost line, on `gpt-4o-mini`'s tokenizer: the answer system prompt is 470 tokens
+and the router's 449, and the five answering rows send 5,314 input tokens in total (164 for the
+MATH 241 lookup, 1,341 for the five-chunk retrieval row) — so the whole ten-query run is about 10k
+input tokens plus at most five completions.
+
+No config value moved: the prompt version is a module constant, so the hash is still `e0d6ff30`
+and `chunk_key` / `dense_key` / `bm25_key` are untouched.
 
 ## Day 1 goal
 

@@ -93,7 +93,12 @@ SIGNAL_KEYS: tuple[str, ...] = (
     # #37, the gate: the number it compared and the number it compared against.
     "retrieval_top_score",
     "evidence_threshold",
-    # #38, the answer: doc_ids the answer cited that were not in `docs`.
+    # #38, the answer: the doc_ids the answer cited and this run can show, and the ones it cited
+    # that were never in `docs`. Both, because the pair is what tells the three outcomes apart: a
+    # verified list with no unknowns is an answer that stood, an unknown id is a fabrication that
+    # discarded it, and an empty verified list with no unknowns is a draft that cited nothing at
+    # all -- which is also discarded. `citations_verified is None` means this node never ran.
+    "citations_verified",
     "citations_unknown",
 )
 
