@@ -4,8 +4,8 @@
 13 campus categories checked against a transcript, and neither the retriever nor the catalog lookup
 can produce it. This module is that check, over the rules ``data/requirements.json`` carries.
 
-Plain functions over Pydantic models, like the other two tools: #33 registers them with FastMCP,
-#36 imports :func:`check_requirement` and calls it in-process.
+Plain functions over Pydantic models, like the other two tools: ``agent/mcp_server.py`` registers
+them with FastMCP (#33), #36 imports :func:`check_requirement` and calls it in-process.
 
 **What this data supports, and what it does not.** ``requirements.json`` holds two keys that
 matter here. ``genEd`` is the 13 campus categories, each a declarative rule against a course's

@@ -11,8 +11,8 @@ same graph for a diagram. A tool that answers a question in prose has to be stri
 diagram in three places -- the depth cap, the layering, and the boolean structure of the
 requirement text -- and each of those is a decision below.
 
-Plain functions over Pydantic models, like ``agent/tools/courses.py``: #33 registers them with
-FastMCP, #36 imports :func:`get_prereq_chain` and calls it in-process.
+Plain functions over Pydantic models, like ``agent/tools/courses.py``: ``agent/mcp_server.py``
+registers them with FastMCP (#33), #36 imports :func:`get_prereq_chain` and calls it in-process.
 
 **Every walk carries a visited set, because the graph is not acyclic.** ``data/README.md`` said to
 build the DAG from ``prereqs`` only, since corequisites are mutual often enough that folding them

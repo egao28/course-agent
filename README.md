@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # tools/ (get_course, get_prereq_chain, check_requirement …), graph.py   (Day 2)
+├── agent/         # tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, graph.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -527,9 +527,9 @@ cannot find, and nothing would report the divergence.
 The whole argument has to be one code: `"CS 374 or ECE 374"` and `"what is cs 374 about"` are both
 `found=False`. Pulling a code out of a sentence is the router's job ([#35](../../issues/35)).
 
-Both models are Pydantic and `extra="forbid"`: [#33](../../issues/33) registers these functions with
-FastMCP and publishes the schemas, while [#36](../../issues/36) imports `get_course` and calls it
-in-process — there is no stdio subprocess between the graph and its own tools.
+Both models are Pydantic and `extra="forbid"`: the [MCP server](#mcp-server) publishes the schemas,
+while [#36](../../issues/36) imports `get_course` and calls it in-process — there is no stdio
+subprocess between the graph and its own tools.
 
 > `CourseDetail.credits` is provisional. A record on this branch carries `credits: 4.0`; open
 > [#25](../../issues/25) replaces it with `creditsRaw` / `creditsMin` / `creditsMax`, because 1,415
@@ -661,6 +661,60 @@ Reasoning I" about a student who has it, which is the one error the reader canno
 listed in the field *and* in `message`. Whether a code is in the catalog is decided by `get_course`,
 so the three tools cannot disagree about it.
 
+
+## MCP server
+
+`agent/mcp_server.py` publishes the three tools above to any MCP client — Claude Desktop, another
+agent, a shell script — over stdio, as `FastMCP("course-tools")` with one `@mcp.tool` per function:
+
+```bash
+uv run python -m agent.mcp_server            # serve stdio
+uv run python -m agent.mcp_server --list     # print what a client sees, then exit
+```
+
+```
+course-tools serves 3 tools
+
+get_course
+  Look up one course in the University of Illinois course catalog by its code.
+  …
+  arguments:
+    course_id (string, required) -- A course code: 'CS 374', 'cs 374' and 'CS374' all name the same course.
+  returns: found, code, name, credits, term, desc, attrs, prereq_raw, section_count, message
+```
+
+**The tool logic lives in plain functions. This module registers them. The graph imports the
+functions directly.** A tool call from a LangGraph node ([#36](../../issues/36)) is an ordinary
+Python call: no subprocess, no stdio framing, no event loop threaded through the graph, and no
+second failure mode when the transport hiccups. Sending the graph to its own tools over MCP would
+buy nothing — the same three functions answer either way — and would cost a process boundary on
+every node. The server is the *external* surface, useful on its own; it is not the graph's
+transport. Revisit only if a tool ends up somewhere the graph cannot import.
+
+**The Pydantic models are the contract for both callers.** A field added to `CourseDetail` for the
+graph shows up in the published output schema with no edit here, and the *input* schemas are built
+out of the query models' own field objects — `Annotated[str, CourseQuery.model_fields["course_id"]]`
+— so a description, a default, and a constraint like `max_depth >= 1` each have exactly one source.
+`tests/test_mcp_server.py` compares every served schema against the model it came from, which is
+what fails when a field is added to a model and not to a wrapper.
+
+**The docstring under each `@mcp.tool` is the tool description a client reads**, and it is what
+decides whether a model picks the right tool, so those three are written for a model rather than for
+a maintainer: what the tool answers, what belongs in each argument, when to call a different one,
+and what `found=false` / `supported=false` mean. The reasoning behind each tool stays in
+`agent/tools/`.
+
+**No auth, no HTTP mount, no `OPENAI_API_KEY`.** `bloom-mcp` needs the first two because it is
+deployed behind a gateway; this is a local stdio server over a published course catalog, and every
+tool is read-only (`readOnlyHint`, so a client need not prompt before a call). The three tools read
+committed JSON and never embed, classify, or generate — the server starts with no key, no `.env`
+and no index built, and nothing it imports pulls in `openai` or `chromadb`.
+
+Verified over a real stdio client, not only in-memory: 3 tools listed, `get_course("cs 374")` →
+`CS 374`, 4.0 hours, and `get_prereq_chain("SE 495")` → 5 levels with `cycle_detected=true`. The
+in-memory equivalent runs on every commit — `tests/test_mcp_server.py` lists the tools through a
+real `fastmcp.Client` and asserts each call returns the same dict the Python call does, so a schema
+that will not generate or a model that will not serialize fails in CI rather than in a client.
 
 ## Day 1 goal
 
