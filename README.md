@@ -36,8 +36,8 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
-├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
+├── eval/          # datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -492,6 +492,11 @@ one when a completion arrives with no answer in it: no choices, an empty or refu
 reply cut off at `max_tokens`. The last matters most for the answer node — a truncated answer keeps
 its citation and loses the claim that citation was supporting, which is the one failure a
 post-generation citation check cannot see.
+
+`llm.StandInChat` is the one canned client that ships with the module: it answers with the first
+line of the evidence it was handed and cites that block's `doc_id`, which is what lets the whole
+graph — prompt, citation check, exit — run end to end with nothing behind it. It is reachable only
+through [`--fake-model`](#command-line), and it names itself `stand-in` everywhere it is printed.
 
 The section is part of the full config hash and reaches neither index key, so adding it renamed the
 reports (`7045a614` → `ade2f799`) and left the dense collection (`094143d8`) and the BM25 pickle
@@ -1181,6 +1186,116 @@ input tokens plus at most five completions.
 No config value moved: the prompt version is a module constant, so the hash is still `e0d6ff30`
 and `chunk_key` / `dense_key` / `bm25_key` are untouched.
 
+## Command line
+
+`python -m agent` is the agent as a person uses it: one question in, one of three exits out, and
+the whole run printed.
+
+```bash
+uv run --env-file .env python -m agent "What do I need before CS 374?"
+uv run python -m agent "Which Gen Eds do I still need if I have taken RHET 105 and MATH 241?" \
+  --intent degree_requirement --fake-model
+```
+
+```
+query     Which Gen Eds do I still need if I have taken RHET 105 and MATH 241?
+intent    degree_requirement forced -- no model was asked
+evidence  check_requirement, 1 block
+
+  #  score  doc_id             first line
+  1      —  General Education  General Education — requirement audit
+
+gate      passed -- an exact catalog lookup carries no score, so no threshold was consulted
+exit      answer             cited General Education
+answer    stand-in -- canned text, no model was called (the citation check is real)
+
+General Education — requirement audit [General Education]
+
+(config e0d6ff30, prompts router v1 / answer v1, 317 ms including any index load)
+```
+
+| flag | what it does |
+| --- | --- |
+| `--intent` | skip the classifier and force one of the five labels ([#35](../../issues/35)). Everything downstream still runs — the dispatch table, the three tools, the retriever, the gate — and `signals["intent_raw"]` stays empty, which is what the trace prints as "no model was asked". |
+| `--fake-model` | answer with `llm.StandInChat`: it replies with the first line of the first evidence block and cites that block's `doc_id`. Requires `--intent`, because a stand-in cannot classify. |
+| `--config` | a config file other than `config.yaml`. |
+
+**It prints a trace, not an answer.** Which label was chosen, which row of the dispatch table ran,
+what the gate compared and which exit was taken are the things that go wrong; the answer alone
+shows none of them, and on the two refusal exits it is fixed text that reads the same however the
+run got there. `agent/trace.py` renders it from the final state and nothing else, so the smoke
+report below can print the same facts per query without a second formatter to drift.
+
+**`--fake-model` is loud everywhere it touches.** The client names itself `stand-in` rather than
+the configured model, the trace says the text is canned, and the report says so in its header, in
+a section of its own and beside every answer. What it buys is that the prompt, the citation parse,
+the check against `docs` and the exit the node claims are all real, which is the most a run can
+honestly show with no credits behind it. What it does not buy is any evidence about *wording* —
+whether a real model stays inside its evidence is the one thing a stand-in cannot demonstrate.
+
+## Day 2 smoke report
+
+`eval/scripts/day2_smoke.py` runs the ten handwritten queries in
+`eval/datasets/day2_queries.jsonl` end to end and writes
+[`report/day2_smoke_e0d6ff30.md`](report/day2_smoke_e0d6ff30.md):
+
+```bash
+uv run python -m eval.scripts.day2_smoke --fake-model      # what can run today
+uv run --env-file .env python -m eval.scripts.day2_smoke   # once the account has credits
+```
+
+```
+config hash e0d6ff30  (mode bm25)
+queries                10  (eval/datasets/day2_queries.jsonl)
+answers written by     a stand-in -- no model was called
+exits                  answer 4, refuse_handoff 5, out_of_scope 1
+agreement              intent 10/10 (forced, so not the router's), exit 9/10
+wrote                  report/day2_smoke_e0d6ff30.md  (17 KB)
+```
+
+Each row is `{query, expected_intent, expected_exit, note}`: all five intents are covered, and all
+three exits are expected by at least one row. The set is **handwritten, not sampled** — it exists
+to prove the wiring, and Day 4's ablation set is a different artifact with a different job.
+
+| exit | expected | actual |
+| --- | --- | --- |
+| `answer` | 5 | 4 |
+| `refuse_handoff` | 4 | 5 |
+| `out_of_scope` | 1 | 1 |
+
+Four of the five refusals are the ones the set was written to force: a prerequisite question that
+names no course (`no_course_code`), a course the 2026-sp export does not carry (`CS 428`,
+`course_not_found`), a degree nobody transcribed (`no_program`), and a topical query whose best
+BM25 hit is a real course about something else (11.06 against a threshold of 15.0).
+
+**`expected_intent` and `expected_exit` are what a row should do, not what it does today**, so the
+fifth refusal is a *disagreement*, recorded as one in the report rather than repaired in the
+dataset: "What does the algorithms course cover?" is a `course_fact` with no code, so it retrieves,
+and on the BM25 half of the pipeline the top hit is ECON 300 at 11.79 — a refusal is the right
+behaviour for that evidence, and the row stays as written until the dense index exists to change
+it. One other row has already outlived its issue: #39 wrote the major-requirement query against
+`majors: []` and [#31](../../issues/31)'s `unsupported` refusal, and since [#32](../../issues/32)
+transcribed two degrees it refuses one step earlier, in the dispatch node, with `no_program`.
+
+**The acceptance is a check, not a sentence in a report.** Day 2's milestone is that all three
+exits fire; the runner writes the report and then exits non-zero if any of the three is missing,
+so a regression is a failed command and not a table nobody re-read.
+
+**What this run does not measure**, and the report says both in its own words:
+
+- **no model was called anywhere in it.** Every row's label is forced from `expected_intent`, so
+  the intent columns agree by construction and say nothing about the router; every answer is the
+  stand-in's. `intent_raw` is empty on all ten rows, which is the marker that says so.
+- **the dense index is still empty** ([#5](../../issues/5) is blocked on the same credits), so
+  `agent.retrieval_mode` is `bm25` and the hybrid path is plumbing-verified, not result-verified —
+  the caveat [#9](../../issues/9)'s Day 1 report carries too.
+
+Re-running it against a real model is the **last item of Day 2**, not a Day 3 task: the same
+command without `--fake-model` rewrites the same file, and the caveats above are generated from
+the run rather than pasted in, so they go away when the thing they warn about does. The report
+carries no timestamp and no latency, so a re-run that changed nothing rewrites a byte-identical
+file and a diff under `report/` is a change in behaviour.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
@@ -1195,3 +1310,19 @@ retrieve("machine learning courses", mode="hybrid")   # mode ∈ {dense, bm25, h
 - Acceptance: hand-check top-5 for 5 queries
 
 Progress is tracked in GitHub Issues (milestone: Day 1).
+
+## Day 2 goal
+
+One message in, one of three exits out:
+
+```python
+from agent.graph import run
+run("What do I need before CS 374?")["exit"]   # 'answer' | 'refuse_handoff' | 'out_of_scope'
+```
+
+- Five intents, a dispatch table over three tools and `retrieve()`, a threshold on the evidence,
+  and an answer whose citations are verified before anyone reads it
+- The same three tools served over MCP — the external surface, not the graph's transport
+- Acceptance: ten handwritten queries from the command line, all three exits, one report
+
+Progress is tracked in GitHub Issues (milestone: Day 2).

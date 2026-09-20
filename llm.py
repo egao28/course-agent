@@ -24,6 +24,12 @@ replaces the SDK object underneath :class:`OpenAIChat` with a stub. Prompt assem
 validation and the citation check are therefore all testable with no network and no
 ``OPENAI_API_KEY``; the live run is the last step of Day 2, not a prerequisite for any of it.
 
+:class:`StandInChat`, at the end of this file, is the one canned client that ships: it answers
+with the first line of the evidence it was handed and cites that block's id, so that Day 2's smoke
+report can be produced end to end before there are credits. It is not a model, it is reachable
+only through an explicit ``--fake-model``, and it calls itself ``stand-in`` wherever it is printed
+-- a report that read as though a model had been in the loop would be worse than no report.
+
 :meth:`OpenAIChat.complete` returns a plain ``str`` rather than a response object precisely so that
 such a fake is three lines long. Nothing here counts tokens: an embedding run bills per corpus and
 is worth a cost line, while a chat run bills per query and the usage page is the honest source.
@@ -31,6 +37,7 @@ is worth a cost line, while a chat run bills per query and the usage page is the
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -190,3 +197,51 @@ def make_chat(cfg: Mapping[str, Any], client: Any | None = None) -> Chat:
     # Unreachable through check_llm_config: here so that adding a PROVIDERS entry without adding a
     # client for it fails by name instead of quietly returning an OpenAI one.
     raise ValueError(f"llm.provider {section['provider']!r} has no client in llm.py")
+
+
+# --- the stand-in ---------------------------------------------------------------------------------
+
+
+#: What :class:`StandInChat` reads out of an answer prompt: the first evidence block's ``doc_id``
+#: and the first line of its text. The shape is :data:`agent.prompts.EVIDENCE_TEMPLATE`'s, matched
+#: here rather than imported -- ``agent`` imports this module, and the dependency runs one way
+#: only -- and ``tests/test_llm.py`` renders a real prompt through it, so the two cannot drift
+#: without failing.
+STANDIN_BLOCK_RE = re.compile(r"^doc_id: (?P<doc_id>.+)\n-{3}\n(?P<line>.+)$", re.MULTILINE)
+
+
+class StandInChat:
+    """Not a model: the canned completion that lets a run finish while the account has no credits.
+
+    It answers with the first line of the first evidence block and cites that block's ``doc_id``,
+    so everything around the words is real -- the prompt #38 assembled, the citation parse, the
+    verification against ``docs``, the exit the node claims -- and only the words are canned. That
+    is the most a run can honestly demonstrate with nothing behind it, and it is what
+    ``--fake-model`` puts behind the answer node in ``python -m agent`` and in Day 2's smoke run.
+
+    **It cannot classify, and refuses rather than guessing.** A prompt with no evidence block in it
+    is the router's (#35), and a stand-in that returned a label there would be a routing decision
+    nobody made -- reported in #39's table beside labels a model did produce. Force the label with
+    ``--intent`` instead; #35 then records ``intent_raw = None``, which is how a forced row stays
+    visible as one.
+
+    **Nothing it produces may be reported as a model's work.** ``model`` says ``stand-in`` rather
+    than naming the configured model, the trace prints it on every run, and the smoke report says
+    it in its header and beside every answer -- a report that reads as though a model was in the
+    loop when it was not is worse than no report.
+    """
+
+    #: What the trace and the report print as the source of the answer. Deliberately not the
+    #: configured model name: a stand-in run must never be mistaken for a run of ``gpt-4o-mini``.
+    model = "stand-in"
+
+    def complete(self, prompt: str, *, system: str | None = None) -> str:
+        """The first evidence block's opening line, with that block's id cited after it."""
+        match = STANDIN_BLOCK_RE.search(prompt)
+        if match is None:
+            raise ValueError(
+                "a stand-in has nothing to answer with: it quotes the evidence in the prompt, and "
+                "this prompt carries none -- a classification (#35) is not something it can fake, "
+                "so force the label with --intent or put a real client behind the router"
+            )
+        return f"{match['line'].strip()} [{match['doc_id'].strip()}]"

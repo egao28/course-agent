@@ -276,3 +276,41 @@ def test_both_clients_satisfy_the_same_caller():
     canned = CannedChat("compare_recommend")
     query = "Which intro ML course should I take?"
     assert classify(over_the_sdk, query) == classify(canned, query)
+
+
+# --- the stand-in ---------------------------------------------------------------------------------
+
+
+def test_the_stand_in_quotes_the_evidence_it_was_given_and_cites_it():
+    # Over a prompt the answer node really assembles, and through the citation check that node
+    # really runs: the pair is what makes a stand-in run worth reporting at all.
+    from agent.nodes.answer import verify_citations
+    from agent.prompts import answer_user_prompt
+    from agent.state import Evidence
+
+    docs = [
+        Evidence("CS 374", "CS 374 — Algorithms\n4 hours.", None, "get_course"),
+        Evidence("CS 225", "CS 225 — Data Structures", None, "get_course"),
+    ]
+    draft = llm.StandInChat().complete(answer_user_prompt("How many credits is CS 374?", docs))
+
+    assert draft == "CS 374 — Algorithms [CS 374]"
+    assert verify_citations(draft, docs) == (["CS 374"], [])
+
+
+def test_the_stand_in_refuses_to_classify_rather_than_inventing_a_label():
+    # A router prompt carries no evidence block. A label from here would be a routing decision
+    # nobody made, reported beside labels a model did produce.
+    from agent.prompts import ROUTER_SYSTEM_PROMPT, router_user_prompt
+
+    with pytest.raises(ValueError, match="--intent"):
+        llm.StandInChat().complete(
+            router_user_prompt("How many credits is CS 374?"), system=ROUTER_SYSTEM_PROMPT
+        )
+
+
+def test_the_stand_in_does_not_answer_to_the_configured_model_name():
+    # It is printed on every trace and in every report row; naming itself `gpt-4o-mini` is the one
+    # way a canned run could be mistaken for a real one.
+    assert llm.StandInChat().model == "stand-in"
+    assert llm.StandInChat.model != BASE["llm"]["model"]
