@@ -122,20 +122,50 @@ Prerequisites: One of CS 173, MATH 213; CS 225.
 Degree Attributes: None
 ```
 
-The requirements block appears twice there: the catalog runs it to the end of the description, so
-`prereqRaw` is a suffix of `desc` — true of 2,732 courses, and what `v1` was specified to render.
-Changing it is a template change, measured in #15 rather than baked into the baseline. The last
-line is labelled the way the catalog labels the column, *not* "Gen Ed": it also carries non-Gen-Ed
-attributes ("Global Classroom course."), so the authoritative Gen Ed answer is `metadata.gened_ids`,
-computed from the rules in `requirements.json`.
+That is template `v1`, the default, and the requirements block is in it twice: the catalog runs
+the block to the end of the description, so `prereqRaw` is a suffix of `desc`. The last line is
+labelled the way the catalog labels the column, *not* "Gen Ed" — it also carries non-Gen-Ed
+attributes ("Global Classroom course."), so the authoritative Gen Ed answer is
+`metadata.gened_ids`, computed from the rules in `requirements.json`.
 
 The wording of that text is a retrieval parameter, not a detail: it is what gets embedded and
-BM25-tokenized. So it is built in `render_chunk(course, template_version)` and nowhere else, keyed
-by `chunk.template_version` in `config.yaml`. A template ablation adds a `v2` renderer beside `v1`,
-flips that one value, and gets fresh index names for free — the version is part of the config hash.
-`chunk.fields` must list exactly what the chosen template renders; the build refuses to run
-otherwise, so the hash can never describe a corpus that was not built. It also refuses to write a
-chunk over the 8191-token limit, rather than letting the embedding call discover it mid-batch.
+BM25-tokenized. So it is built in `render_chunk(course, template_version, corpus)` and nowhere
+else, keyed by `chunk.template_version` in `config.yaml`.
+
+### Templates
+
+Two ship. Which one retrieves better is a Day 4 measurement, not a decision baked into the
+baseline, so `v1` renders the catalog fields exactly as #4 specified them, and `v2` makes the two
+changes #4 left out:
+
+| | `v1` (default) | `v2` |
+|---|---|---|
+| The requirements block, which `v1` renders twice (2,732 courses) | as specified | cut from the `Description:` line, label included, and kept once under `Prerequisites:` |
+| A cross-reference-only `desc` — `"Same as HIST 283. See HIST 283."` and nothing else (497 courses, 11% of the corpus) | as written, so neither retriever has topical text to match | the `See` clause is followed and the target's description added on a `Description of HIST 283:` line of its own — 496 of the 497 resolve |
+
+```
+                    v1                v2
+total tokens        522,658           513,445      −50,222 de-duplicated
+p50 / p95 / max     111 / 202 / 523   110 / 182 / 446   +41,009 inherited
+chunk_key           05d00726          bca89eb0
+```
+
+Switching is one line — `chunk.template_version: v2` — then re-run the chunk build and the index
+builds, which pick up new names from the moved `chunk_key`. Nothing else in the `chunk` section
+moves: both templates read the same seven fields, and `chunk.fields` must list exactly what the
+chosen template renders (the build refuses to run otherwise, so the hash can never describe a
+corpus that was not built). The build also refuses to write a chunk over the 8191-token limit,
+rather than letting the embedding call discover it mid-batch.
+
+`v2` keeps the `Same as ...` sentence it resolved: it is the only place a course's sibling codes
+appear (`AAS 357` lists four), so following the reference adds a line instead of replacing one.
+The borrowed text is labelled with the course it came from, and has that course's requirements
+block stripped as well — 274 of the sources have one, and it describes the source, not the course
+doing the borrowing, whose own `metadata.prereq_codes` is empty. Two things `v2` is expected to
+cost, both for Day 4 to weigh against the recall it buys: the 496 resolved courses and their 351
+sources are 847 chunks whose topical text now appears more than once (up to 8 at a time — `FR 418`
+is quoted by seven), and an inherited description is the *source's* answer to "what is this course
+about", which is only as true as the catalog's claim that the two are the same course.
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
 credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
