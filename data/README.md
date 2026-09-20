@@ -66,6 +66,15 @@ The 13 campus Gen Ed categories as declarative rules: a course matches when its 
 **any** of `match.any` and **none** of `match.none`. `courseCount` is how many courses in this
 export match, derived in the same run.
 
+**Sub-category rules match on the `- ` separator**, not on the bare label: the catalog writes a
+sub-category as `"<group> - <name>"` (`"Social & Beh Sci - Soc Sci course."`), and the bare labels
+`gened.ts` tests are not safe substrings of that shape — `"Beh Sci"` also occurs inside the *group*
+name `Social & Beh Sci`, so `socbeh` used to claim all 118 Soc Sci courses on top of its own 24
+(#14). Anchoring is what keeps the 13 rules disjoint; it left the other 12 categories' membership
+unchanged, and it made the second spelling `gened.ts` ORs into `cultwest` (`"Western course"`)
+redundant, since that string only ever occurs as the tail of `"Cultural Studies - Western course"`.
+`almabot-web/src/lib/gened.ts` still carries the unanchored rules.
+
 `majors` is an empty placeholder: major and degree requirements are not in `course-catalog.csv`,
 which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
 pages, or a department plan).
@@ -88,8 +97,9 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` — readable in a ranked list, and term-scoped so a second term can
 join the same collection without colliding. `text` is rendered by `render_chunk()` alone, under the
-template named by `chunk.template_version`; see [the chunking section of the top-level
-README](../README.md#chunking). `prereq_codes` is the **unfiltered** list, so a reference to a
+template named by `chunk.template_version` (`v1` renders the catalog fields as they stand, `v2`
+de-duplicates the requirements block and follows cross-references); see [the chunking section of
+the top-level README](../README.md#templates). `prereq_codes` is the **unfiltered** list, so a reference to a
 course not offered this term stays visible in metadata even though `prereqs.json` drops it.
 
 Neither file is committed, unlike the three above: they are rebuilt from those by one command with
@@ -156,22 +166,19 @@ Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every 
 
 - **497 descriptions are cross-references only** (`"Same as HIST 200. See HIST 200."`). They carry
   no topical text, so both retrievers will rank them poorly. Template `v1` renders them as they
-  are; following the reference is #15.
+  are; `v2` follows the `See` clause and borrows the target's description, which resolves 496 of
+  the 497 — the one that does not is `BADM 205`, pointing at `GGIS 205`, not offered this term.
+  Neither template can fix the underlying export: `prereqCodes`, `credits` and `attrs` of a
+  cross-listed course are still whatever the catalog filed under *its* code, not the target's.
 - **1 course has an empty description** (`CWL 593`).
 - **779 of 2,865 prerequisite references dangle** — a course mentioned in prerequisite text that is
   not offered in 2026-sp. They stay in `courses.json:prereqCodes` and are dropped from
   `prereqs.json`.
 - **Only 572 of 4,502 courses carry any `Degree Attributes`**, so Gen Ed coverage is sparse by
   nature, not by parsing loss.
-- **`socbeh` over-matches.** The catalog writes both social-science categories under one prefix,
-  `Social & Beh Sci - Soc Sci` / `Social & Beh Sci - Beh Sci`, so the `Beh Sci` substring rule
-  (inherited verbatim from `gened.ts`) matches all 118 Soc Sci courses on top of the 24 real
-  Behavioral Sciences ones — 142 instead of 24. Affects `requirements.json:courseCount` and every
-  chunk's `gened_ids`: #14.
-- **`creditsMin`/`creditsMax` are an interval, and an `X OR Y` course is not.** 581 courses are
-  worth one of two values, never something in between, so a filter on a fractional credit count
-  inside such a range matches more courses than the catalog allows. `creditsRaw` is the exact
-  answer; see [how credit hours are read](#how-credit-hours-are-read).
+- **Gen Ed categories are small, and two of them share a group name.** `socsoc` is 118 courses and
+  `socbeh` 24; both are written under the `Social & Beh Sci` prefix, which is why the rules match
+  on the `- ` separator (#14). A rule added later has to do the same.
 - **Prerequisite text is prose, not a grammar.** `prereqCodes` is a bag of codes: "One of CS 173,
   MATH 213; CS 225" loses the "one of" structure, so a planner cannot tell alternatives from
   conjunctions. Parsing that structure is a separate job.

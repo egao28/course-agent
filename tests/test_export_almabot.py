@@ -533,6 +533,30 @@ ATTRS_SAMPLES = [
     "Advanced Composition, Humanities - Hist & Phil, and Cultural Studies - Western course.",
 ]
 
+# Categories whose rule deliberately no longer behaves like its TS matcher. socbeh is the #14 fix:
+# gened.ts tests the bare label "Beh Sci", which is also inside the group name "Social & Beh Sci",
+# so it matches every Soc Sci course too. Each divergence has its own test below.
+TS_DIVERGENCES = {"socbeh"}
+
+# One canonical Degree Attributes string per category, in the shape the catalog writes it. A
+# course attributed exactly one category must match exactly that category -- the property the
+# bare-label rules broke, and the cheapest guard against re-breaking it for the other 12.
+CANONICAL_ATTRS = {
+    "comp1": "Composition I course.",
+    "advcomp": "Advanced Composition course.",
+    "qr1": "Quantitative Reasoning I course.",
+    "qr2": "Quantitative Reasoning II course.",
+    "natphys": "Nat Sci & Tech - Phys Sciences course.",
+    "natlife": "Nat Sci & Tech - Life Sciences course.",
+    "humhist": "Humanities - Hist & Phil course.",
+    "humlit": "Humanities - Lit & Arts course.",
+    "socsoc": "Social & Beh Sci - Soc Sci course.",
+    "socbeh": "Social & Beh Sci - Beh Sci course.",
+    "cultwest": "Cultural Studies - Western course.",
+    "cultnonwest": "Cultural Studies - Non-West course.",
+    "cultus": "Cultural Studies - US Minority course.",
+}
+
 
 def test_gened_ids_and_labels_match_the_frontend():
     assert [c["id"] for c in ex.GENED] == list(TS_MATCHERS)
@@ -553,6 +577,8 @@ def test_gened_entries_already_carry_the_shape_that_is_written_out():
 @pytest.mark.parametrize("attrs", ATTRS_SAMPLES, ids=range(len(ATTRS_SAMPLES)))
 def test_rules_agree_with_the_frontend_matchers(attrs):
     for category in ex.GENED:
+        if category["id"] in TS_DIVERGENCES:
+            continue
         assert ex.matches_attrs(category, attrs) is TS_MATCHERS[category["id"]](attrs), (
             f"{category['id']} disagrees on {attrs!r}"
         )
@@ -572,6 +598,67 @@ def test_qr1_diverges_from_the_ts_regex_only_on_a_combination_the_catalog_never_
     qr1 = next(c for c in ex.GENED if c["id"] == "qr1")
     assert TS_MATCHERS["qr1"](both) is True
     assert ex.matches_attrs(qr1, both) is False
+
+
+def test_a_course_in_one_category_matches_only_that_category():
+    # The trap #14 fell into: a sub-category label can be a substring of another category's
+    # group name or label. Anchoring on the "- " separator is what keeps the 13 rules disjoint.
+    assert set(CANONICAL_ATTRS) == {c["id"] for c in ex.GENED}
+    for cat_id, attrs in CANONICAL_ATTRS.items():
+        matched = {c["id"] for c in ex.GENED if ex.matches_attrs(c, attrs)}
+        assert matched == {cat_id}, f"{attrs!r} matched {sorted(matched)}"
+
+
+def test_behavioral_sciences_does_not_swallow_the_social_sciences():
+    # #14: "Beh Sci" is a substring of the group name "Social & Beh Sci", so the TS matcher counts
+    # every Soc Sci course as Behavioral Sciences -- 142 courses instead of 24 on the 2026-sp CSV.
+    socsoc = next(c for c in ex.GENED if c["id"] == "socsoc")
+    socbeh = next(c for c in ex.GENED if c["id"] == "socbeh")
+    soc = "Social & Beh Sci - Soc Sci course."
+    beh = "Social & Beh Sci - Beh Sci course."
+    assert TS_MATCHERS["socbeh"](soc) is True  # the inherited defect
+    assert ex.matches_attrs(socbeh, soc) is False
+    assert ex.matches_attrs(socbeh, beh) is True
+    assert ex.matches_attrs(socsoc, soc) is True
+    assert ex.matches_attrs(socsoc, beh) is False
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        "Social & Beh Sci - Soc Sci, and Cultural Studies - US Minority course.",
+        "Cultural Studies - Non-West, and Social & Beh Sci - Soc Sci course.",
+        "Quantitative Reasoning II, and Social & Beh Sci - Soc Sci course.",
+        "Camp Honors/Chanc Schol, Humanities - Hist & Phil, and Social & Beh Sci - Soc Sci course.",
+    ],
+)
+def test_soc_sci_stays_out_of_behavioral_sciences_in_combined_attributes(attrs):
+    # Multi-category strings are where the group name is easiest to miss on review.
+    socbeh = next(c for c in ex.GENED if c["id"] == "socbeh")
+    assert ex.matches_attrs(socbeh, attrs) is False
+
+
+def test_cultwest_covers_both_spellings_the_frontend_ors_together():
+    # The TS ORs "Cultural Studies - Western" with "Western course"; the second is only ever the
+    # tail of the first in the catalog, so the anchored rule subsumes both -- and, unlike
+    # "Western course", it cannot be reached by a "Non-Western" designation.
+    cultwest = next(c for c in ex.GENED if c["id"] == "cultwest")
+    for attrs in (
+        "Cultural Studies - Western course.",
+        "Humanities - Lit & Arts, and Cultural Studies - Western course.",
+        "Cultural Studies - Western, and Humanities - Lit & Arts course.",
+    ):
+        assert ex.matches_attrs(cultwest, attrs) is True
+    assert ex.matches_attrs(cultwest, "Cultural Studies - Non-West course.") is False
+
+
+def test_every_sub_category_rule_is_anchored_on_the_separator():
+    # Composition and Quantitative Reasoning are written without a group prefix; everything else
+    # is a sub-category, and its rule has to carry the separator.
+    for category in ex.GENED:
+        anchored = all(s.startswith("- ") for s in category["match"]["any"])
+        bare = category["id"] in {"comp1", "advcomp", "qr1", "qr2"}
+        assert anchored is not bare, f"{category['id']}: {category['match']['any']}"
 
 
 def test_empty_attrs_never_matches():
@@ -614,9 +701,22 @@ def test_requirement_counts_match_the_courses(courses, cfg):
     assert counts["qr1"] == 1  # STAT 100, not MATH 101
     assert counts["qr2"] == 1  # MATH 101
     assert counts["comp1"] == 0
+    assert counts["socbeh"] == 0  # the fixture's 3 Soc Sci courses no longer leak in (#14)
     for category in ex.GENED:
         expected = sum(1 for c in courses if ex.matches_attrs(category, c["attrs"]))
         assert counts[category["id"]] == expected
+
+
+def test_the_two_social_and_behavioral_counts_are_kept_apart(cfg):
+    # build_requirements only reads `attrs`, so the count path can be pinned without a CSV. On the
+    # real 2026-sp catalog this is socsoc 118 / socbeh 24 (see the PR for #14).
+    made_up = [{"attrs": "Social & Beh Sci - Soc Sci course."}] * 3 + [
+        {"attrs": "Social & Beh Sci - Beh Sci, and Cultural Studies - Western course."}
+    ]
+    counts = {c["id"]: c["courseCount"] for c in ex.build_requirements(made_up, cfg)["genEd"]}
+    assert counts["socsoc"] == 3
+    assert counts["socbeh"] == 1
+    assert counts["cultwest"] == 1
 
 
 # --- export ------------------------------------------------------------------------------------

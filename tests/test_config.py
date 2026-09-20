@@ -20,8 +20,10 @@ import config
 from config import (
     Config,
     bm25_path,
+    chroma_path,
     collection_name,
     config_hash,
+    dense_key,
     load_config,
     rel_to_repo,
     report_path,
@@ -183,9 +185,32 @@ def test_hash_is_frozen_at_load_and_shared_by_every_helper(cfg):
     assert "~" not in str(expanded)
     assert cfg["data"]["source"].startswith("~/")
     assert cfg.hash == h
-    assert collection_name(cfg) == f"courses_{h}"
     assert bm25_path(cfg).name == f"bm25_{h}.pkl"
     assert report_path("x", cfg).name == f"x_{h}.md"
+
+
+def test_collection_name_ignores_settings_that_cannot_change_a_vector(cfg):
+    # A Day 4 ablation tunes fusion / bm25 / seed. Every other artifact gets a new name for it;
+    # the dense index must not, or the ablation re-embeds a byte-identical corpus and pays again.
+    ablation = Config({**cfg.to_dict(), "seed": 43, "fusion": {**cfg["fusion"], "rrf_k": 61}})
+    assert ablation.hash != cfg.hash
+    assert collection_name(ablation, "c0ffee00") == collection_name(cfg, "c0ffee00")
+
+
+def test_collection_name_moves_with_the_chunks_and_with_the_encoder(cfg):
+    name = collection_name(cfg, "c0ffee00")
+    assert HEX8.match(name.removeprefix("courses_"))
+    assert collection_name(cfg, "deadbeef") != name  # other chunks, other vectors
+    other_model = {**cfg["embedding"], "model": "text-embedding-3-large"}
+    assert collection_name(Config({**cfg.to_dict(), "embedding": other_model}), "c0ffee00") != name
+
+
+def test_dense_key_names_the_embedding_keys_it_needs(cfg):
+    # config.yaml is the file the reader has to go and fix, so it gets named -- see the same rule
+    # in check_embedding_config / check_chunk_config.
+    bare = {k: v for k, v in cfg["embedding"].items() if k != "model"}
+    with pytest.raises(ValueError, match="embedding section is missing model"):
+        dense_key(Config({**cfg.to_dict(), "embedding": bare}), "c0ffee00")
 
 
 def test_reordering_keys_does_not_change_hash(raw):
@@ -291,6 +316,23 @@ def test_artifact_paths_are_absolute_and_create_their_directory(cfg, tmp_path, m
     assert p.parent.is_dir()
     assert r == tmp_path / "report" / f"day1_smoke_{cfg.hash}.md"
     assert r.parent.is_dir()
+
+
+def test_chroma_path_is_one_store_for_every_config(cfg, tmp_path, monkeypatch):
+    # The key belongs on the collection inside the store, not on the store: an ablation should
+    # add a collection beside the baseline, not a second copy of the whole directory.
+    monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
+    path = chroma_path()
+    assert path == tmp_path / "indexes" / "chroma"
+    assert cfg.hash not in str(path)
+
+
+def test_chroma_path_does_not_create_the_store(tmp_path, monkeypatch):
+    # The one path helper that must not: opening a persistent Chroma client on this directory
+    # writes a chroma.sqlite3 into it, so a caller that only wants to *name* the store -- a dry
+    # run, an error message quoting the path -- would leave one behind just by asking.
+    monkeypatch.setattr(config, "INDEXES_DIR", tmp_path / "indexes")
+    assert not chroma_path().exists()
 
 
 def test_artifact_directories_exist_in_a_fresh_checkout():

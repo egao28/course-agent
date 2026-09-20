@@ -20,8 +20,11 @@ term can be added to the same collection without colliding.
 
 The wording of ``text`` is a retrieval parameter, not a detail -- it is what gets embedded and
 BM25-tokenized -- so it lives in :func:`render_chunk` alone, keyed by ``chunk.template_version``
-in ``config.yaml``. A template ablation (#15) adds a ``v2`` renderer next to ``v1``, changes that
-one config value, and gets fresh index names for free: the version is part of the config hash.
+in ``config.yaml``. Two templates ship: ``v1`` renders the catalog fields as they stand, ``v2``
+drops the requirements block the catalog duplicates into ``desc`` and follows a
+cross-reference-only description to the course that carries the real text. Switching between them
+is one line of ``config.yaml`` and gets fresh index names for free -- the version is part of the
+config hash -- so which one retrieves better is a Day 4 measurement, not a decision made here.
 Nothing else in the pipeline may build chunk text.
 
 Three properties the rest of Day 1 relies on, all asserted here rather than assumed downstream:
@@ -35,6 +38,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -45,10 +49,10 @@ import tiktoken
 from config import HASH_LEN, Config, canonical_dump, load_config, rel_to_repo
 from ingest.export_almabot import (
     COURSES_PATH,
+    CROSS_REF_RE,
     DATA_DIR,
     REQUIREMENTS_PATH,
     matches_attrs,
-    parse_credit_hours,
 )
 
 CHUNKS_PATH = DATA_DIR / "chunks.jsonl"
@@ -63,13 +67,37 @@ TOKEN_ENCODING = "cl100k_base"
 EMBEDDING_TOKEN_LIMIT = 8191
 #: Chroma metadata values must be scalars, so list fields are joined on this.
 LIST_SEPARATOR = "|"
+#: The metadata fields that hold a list. Named rather than sniffed by type: after the join, a
+#: decoder cannot tell "CS 173|CS 225" from a string that happens to contain a pipe.
+LIST_FIELDS = ("prereq_codes", "gened_ids")
+
+#: The label the catalog writes in front of the requirements block, which runs from there to the
+#: end of ``desc``. Anchored at the end because ``v2`` strips it along with the block it opens.
+REQUIREMENTS_LABEL_RE = re.compile(r"\s*Prerequisites?:\s*$")
+
+#: The ``See X.`` sentence of a cross-reference-only description, naming the one course that holds
+#: the real text. The subject is matched case-insensitively: the catalog writes "See Rel 514" in
+#: one of the 497, which the export's upper-case ``CODE_RE`` misses.
+SEE_RE = re.compile(r"\bSee\s+([A-Za-z]{2,4})\s?(\d{3})\b")
 
 #: Course fields each template reads, in the order they appear in the rendered text. Checked
 #: against ``chunk.fields`` in config.yaml, which is hashed: the hash must not claim a field set
 #: the renderer does not actually use.
 TEMPLATE_FIELDS: dict[str, tuple[str, ...]] = {
-    "v1": ("code", "name", "creditsRaw", "term", "desc", "prereqRaw", "attrs"),
+    "v1": ("code", "name", "credits", "term", "desc", "prereqRaw", "attrs"),
+    # v2 reads the same seven fields *of this course*; what differs is how two of them are
+    # rendered (see :func:`_render_v2`). The extra text it can pull in is another course's
+    # ``desc``, which is already in the list. Identical lists are what make the switch one line:
+    # ``chunk.fields`` is checked against this, so only ``template_version`` has to move.
+    "v2": ("code", "name", "credits", "term", "desc", "prereqRaw", "attrs"),
 }
+
+#: Templates that follow a cross-reference to the course carrying the real description. Read by
+#: :func:`summarize` so a build says which of the two things it did.
+FOLLOWS_REFERENCES = frozenset({"v2"})
+
+#: A ``{code: course}`` view of the corpus, for templates that read across courses.
+Corpus = Mapping[str, Mapping[str, Any]]
 
 
 # --- rendering ------------------------------------------------------------------------------------
@@ -96,7 +124,69 @@ def format_credits(raw: str | None) -> str:
     return low if low == high else f"{low} {credits.connector.lower()} {high}"
 
 
-def _render_v1(course: Mapping[str, Any]) -> str:
+def strip_requirements(desc: str, prereq_raw: str) -> str:
+    """``desc`` without the trailing requirements block, its ``Prerequisite:`` label included.
+
+    The catalog runs that block from the label to the end of the description, so ``prereqRaw`` is
+    a *suffix* of ``desc`` -- true of all 2,732 courses in the 2026-sp corpus that have one.
+    ``v1`` renders both fields as #4 specified, which embeds the text twice and doubles the BM25
+    term frequency of every code and phrase inside it, biasing lexical retrieval toward courses
+    with long prerequisite text. Removing it here leaves the topical text on the ``Description:``
+    line and the requirements on the ``Prerequisites:`` one, each exactly once.
+
+    A ``prereqRaw`` that is not a suffix is left alone. None are today, but the block is parsed
+    out of prose: cutting on anything less than an exact match could truncate a real description.
+    """
+    if not prereq_raw or not desc.endswith(prereq_raw):
+        return desc
+    head = desc[: len(desc) - len(prereq_raw)]
+    return REQUIREMENTS_LABEL_RE.sub("", head).rstrip()
+
+
+def cross_reference(course: Mapping[str, Any]) -> str | None:
+    """The course code a cross-reference-only description defers to, or ``None`` for a real one.
+
+    497 descriptions (11% of the corpus) are nothing but ``"Same as HIST 283. See HIST 283."``:
+    no topical text for either retriever to match on, only the code and the title. The ``Same as``
+    clause may name up to seven sibling codes, but the ``See`` clause names exactly one -- the
+    course the catalog files the real text under -- so that is the one read here.
+    """
+    desc = course["desc"]
+    if not CROSS_REF_RE.match(desc):
+        return None
+    _, _, see = desc.partition(".")
+    match = SEE_RE.search(see)
+    if match is None:
+        return None
+    subject, number = match.groups()
+    return f"{subject.upper()} {number}"
+
+
+def inherited_desc(course: Mapping[str, Any], corpus: Corpus) -> tuple[str, str] | None:
+    """``(source code, description)`` a cross-reference borrows, or ``None`` if it cannot.
+
+    Three ways a reference does not resolve, all of which leave the course rendered as the
+    catalog wrote it: it is not a cross-reference at all; the target is not offered this term
+    (``BADM 205`` points at ``GGIS 205``, absent from the 2026-sp corpus); or the target is
+    itself a cross-reference, which would only pass the pointer along. That last check is also
+    what makes chains and mutual references safe without recursion -- this corpus has neither,
+    but the guard costs one comparison and a later term may.
+
+    The borrowed text goes through :func:`strip_requirements` too, so an inherited description
+    never carries a requirements block: 274 of these sources have one, and it describes the
+    *source*. This course's own ``prereqRaw`` is empty and so is its ``metadata.prereq_codes``;
+    rendering the source's block here would have the chunk contradict its own metadata.
+    """
+    code = cross_reference(course)
+    if code is None:
+        return None
+    source = corpus.get(code)
+    if source is None or not source["desc"] or cross_reference(source) is not None:
+        return None
+    return code, strip_requirements(source["desc"], source["prereqRaw"])
+
+
+def _render_v1(course: Mapping[str, Any], corpus: Corpus) -> str:
     """Template ``v1``: a labelled line per field, in ``TEMPLATE_FIELDS["v1"]`` order.
 
     Labels are spelled out ("Prerequisites", "Degree Attributes") because they are embedded along
@@ -109,8 +199,10 @@ def _render_v1(course: Mapping[str, Any]) -> str:
     non-Gen-Ed attributes (ACE 436 and CMN 361 are "Global Classroom course." and satisfy no Gen
     Ed at all; ABE 232 mixes the two), so a "Gen Ed:" line would have the chunk assert a category
     the course does not hold. The authoritative answer is ``metadata.gened_ids``, computed from
-    the rules in ``requirements.json``; whether v2 should render those labels as text is part of
-    #15.
+    the rules in ``requirements.json``. ``v2`` keeps this line exactly as it is.
+
+    ``corpus`` is unused: this template reads one course and nothing else. It is in the signature
+    because every renderer shares one.
     """
     lines = [
         f"{course['code']} — {course['name']}",
@@ -123,15 +215,57 @@ def _render_v1(course: Mapping[str, Any]) -> str:
     return "\n".join(line.rstrip() for line in lines)
 
 
+def _render_v2(course: Mapping[str, Any], corpus: Corpus) -> str:
+    """Template ``v2``: ``v1``, minus the duplicated requirements block, plus resolved references.
+
+    Two changes #4 left out of the baseline on purpose, so that each could be measured instead of
+    assumed (#15). Both are described where they are implemented -- :func:`strip_requirements`
+    and :func:`inherited_desc` -- and neither touches the other four lines, which render exactly
+    as ``v1`` renders them.
+
+    The ``Same as X. See X.`` sentence stays on the ``Description:`` line even when the reference
+    resolves. It is the only place the sibling codes appear (``AAS 357`` lists four), so dropping
+    it in favour of the borrowed text would trade one retrieval signal for another instead of
+    adding one. The inherited text goes on its own line, labelled with the course it came from:
+    a chunk never claims another course's description as its own, and a hit can be read back to
+    its source.
+    """
+    lines = [
+        f"{course['code']} — {course['name']}",
+        f"Credits: {format_credits(course['credits'])}",
+        f"Term: {course['term']}",
+        f"Description: {strip_requirements(course['desc'], course['prereqRaw'])}",
+    ]
+    borrowed = inherited_desc(course, corpus)
+    if borrowed is not None:
+        source, text = borrowed
+        lines.append(f"Description of {source}: {text}")
+    lines += [
+        f"Prerequisites: {course['prereqRaw'] or 'None listed'}",
+        f"Degree Attributes: {course['attrs'] or 'None'}",
+    ]
+    return "\n".join(line.rstrip() for line in lines)
+
+
 #: Every renderer, keyed by ``chunk.template_version``.
-RENDERERS: dict[str, Callable[[Mapping[str, Any]], str]] = {"v1": _render_v1}
+RENDERERS: dict[str, Callable[[Mapping[str, Any], Corpus], str]] = {
+    "v1": _render_v1,
+    "v2": _render_v2,
+}
 
 
-def render_chunk(course: Mapping[str, Any], template_version: str) -> str:
+def render_chunk(
+    course: Mapping[str, Any], template_version: str, corpus: Corpus | None = None
+) -> str:
     """The text that gets embedded and BM25-tokenized, for one course.
 
-    The single place chunk text is built. Keep it pure (course in, string out) so a template
+    The single place chunk text is built, and pure -- courses in, string out -- so a template
     ablation can re-render the corpus without re-running the export.
+
+    ``corpus`` is the ``{code: course}`` view a template needs to follow a reference to another
+    course; :func:`build_chunks` passes the whole corpus, so every built chunk has it. It
+    defaults to empty, where an unresolvable reference and an absent corpus render alike: the
+    course as the catalog wrote it.
     """
     try:
         renderer = RENDERERS[template_version]
@@ -140,7 +274,7 @@ def render_chunk(course: Mapping[str, Any], template_version: str) -> str:
         raise ValueError(
             f"unknown chunk.template_version {template_version!r}; known templates: {known}"
         ) from None
-    return renderer(course)
+    return renderer(course, {} if corpus is None else corpus)
 
 
 # --- ids and metadata -----------------------------------------------------------------------------
@@ -206,8 +340,33 @@ def chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, str | int | float 
     Chroma rejects a list metadata value, so ``prereq_codes`` / ``gened_ids`` go in joined on
     ``LIST_SEPARATOR`` (``"CS 173|CS 225"``, ``""`` when empty). Flattening lives here so the
     dense and BM25 sides cannot disagree about the encoding; ``chunks.jsonl`` keeps the lists.
+
+    A list field missing from :data:`LIST_FIELDS` is refused rather than flattened: it would
+    write fine and come back from a query as a string nothing splits again.
     """
+    unnamed = [k for k, v in metadata.items() if isinstance(v, list) and k not in LIST_FIELDS]
+    if unnamed:
+        raise ValueError(
+            f"metadata field(s) {', '.join(unnamed)} hold a list but are not in LIST_FIELDS; "
+            "add them there, or decode_chroma_metadata cannot restore them"
+        )
     return {k: LIST_SEPARATOR.join(v) if isinstance(v, list) else v for k, v in metadata.items()}
+
+
+def decode_chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Inverse of :func:`chroma_metadata`, for what a dense query reads back out of Chroma.
+
+    BM25 (#6) takes its metadata straight from ``chunks.jsonl``, where the lists are still lists.
+    The dense side only has what Chroma stored, so it splits them again here -- beside the join,
+    so the two encodings cannot drift -- and a ``Hit`` means the same thing whichever retriever
+    produced it. An empty string decodes to ``[]``, not ``[""]``.
+    """
+    return {
+        k: [part for part in v.split(LIST_SEPARATOR) if part]
+        if k in LIST_FIELDS and isinstance(v, str)
+        else v
+        for k, v in metadata.items()
+    }
 
 
 # --- building -------------------------------------------------------------------------------------
@@ -290,7 +449,13 @@ def build_chunks(
     categories: Sequence[Mapping[str, Any]],
     template_version: str,
 ) -> list[dict[str, Any]]:
-    """One chunk per course, in ``courses`` order, with ``doc_id`` uniqueness enforced."""
+    """One chunk per course, in ``courses`` order, with ``doc_id`` uniqueness enforced.
+
+    The ``{code: course}`` view handed to the renderer is built once here, from the same corpus
+    being chunked: a template that follows a reference resolves it against the courses going into
+    this index, never against a different export.
+    """
+    corpus = {c["code"]: c for c in courses}
     chunks: list[dict[str, Any]] = []
     seen: dict[str, str] = {}
     for course in courses:
@@ -304,7 +469,7 @@ def build_chunks(
         chunks.append(
             {
                 "doc_id": cid,
-                "text": render_chunk(course, template_version),
+                "text": render_chunk(course, template_version, corpus),
                 "metadata": chunk_metadata(course, categories),
             }
         )
@@ -493,6 +658,19 @@ def token_stats(
     )
 
 
+def crossref_counts(courses: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
+    """``(cross-reference-only descriptions, how many of them resolve)``.
+
+    The second number is a property of the corpus, not of the template: it is what a template
+    that follows references *could* pick up. :func:`summarize` reports it either way, so a ``v1``
+    build says out loud what it is leaving on the table.
+    """
+    corpus = {c["code"]: c for c in courses}
+    total = sum(1 for c in courses if CROSS_REF_RE.match(c["desc"]))
+    resolvable = sum(1 for c in courses if inherited_desc(c, corpus) is not None)
+    return total, resolvable
+
+
 def summarize(result: Mapping[str, Any]) -> list[str]:
     """Human-readable build stats: counts, token budget, metadata coverage.
 
@@ -504,6 +682,12 @@ def summarize(result: Mapping[str, Any]) -> list[str]:
     stats = result["stats"]
     with_prereqs = sum(1 for c in chunks if c["metadata"]["prereq_codes"])
     with_gened = sum(1 for c in chunks if c["metadata"]["gened_ids"])
+    crossrefs, resolvable = crossref_counts(result["courses"])
+    followed = (
+        f"{resolvable} resolved, {crossrefs - resolvable} left as written"
+        if version in FOLLOWS_REFERENCES
+        else f"not followed by template {version}"
+    )
     tokens = (
         [f"tokens ({TOKEN_ENCODING})        unavailable, chunks not size-checked"]
         if stats is None
@@ -524,6 +708,7 @@ def summarize(result: Mapping[str, Any]) -> list[str]:
         *tokens,
         f"metadata prereq_codes  {with_prereqs} chunks",
         f"metadata gened_ids     {with_gened} chunks",
+        f"cross-reference descs  {crossrefs}  ({followed})",
     ]
 
 
@@ -556,7 +741,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"metadata {json.dumps(chunk_metadata(match, categories), ensure_ascii=False)}")
         print(f"chroma   {json.dumps(chroma_metadata(chunk_metadata(match, categories)))}")
         print("text")
-        print(render_chunk(match, version))
+        print(render_chunk(match, version, {c["code"]: c for c in courses}))
         return
 
     result = chunk(cfg)
