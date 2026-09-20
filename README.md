@@ -57,10 +57,10 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "e0d6ff30", frozen at load
+cfg.hash                         # "7980f15f", frozen at load
 collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
 bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_e0d6ff30.md  dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_7980f15f.md  dir created on demand
 rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
@@ -177,7 +177,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash e0d6ff30  (chunk key 05d00726)
+config hash 7980f15f  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -249,7 +249,7 @@ uv run python -m ingest.build_bm25
 ```
 
 ```
-config hash e0d6ff30  (bm25 key 877a6610)
+config hash 7980f15f  (bm25 key 877a6610)
 documents indexed      4502
 vocabulary             21500 terms
 terms emitted          298000  (mean 66.2 per chunk)
@@ -401,7 +401,7 @@ uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 1
 ```
 
 ```
-'CS 374'  ->  5 hits, mode bm25, config e0d6ff30, 1.9 ms
+'CS 374'  ->  5 hits, mode bm25, config 7980f15f, 1.9 ms
 
 #  doc_id             score  name                                            sources
 1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
@@ -428,7 +428,7 @@ between them.
 The result carries what a report has to quote next to the hits:
 
 ```python
-RetrievalResult(query=…, mode="hybrid", config_hash="e0d6ff30", hits=[Hit, …], latency_ms=128.4)
+RetrievalResult(query=…, mode="hybrid", config_hash="7980f15f", hits=[Hit, …], latency_ms=128.4)
 ```
 
 `config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
@@ -857,6 +857,23 @@ built per query and thrown away, and hashing it into the config would rename bot
 every report name to record that an example sentence was reworded. A digest test pins the text to
 its version, so editing one without the other fails rather than publishing a second "v1".
 
+**v2: two examples, against a mistake the rules already forbade.** The first live run with a real
+model (gpt-4o-mini, 2026-09-21) labelled two questions `out_of_scope` that are not:
+`What are the prerequisites?` and `Is there a course about quantum origami?`. Both are covered in
+words — rule 2 says to classify what the question asks for and not whether the catalog can answer
+it, rule 3 says a question that names no course is still `prereq_chain` — and neither rule held,
+because every example in the prompt was a question the catalog *can* answer. The cost is not a
+mislabelled row: the first hands a person "that is outside what I can answer" when the honest
+reply asks which course, and the second never reaches the evidence gate that exists to refuse it.
+So `prereq_chain` gained a course-less example and `compare_recommend` an existence question, the
+version went to `v2`, and the digest moved with it.
+
+Neither new example is one of the two questions above: they are rows of
+`eval/datasets/day2_queries.jsonl`, and a prompt that quotes its own evaluation set stops measuring
+anything. They teach the same two shapes on questions the set does not contain — a test asserts
+that, because the temptation to paste the failing string in is exactly what makes a smoke run look
+green.
+
 The chat client is built on the **first query**, not when the node is built, and `llm` is imported
 there — it reaches `openai` and `OPENAI_API_KEY` through `embedding.py`, and `build_graph()` has to
 stay callable in a checkout with no key. The `llm` config section *is* validated at build time:
@@ -969,8 +986,8 @@ evidence:
   method: top_score     # day 5 adds "conformal"
   thresholds:
     bm25: 15.0          # Okapi BM25, unbounded
-    dense: 0.35         # 1 - cosine distance — UNMEASURED, the collection is still empty
-    hybrid: 0.025       # RRF = 2/(rrf_k + top_k_each): exactly "both retrievers returned it"
+    dense: 0.46         # 1 - cosine distance — measured, band 0.4529–0.6781
+    hybrid: 0.025       # RRF — kept, but top_score refuses to gate on it at all
 ```
 
 Four outcomes, and only the last one consults a threshold:
@@ -1020,12 +1037,32 @@ sentence scores 53% higher for the same match, which means part of what this thr
 how many words the question had. It separates the handwritten set correctly and it was chosen from
 that set. It is not a probability, and that gap is what Day 5 closes.
 
-**What an RRF threshold actually means: agreement — written down, because it is not confidence.**
-With `rrf_k: 60` and `top_k_each: 20`, a document one retriever ranked first scores `1/61 = 0.0164`
-and one both retrievers returned at the worst rank either reports scores `2/80 = 0.025`. So any
-threshold above `1/61` is unreachable by a single retriever, and `0.025` is exactly "both
-retrievers returned it" — with the consequence that in a hybrid run where one retriever is silent
-(a nonsense-word query returns no BM25 hits), nothing can clear it and the run hands over.
+**The dense number is a cutoff on thinner evidence than the BM25 one.** Top-1 cosine similarity
+over the same twelve queries (collection `courses_094143d8`, measured 2026-09-21) runs from
+**0.4529 to 0.6781** — so the `0.35` this section carried while the collection was empty sat below
+the entire band and refused nothing, twelve passes out of twelve. `dense: 0.46` refuses exactly one
+row, `Is there a course about quantum origami?` at 0.4529, and the next row up (`algorithms`,
+0.4619) clears it by 0.002. One negative example and a 2% margin is a floor fitted to a single
+query, not a tuned threshold; Day 4's negative set is what earns it. Dense top-1 is also the right
+course only 6 times in 12 — `CS 374` returns **CS 473** first, at 0.6200 — so it is no more a
+confidence than the BM25 number is.
+
+**An RRF threshold cannot be a gate at all, and the measurement is what says so.** With `rrf_k: 60`
+and `top_k_each: 20`, a document one retriever ranked first scores `1/61 = 0.0164` and one both
+retrievers returned at the worst rank either reports scores `2/80 = 0.025`, so `0.025` is exactly
+"both retrievers returned it" — which is what this section claimed for it while the dense index was
+unbuilt. With the index built, top-1 over those twelve queries spans **0.0296 to 0.0328**, and
+`Is there a course about quantum origami?` scores **0.0325 — fourth highest of the twelve**, with
+six answerable queries *below* it. The top document of a fused list is nearly always one that both
+retrievers returned near the top, whatever it is, so the score barely moves with the query and no
+cutoff separates the set.
+
+So `top_score` **refuses** a hybrid block instead of comparing it (`UNGATEABLE` in
+`check_evidence.py`), and `check_evidence_node` raises when it is built if `agent.retrieval_mode`
+is `hybrid` — not on the fifth query, the first one whose evidence carried a score. Passing
+everything is worse than handing over: in a report it is indistinguishable from evidence that was
+checked and found good. The number stays in the table so it holds one entry per retrieval mode, and
+so Day 5's calibrated method has somewhere to land.
 
 **One scored source per run.** A `docs` list carrying two retrievers' raw scores is refused rather
 than resolved: "the top score" is only defined inside one source, the two numbers in `signals` can
@@ -1183,7 +1220,7 @@ and the router's 449, and the five answering rows send 5,314 input tokens in tot
 MATH 241 lookup, 1,341 for the five-chunk retrieval row) — so the whole ten-query run is about 10k
 input tokens plus at most five completions.
 
-No config value moved: the prompt version is a module constant, so the hash is still `e0d6ff30`
+No config value moved there: the prompt version is a module constant, so #38 left the hash where it found it
 and `chunk_key` / `dense_key` / `bm25_key` are untouched.
 
 ## Command line
@@ -1238,6 +1275,11 @@ whether a real model stays inside its evidence is the one thing a stand-in canno
 `eval/scripts/day2_smoke.py` runs the ten handwritten queries in
 `eval/datasets/day2_queries.jsonl` end to end and writes
 [`report/day2_smoke_e0d6ff30.md`](report/day2_smoke_e0d6ff30.md):
+
+That report is named after the config it ran under, `e0d6ff30`, which is the config as it was
+*before* the dense threshold moved. Re-running it under `7980f15f` writes a new file beside it
+rather than over it — that is what naming a report after a hash is for — and the two rows that
+change are the router's: see below.
 
 ```bash
 uv run python -m eval.scripts.day2_smoke --fake-model      # what can run today

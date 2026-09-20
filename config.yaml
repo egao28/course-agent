@@ -69,15 +69,28 @@ evidence:
     # both sides. It is a cutoff on this corpus, not a confidence: see the inversions in
     # agent/nodes/check_evidence.py before reading any meaning into the number.
     bm25: 15.0
-    # 1 - cosine distance. UNMEASURED: the dense collection is still empty (#5 is blocked on OpenAI
-    # credits), so this is the middle of the 0.2–0.6 band text-embedding-3-small gives on short
-    # documents, and it must be re-set from real scores before any dense or hybrid result is
-    # reported as tuned.
-    dense: 0.35
+    # 1 - cosine distance. Measured 2026-09-21 on the live collection (courses_094143d8), top-1
+    # over the same twelve queries: "Is there a course about quantum origami?" 0.4529 (the one
+    # question with no answer, and the lowest of the twelve), "algorithms" 0.4619, "machine
+    # learning" 0.4721, up to "How many credits is MATH 241?" 0.6781. The whole band sits ABOVE
+    # the 0.35 this used to guess, so that value refused nothing — 12 of 12 passed. 0.46 is the
+    # only kind of cutoff this set supports: it sits between the origami row and the next one up,
+    # a 2% margin over a SINGLE negative example, so it is a floor fitted to one query rather
+    # than a tuned threshold, and Day 4's negative set is what re-sets it. Like bm25 it is a
+    # cutoff on this corpus and not a confidence — dense top-1 was the right course in only 6 of
+    # the 12 ("CS 374" returns CS 473 first, at 0.6200).
+    dense: 0.46
     # RRF, the sum of 1/(rrf_k + rank) over the retrievers that returned the document. 0.025 is
     # exactly 2/(rrf_k + top_k_each) = 2/(60 + 20), the score of a document both retrievers
-    # returned at the worst rank either of them reports — so this threshold asks "did the two
-    # retrievers agree?", not "how good is the match?". Chosen knowingly (the issue's point): one
-    # retriever alone tops out at 1/61 = 0.0164 and can never clear it, so a hybrid run in which
-    # one retriever is silent refuses everything. Day 5 needs to know that is what it replaces.
+    # returned at the worst rank either of them reports — so this number asks "did the two
+    # retrievers agree?", not "how good is the match?".
+    #
+    # Measured 2026-09-21, that turned out to be unusable as a gate rather than merely blunt:
+    # hybrid top-1 over the twelve queries spans 0.0296 to 0.0328, and "Is there a course about
+    # quantum origami?" scores 0.0325 — fourth highest of the twelve. The top document of a fused
+    # list is nearly always one both retrievers returned near the top, whatever it is, so the
+    # score is almost constant and no cutoff separates the set. top_score therefore REFUSES a
+    # hybrid block instead of comparing it (agent/nodes/check_evidence.py, UNGATEABLE); the
+    # number is kept so the table stays one entry per retrieval mode, and so Day 5's conformal
+    # method — which calibrates rather than thresholds — has somewhere to land.
     hybrid: 0.025
