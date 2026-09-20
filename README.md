@@ -17,6 +17,10 @@ cp -n .env.example .env  # then fill in OPENAI_API_KEY (-n never overwrites an e
 uv run pytest -q         # smoke: imports resolve + config hash properties hold
 ```
 
+Nothing loads `.env` by itself yet (that is #11), so commands that call the embeddings API are run
+as `uv run --env-file .env python -m ...`. Everything else — tests, chunking, `--dry-run` — needs
+no key at all.
+
 Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --locked --extra local`.
 `uv sync` is exact by default, so pass `--extra local` on **every** sync or the extra is removed again;
 alternatively use `uv sync --inexact` to leave already-installed extras in place.
@@ -27,9 +31,10 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 course-agent/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
+├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
-├── ingest/        # export_almabot.py → chunk.py → build indexes (dense / bm25)
-├── retrieval/     # dense.py, bm25.py, fusion.py, retrieve(query, mode)
+├── ingest/        # export_almabot.py → chunk.py → build_dense.py (+ build_bm25.py)
+├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
@@ -52,7 +57,7 @@ from config import load_config, collection_name, bm25_path, report_path, rel_to_
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
 cfg.hash                         # "a1b2c3d4", frozen at load
-collection_name(cfg)             # "courses_a1b2c3d4"                   Chroma collection
+collection_name(cfg, chunk_key)  # "courses_094143d8"                   Chroma collection, see below
 bm25_path(cfg)                   # <repo>/indexes/bm25_a1b2c3d4.pkl     absolute, dir created on demand
 report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_a1b2c3d4.md absolute, dir created on demand
 rel_to_repo(bm25_path(cfg))      # "indexes/bm25_a1b2c3d4.pkl"          for reports/logs, never str(path)
@@ -61,6 +66,14 @@ source_path(cfg)                 # data.source with ~ expanded; cfg itself is un
 
 The naming helpers return **absolute** paths so a build works from any cwd; print them through
 `rel_to_repo()` so a local home directory never lands in a git-tracked report.
+
+The Chroma collection is the one artifact *not* named after the full hash. It is keyed on
+`dense_key()` — `chunk_key` plus `embedding.provider` and `embedding.model`, i.e. everything that
+can change a vector. A Day 4 ablation over `fusion.rrf_k`, `bm25.k1` or `seed` moves `cfg.hash`
+without moving a single number in the index, so naming the collection after it would orphan the
+index and re-embed (and re-pay for) a byte-identical corpus. `chroma_path()` is also the one path
+helper that does **not** create its directory: opening a persistent Chroma client is what writes a
+store, so a dry run, a failed query or an error message quoting the path leaves nothing behind.
 
 `data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter calls
 `verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
@@ -132,6 +145,79 @@ version and field list — so an index build can detect chunks left over from an
 ignoring the `seed` / `bm25` / `fusion` tuning that a Day 4 ablation changes on purpose (the full
 `config_hash` of the run is recorded too, but only as a record of who wrote the file). See
 [data/README.md](data/README.md#chunksjsonl).
+
+## Dense index
+
+`ingest/build_dense.py` embeds every chunk once and puts the vectors in Chroma, in the collection
+`courses_{dense_key}` under `indexes/chroma` (gitignored: rebuildable, and never committed).
+
+```bash
+uv run python -m ingest.build_dense --dry-run                  # what it would cost; calls no API
+uv run --env-file .env python -m ingest.build_dense            # build it
+uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collection, embed again
+```
+
+```
+config hash 1edbaf46  (chunk key 05d00726)
+collection             courses_094143d8  (does not exist yet)
+would embed            4502 chunks via openai in batches of 256
+tokens billed          522658  (text-embedding-3-small)
+cost                   $0.0105  (at $0.02 / 1M tokens)
+store                  indexes/chroma
+```
+
+The whole 2026-sp corpus is about one cent on `text-embedding-3-small`. After a real run the same
+report prints what the API said it *billed*, not an estimate of it. `--dry-run` quotes the cost of
+the *next* run: against a collection that is already complete it quotes nothing, since that run
+would embed nothing — and it combines with `--rebuild`, which does change the answer. It creates
+nothing either, not even the store.
+
+Re-running costs nothing: a collection that already holds exactly as many rows as there are chunks
+is left alone. Any other count — an interrupted build — stops and asks for `--rebuild` instead of
+topping the collection up, which would leave a corpus that is quietly a mix of two runs. That makes
+`count()` the signal everything rests on, so `doc_id`s are checked for duplicates before the build
+(Chroma keeps the first of two rows with one id and drops the second silently) and what landed is
+counted after it. The chunks are checked against the config's `chunk_key` first, since discovering
+afterwards that they came from another template means paying for the build twice. Everything that
+can fail without spending money — the config, the corpus, the collection state, the API key — is
+checked before the store is opened, so a run that cannot embed leaves no `indexes/chroma` behind.
+
+The collection is created in **cosine** space (Chroma defaults to squared L2) and records how it was
+built — `chunk_key`, `config_hash`, `provider`, `model`, `dim`, `built_at` — for the person who opens
+an index six weeks later.
+
+### Querying it
+
+```bash
+uv run --env-file .env python -m retrieval.dense "machine learning" -k 5
+```
+
+```python
+from config import load_config
+from retrieval.dense import DenseRetriever
+
+DenseRetriever(load_config()).search("machine learning", 5)
+```
+
+`search` returns `Hit(doc_id, score, rank, text, metadata)` — the same shape BM25 returns, so RRF can
+fuse two lists without knowing which retriever produced either. `score` is `1 - cosine_distance`:
+higher is better, and comparable only *within* one list, which is why fusion works on `rank`. Text
+and metadata come back out of the index rather than `chunks.jsonl`, with the joined metadata lists
+split into lists again so a dense hit and a BM25 hit mean the same thing.
+
+### Embeddings
+
+`embedding.py` is the one place text becomes a vector — build side and query side both go through
+it, so a query can never be encoded by a different model than the corpus was. `embedding.provider`
+picks the route:
+
+| provider | model | needs |
+| --- | --- | --- |
+| `openai` | `text-embedding-3-small` | `OPENAI_API_KEY` |
+| `local` | `BAAI/bge-m3` | `uv sync --locked --extra local` |
+
+Both are part of `dense_key`, so switching providers names a new collection instead of mixing two
+vector spaces in one.
 
 ## Day 1 goal
 

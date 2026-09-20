@@ -12,6 +12,7 @@ chunk:
   overlap: 0
 embedding:
   provider: local
+  model: BAAI/bge-m3
   normalize: true
   batch_size: 16
 bm25:
