@@ -92,7 +92,13 @@ TERM_ABBR = {"spring": "sp", "summer": "su", "fall": "fa", "winter": "wi"}
 # requirements.json can carry it verbatim and :func:`matches_attrs` can evaluate it straight
 # from the file: a course matches when attrs contains ANY of `any` and NONE of `none`.
 #   - qr1 replaces the lookahead /Quantitative Reasoning I(?!I)/ with an explicit `none`.
-#   - cultwest keeps both spellings the TS matcher ORs together.
+# The catalog writes a sub-category as "<group> - <name>" ("Social & Beh Sci - Soc Sci course."),
+# so every sub-category rule matches on the separator too. The bare labels gened.ts tests are not
+# safe substrings of that shape: "Beh Sci" is also inside the *group* "Social & Beh Sci", which
+# made socbeh match all 118 Soc Sci courses on top of its own 24 (#14). Anchoring is what makes
+# the rules disjoint; it changes no other category's membership on the 2026-sp catalog, and it
+# lets cultwest drop the second spelling the TS ORs in ("Western course" only ever occurs as the
+# tail of "Cultural Studies - Western course").
 # fmt: off -- one line per category, aligned for review against the TS source
 GENED: tuple[dict[str, Any], ...] = (
     {
@@ -127,59 +133,55 @@ GENED: tuple[dict[str, Any], ...] = (
         "id": "natphys",
         "label": "Physical Sciences",
         "group": "Natural Sciences & Tech",
-        "match": {"field": "attrs", "any": ["Phys Sciences"], "none": []},
+        "match": {"field": "attrs", "any": ["- Phys Sciences"], "none": []},
     },
     {
         "id": "natlife",
         "label": "Life Sciences",
         "group": "Natural Sciences & Tech",
-        "match": {"field": "attrs", "any": ["Life Sciences"], "none": []},
+        "match": {"field": "attrs", "any": ["- Life Sciences"], "none": []},
     },
     {
         "id": "humhist",
         "label": "Historical & Philosophical",
         "group": "Humanities & the Arts",
-        "match": {"field": "attrs", "any": ["Hist & Phil"], "none": []},
+        "match": {"field": "attrs", "any": ["- Hist & Phil"], "none": []},
     },
     {
         "id": "humlit",
         "label": "Literature & the Arts",
         "group": "Humanities & the Arts",
-        "match": {"field": "attrs", "any": ["Lit & Arts"], "none": []},
+        "match": {"field": "attrs", "any": ["- Lit & Arts"], "none": []},
     },
     {
         "id": "socsoc",
         "label": "Social Sciences",
         "group": "Social & Behavioral Sci",
-        "match": {"field": "attrs", "any": ["Soc Sci"], "none": []},
+        "match": {"field": "attrs", "any": ["- Soc Sci"], "none": []},
     },
     {
         "id": "socbeh",
         "label": "Behavioral Sciences",
         "group": "Social & Behavioral Sci",
-        "match": {"field": "attrs", "any": ["Beh Sci"], "none": []},
+        "match": {"field": "attrs", "any": ["- Beh Sci"], "none": []},
     },
     {
         "id": "cultwest",
         "label": "Western/Comparative Cultures",
         "group": "Cultural Studies",
-        "match": {
-            "field": "attrs",
-            "any": ["Cultural Studies - Western", "Western course"],
-            "none": [],
-        },
+        "match": {"field": "attrs", "any": ["- Western"], "none": []},
     },
     {
         "id": "cultnonwest",
         "label": "Non-Western Cultures",
         "group": "Cultural Studies",
-        "match": {"field": "attrs", "any": ["Non-West"], "none": []},
+        "match": {"field": "attrs", "any": ["- Non-West"], "none": []},
     },
     {
         "id": "cultus",
         "label": "US Minority Cultures",
         "group": "Cultural Studies",
-        "match": {"field": "attrs", "any": ["US Minority"], "none": []},
+        "match": {"field": "attrs", "any": ["- US Minority"], "none": []},
     },
 )
 # fmt: on
@@ -457,7 +459,8 @@ def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, A
         "term": cfg["data"]["term"],
         "source": (
             "almabot-web/src/lib/gened.ts (GENED), matched against the catalog's "
-            "'Degree Attributes' column"
+            "'Degree Attributes' column, with sub-category rules anchored on the "
+            "'<group> - <name>' separator the TS matchers ignore (#14)"
         ),
         "genEd": categories,
         "majors": [],
