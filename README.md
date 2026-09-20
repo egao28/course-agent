@@ -323,6 +323,56 @@ retrieved. Ties are broken by corpus order, so a ranking is the same on every ru
 This is the half of the hybrid that can find a course by name. Embeddings put `CS 374` near
 "algorithms" and "theory of computation"; only the lexical side knows the string is a course code.
 
+## Fusion
+
+`retrieval/fusion.py` combines the two rankings into one, on **rank alone**:
+
+```
+score(d) = Σ_i 1 / (k + rank_i(d))        k = fusion.rrf_k (60), ranks 1-based
+```
+
+```python
+from config import load_config
+from retrieval.fusion import fuse, rrf
+
+rankings = {"dense": dense_hits, "bm25": bm25_hits}
+
+rrf(rankings)                     # the whole fused ranking, k = 60
+fuse(rankings, load_config())     # ... with the config's k, cut to top_k_final
+```
+
+No score crosses the boundary, and none can: a cosine similarity of 0.42 and a BM25 score of 11.3
+are not on one scale, and both distributions move with the query, so an `α·dense + (1-α)·bm25`
+tunes a constant against a moving target. Rank is the one thing both retrievers report in the same
+unit. What the formula buys is **agreement**: a document one retriever put first scores `1/61 =
+0.0164`, while one *both* put tenth scores `2/70 = 0.0286` and wins. `k` is the knob on that trade
+— it damps the head of each list, so the gap between rank 1 and rank 2 (0.0164 vs 0.0161) stays
+small beside the gain from being found twice. At `k = 0` it degenerates to plain reciprocal rank,
+where one first place merely ties two second places and the fusion becomes "whoever was most
+confident". 60 is Cormack et al.'s constant, and a config value, so Day 4 can ablate it.
+
+Each fused hit reports where it came from, in `sources` — the rank each retriever gave it, `None`
+where that retriever did not return it at all. The ranks are what explain the order:
+
+```
+Hit(doc_id="2026-sp:CS-374", score=0.02857, rank=1, …, sources={"dense": 10, "bm25": 10})
+Hit(doc_id="2026-sp:CS-357", score=0.01639, rank=2, …, sources={"dense": 1, "bm25": None})
+```
+
+(`2/70` against `1/61`: agreement at rank ten, against a first place only one half of the hybrid
+found. Real top-5s for the Day 1 queries are in the smoke report, once the dense index is built.)
+
+So the Day 4 ablation can say which half of the hybrid produced a result, and a result only one
+half ever finds is visible rather than inferred. Ties — two documents found by the same retrievers
+at the same ranks, which happens on nearly every query at 20 hits each — are broken by `doc_id`,
+not by which retriever the mapping happened to list first; otherwise an ablation would measure
+that ordering instead of the change it made.
+
+The module is **pure**: no index, no API key, no config in `rrf` itself. That is why it is not
+part of either retriever — the arithmetic that decides the final order is tested against numbers
+written out by hand, on rankings built in the test file. `fuse` is the one function that reads the
+`fusion` section (`method`, `rrf_k`, `top_k_final`), for `retrieve(query, "hybrid")`.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
