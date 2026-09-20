@@ -16,6 +16,7 @@ import pytest
 from config import load_config
 from retrieval.fusion import (
     DEFAULT_RRF_K,
+    check_limit,
     check_method,
     fuse,
     rrf,
@@ -220,6 +221,25 @@ def test_fuse_keeps_the_head_of_the_full_fusion_not_of_either_ranking():
     bm25 = ranking(*filler("B", 8), "AGREED")
     cfg = {"fusion": {**CFG["fusion"], "top_k_final": 3}}
     assert fuse({"dense": dense, "bm25": bm25}, cfg)[0].doc_id == "AGREED"
+
+
+def test_fuse_takes_a_depth_from_the_caller_over_the_config_one():
+    # retrieve(..., k=10) and a recall@k measurement both cut the same fusion to their own depth;
+    # the method and the damping constant still come from the config, since those name the run.
+    rankings = {"dense": ranking(*filler("D", 8)), "bm25": ranking(*filler("B", 8))}
+    assert len(fuse(rankings, CFG, 2)) == 2
+    assert len(fuse(rankings, CFG, 16)) == 16
+    assert fuse(rankings, CFG, 16)[:5] == fuse(rankings, CFG)
+
+
+@pytest.mark.parametrize("k", [0, -1, 2.5, "5", True])
+def test_a_caller_s_depth_that_is_not_a_positive_whole_number_is_refused(k):
+    with pytest.raises(ValueError, match="k must be a positive integer"):
+        fuse({"dense": ranking("A")}, CFG, k)
+
+
+def test_check_limit_returns_the_depth_it_accepted():
+    assert check_limit(20) == 20
 
 
 def test_fuse_refuses_a_method_this_repo_does_not_implement():
