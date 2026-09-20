@@ -23,9 +23,13 @@ from ``expected_intent`` and puts :class:`llm.StandInChat` behind the answer nod
 report says so in its header, in a section of its own, and beside every answer: the wording of an
 answer, and whether a model stays inside its evidence, are *not* measured by it.
 
-**The report carries no timestamp and no latency.** Re-running with nothing changed rewrites a
-byte-identical file, so a diff under ``report/`` is a change in behaviour and not a change in the
-clock. What the run was is in the name (the config hash) and in the header.
+**The report carries no timestamp and no latency**, so nothing in it moves unless the run did:
+under ``--fake-model`` a re-run rewrites a byte-identical file, and a live re-run differs exactly
+as much as the model answered differently (``temperature: 0`` is not determinism -- two
+consecutive live runs of the ten queries disagreed on one row, once answering it and once
+drafting an answer that cited nothing and was discarded). A diff under ``report/`` is therefore a
+change in behaviour, never a change in the clock. What the run was is in the name (the config
+hash) and in the header.
 """
 
 from __future__ import annotations
@@ -333,14 +337,22 @@ def render_caveats(cfg: Config, fake_model: bool) -> str:
                 "citations checked out."
             ),
             "",
+            (
+                "- **A live run is not reproducible, and `temperature: 0` does not make it one.** "
+                "Nothing else in this file can move a line -- there is no clock in it and the "
+                "renderer is a function of the run -- so a diff under `report/` after a live "
+                "re-run is the model having answered differently, which it does. Read a single "
+                "row as one sample and not as the behaviour of the system."
+            ),
         ]
     if cfg["agent"]["retrieval_mode"] == "bm25":
         parts += [
             (
-                "- **The dense index is empty** (#5 is blocked on the same credits), so "
-                "`agent.retrieval_mode` is `bm25` and every retrieval row here ran lexically. The "
-                "hybrid path is plumbing-verified, not result-verified -- the caveat #9's Day 1 "
-                "report carries too."
+                "- **Only the lexical half of the pipeline ran.** `agent.retrieval_mode` is "
+                "`bm25`, so every retrieval row here was answered by BM25 alone and the hybrid "
+                "path is plumbing-verified, not result-verified by this report. Which mode runs "
+                "is a config value, so switching it is a new hash and a new report rather than a "
+                "footnote to this one."
             ),
         ]
     parts += [

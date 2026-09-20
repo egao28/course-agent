@@ -273,3 +273,11 @@ def test_a_live_report_describes_a_live_run(runs):
     assert "**This run called `gpt-4o-mini`**" in text
     assert "No model was called" not in text
     assert "uv run --env-file .env python -m eval.scripts.day2_smoke" in text
+
+
+def test_only_the_live_report_warns_that_a_re_run_will_differ(runs):
+    # The stand-in rewrites a byte-identical file and the live path does not, so the two reports
+    # must not make the same promise about a diff under `report/`.
+    warning = "A live run is not reproducible"
+    assert warning in smoke.render_report(CFG, runs, smoke.DATASET, fake_model=False)
+    assert warning not in smoke.render_report(CFG, runs, smoke.DATASET, fake_model=True)
