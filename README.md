@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # tools/ (get_course, get_prereq_chain …), graph.py   (Day 2)
+├── agent/         # tools/ (get_course, get_prereq_chain, check_requirement …), graph.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -585,6 +585,57 @@ in the catalog. A course that *is* in it with no prerequisites returns `found=Tr
 — that is an answer — and `chain.raw` still quotes its requirements block, which matters for the
 1,608 courses that have one and no chain at all, because every course it names is either not
 offered this term or only a corequisite (`PHYS 211`: "PHYS 211 placement test or MATH 221.").
+
+## Requirement check
+
+`agent/tools/requirements.py` is the third tool, and the one with a hole in its data. "What Gen Eds
+do I still need?" is a question about a rule set rather than about a course, and
+`data/requirements.json` answers half of it: `genEd` holds the 13 campus categories as declarative
+rules, `majors` is `[]` and always has been — `course-catalog.csv` lists sections, and a degree
+requirement has never been in it ([#32](../../issues/32)).
+
+```python
+from agent.tools.requirements import check_requirement
+
+status = check_requirement("gened", ["RHET 105", "MATH 221"])
+{c.id: c.satisfied_by for c in status.satisfied}   # -> {'comp1': 'RHET 105'}
+status.unknown_courses                             # -> ['MATH 221']   (not offered in 2026-sp)
+[c.id for c in status.unsatisfied]                 # -> the other 12
+
+check_requirement("Computer Science, BS", [...]).supported   # -> False, with both lists empty
+```
+
+**The unsupported half is a typed refusal, not an empty result.** Anything that is not Gen Ed comes
+back `supported=False` with `satisfied` and `unsatisfied` both empty and a message naming what is
+missing (a source of degree requirements) and what is available (Gen Ed). A degree audit improvised
+from an LLM's parametric memory is the most harmful thing this agent could emit — fluent, specific,
+checkable only by the advisor the student was trying not to bother — so the refusal leaves nothing
+for the answer node to paraphrase, and [#39](../../issues/39) asserts the query leaves by the
+hand-off exit. The refusal is decided before any file is read, so it cannot fail with a missing
+corpus either. If `majors` is ever non-empty, `load_requirements()` raises rather than keep
+declining a program the data now holds.
+
+**The rules are evaluated from the file, by the exporter's own evaluator** (`matches_attrs`), not
+re-transcribed here. They stopped being code in [#3](../../issues/3) so there would be one copy:
+`gened.ts`'s `socbeh` matcher is wrong, open [#23](../../issues/23) fixes it in the data (142 → 24)
+and deliberately leaves the TS broken. On this branch the pre-#23 rules are what ship, so `ECON 102`
+still satisfies `socbeh`; when #23 merges the answer changes with no code change here. The test that
+pins this compares the tool against `matches_attrs` on whatever rule is on disk, so it survives
+either way.
+
+**A course counts for every category it is designated for**, exactly as the frontend resolved them:
+`IS 145` is Quantitative Reasoning II *and* Soc Sci *and* US Minority. 570 of the 4,502 courses
+carry at least one designation and 299 carry more than one (244 after #23, whose largest is 3 rather
+than 4). Where several completed courses qualify, the first one listed is credited — a transcript is
+the student's own ordering, and re-ranking it would be a recommendation dressed up as an audit.
+
+**Codes the catalog does not have come back in `unknown_courses`.** The corpus is one term, so a
+real transcript is mostly courses it has never seen — `MATH 221`, in the acceptance query above, is
+one of them. An audit that silently dropped them would report "you still need Quantitative
+Reasoning I" about a student who has it, which is the one error the reader cannot detect; they are
+listed in the field *and* in `message`. Whether a code is in the catalog is decided by `get_course`,
+so the three tools cannot disagree about it.
+
 
 ## Day 1 goal
 

@@ -88,7 +88,13 @@ export match, derived in the same run.
 
 `majors` is an empty placeholder: major and degree requirements are not in `course-catalog.csv`,
 which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
-pages, or a department plan).
+pages, or a department plan). `agent/tools/requirements.py` refuses every program except Gen Ed on
+those grounds, and raises if this list ever stops being empty without that tool learning to read it.
+
+572 courses carry a `Degree Attributes` string but only **570 satisfy a category**: `ACE 436` and
+`CMN 361` are labelled `Global Classroom course.`, which is a designation and not a Gen Ed. 299 of
+the 570 satisfy more than one category (244 once #14 lands), because a course can carry a Gen Ed
+area and a Cultural Studies designation at the same time.
 
 ## chunks.jsonl
 
