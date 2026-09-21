@@ -4,7 +4,8 @@
 built for a React UI: ``desc`` is truncated to 240 chars, ``attrs`` to 160, and there is no term
 field. Dense and BM25 both index the full description, so this exporter re-reads the **CSV** and
 reuses only the *logic* from ``almabot-web/scripts/build_data.py`` (section de-duplication,
-``parse_credits``, ``parse_prereq``, ``CODE_RE``), keeping every field untruncated.
+``parse_prereq``, ``CODE_RE``), keeping every field untruncated -- and replacing its lossy
+``parse_credits`` with :func:`parse_credit_hours`, which keeps both ends of a credit range.
 
 Run from the repo root::
 
@@ -20,6 +21,8 @@ Outputs
     One record per course, sorted by (subject, number). ``prereqRaw`` is the *whole* requirements
     block -- the catalog runs it from the ``Prerequisite:`` label to the end of the description --
     and ``prereqCodes`` / ``coreqCodes`` hold the course codes it names, resolved or not.
+    ``creditsRaw`` is the ``Credit Hours`` column verbatim, with ``creditsMin`` / ``creditsMax``
+    as the bounds to filter on: a third of the catalog is variable-credit.
 ``data/prereqs.json``
     The prerequisite edge list, filtered to codes that exist in this catalog (the filter
     ``dag.ts::prereqs()`` applies at read time). Courses with no surviving edge are omitted.
@@ -56,6 +59,12 @@ CODE_RE = re.compile(r"\b([A-Z]{2,4})\s?(\d{3})\b")
 PREREQ_HEAD_RE = re.compile(r"Prerequisite[s]?:\s*")
 # Descriptions that carry no content of their own: "Same as HIST 283. See HIST 283."
 CROSS_REF_RE = re.compile(r"^Same as [^.]*\.\s*See [^.]*\.$")
+# A "Credit Hours" value: "3 hours.", "3 OR 4 hours.", "1 TO 5 hours.". All 67 distinct strings
+# in the pinned CSV match; check_credits() refuses a corpus where one does not, rather than
+# exporting a course with no credit bounds for a filter to skip silently.
+CREDIT_HOURS_RE = re.compile(
+    r"^(\d+(?:\.\d+)?)(?:\s+(TO|OR)\s+(\d+(?:\.\d+)?))?\s+hours?\.?$", re.IGNORECASE
+)
 
 # Sentence boundary: a stop followed by something that starts a new sentence. Splitting on ". "
 # alone would cut "Ph.D. standing in BADM" down to "Ph.D" -- the abbreviations below are never
@@ -201,16 +210,41 @@ CULTURAL_STUDIES_NOTE = (
 # --- field parsing (ported from almabot-web/scripts/build_data.py) --------------------------------
 
 
-def parse_credits(raw: str | None) -> float:
-    """Credit hours from strings like ``"3 hours."`` or ``"0 TO 4 hours."``.
+class CreditHours(NamedTuple):
+    """The ``Credit Hours`` column kept whole, plus the bounds a filter can compare against.
 
-    The first number, unless it is zero -- a "0 TO 4" course is worth up to 4.
+    ``raw`` is the column verbatim -- the only lossless form, and what the chunk renders.
+    ``low`` / ``high`` are inclusive and equal for a fixed-credit course; both are ``None`` for a
+    string :data:`CREDIT_HOURS_RE` cannot read, which :func:`check_credits` refuses to export.
     """
-    nums = re.findall(r"\d+(?:\.\d+)?", raw or "")
-    if not nums:
-        return 0.0
-    first = float(nums[0])
-    return first if first > 0 else max(float(n) for n in nums)
+
+    raw: str
+    low: float | None
+    high: float | None
+    #: ``"TO"``, ``"OR"``, or ``""`` for a single value -- how the catalog joins the two bounds.
+    #: They do not mean the same thing (a "3 OR 4" course is worth one of the two, a "1 TO 5"
+    #: course anything between), so the renderer keeps whichever the catalog wrote.
+    connector: str
+
+
+def parse_credit_hours(raw: str | None) -> CreditHours:
+    """``"3 OR 4 hours."`` -> the string, the 3 and the 4.
+
+    Replaces ``build_data.py``'s ``parse_credits``, which reduced the column to one float: the
+    first number, or the largest when the first was 0. 1,415 of the 4,502 courses (31%) carry a
+    range -- 834 written ``X TO Y``, 581 ``X OR Y`` -- so that single number reported 1,211
+    courses at the bottom of their range and 204 at the top, with nothing to say which (#17).
+
+    Bounds come back ordered, because that is what the field names promise; the catalog never
+    writes them the other way round (verified: 0 of 1,415 ranges are descending).
+    """
+    text = (raw or "").strip()
+    m = CREDIT_HOURS_RE.match(text)
+    if m is None:
+        return CreditHours(text, None, None, "")
+    first = float(m.group(1))
+    second = float(m.group(3)) if m.group(3) else first
+    return CreditHours(text, min(first, second), max(first, second), (m.group(2) or "").upper())
 
 
 def parse_prereq(desc: str | None) -> str:
@@ -348,13 +382,16 @@ def read_courses(csv_path: Path) -> Catalog:
             if course is None:
                 desc = clean(row.get("Description"))
                 prereq_raw = parse_prereq(desc)
+                credits = parse_credit_hours(row.get("Credit Hours"))
                 courses[code] = {
                     "code": code,
                     "subject": subject,
                     "number": number,
                     "name": clean(row.get("Name")),
                     "term": row_term(row),
-                    "credits": parse_credits(row.get("Credit Hours")),
+                    "creditsRaw": credits.raw,
+                    "creditsMin": credits.low,
+                    "creditsMax": credits.high,
                     "desc": desc,
                     "attrs": clean(row.get("Degree Attributes")),
                     "prereqRaw": prereq_raw,
@@ -399,6 +436,30 @@ def check_terms(catalog: Catalog, cfg: Mapping[str, Any]) -> None:
             "every section row must be in the configured term -- update config.yaml "
             "(the hash, and therefore the index names, must move with the data)"
         )
+
+
+def check_credits(catalog: Catalog) -> None:
+    """Fail unless every course's ``Credit Hours`` string yielded numeric bounds.
+
+    ``creditsMin`` / ``creditsMax`` are what a "can I take this for 4 credits" filter compares
+    against, so a course that parsed to ``null`` bounds would not be *missing* from such a filter
+    so much as invisible to it -- the same silent-wrong-answer this issue started as. Asserted
+    rather than counted in the stats: an unreadable value means the column has a shape
+    :data:`CREDIT_HOURS_RE` has never seen, which can only come from a new CSV, and the
+    ``data.source_sha256`` pin already forces a fresh config hash for that.
+    """
+    unreadable = [
+        f"{c['code']} ({c['creditsRaw']!r})" for c in catalog.courses if c["creditsMin"] is None
+    ]
+    if not unreadable:
+        return
+    listed = ", ".join(unreadable[:5])
+    more = "" if len(unreadable) <= 5 else f" (+{len(unreadable) - 5} more)"
+    raise ValueError(
+        f"{len(unreadable)} course(s) have a Credit Hours value this export cannot read: "
+        f"{listed}{more}; teach CREDIT_HOURS_RE the new shape -- exporting them would leave "
+        "creditsMin/creditsMax null, which every credit filter skips without saying so"
+    )
 
 
 def build_prereqs(courses: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -497,6 +558,9 @@ def summarize(
     coreq_courses = sum(1 for e in prereqs if e["coreqs"])
     with_attrs = sum(1 for c in courses if c["attrs"])
     untruncated = sum(1 for n in lengths if n > 240)
+    connectors = Counter(parse_credit_hours(c["creditsRaw"]).connector for c in courses)
+    variable = connectors["TO"] + connectors["OR"]
+    shapes = f"{connectors['TO']} 'X TO Y', {connectors['OR']} 'X OR Y'"
 
     lines = [
         f"section rows read      {catalog.section_rows}",
@@ -515,6 +579,8 @@ def summarize(
         f"  resolved in catalog  {resolved}  over {prereq_courses} courses",
         f"  dangling (dropped)   {mentioned - resolved}",
         f"corequisite edges      {coreq_resolved}  over {coreq_courses} courses",
+        f"credit hours fixed     {connectors['']}",
+        f"  variable             {variable}  ({shapes})",
         f"courses with attrs     {with_attrs}",
     ]
     lines += [f"  {c['id']:<12} {c['courseCount']:>4}  {c['label']}" for c in requirements["genEd"]]
@@ -528,6 +594,7 @@ def export(cfg: Config) -> dict[str, Any]:
     if not catalog.courses:
         raise ValueError(f"{rel_to_repo(csv_path)} yielded no courses; is it the catalog export?")
     check_terms(catalog, cfg)
+    check_credits(catalog)
     prereqs = build_prereqs(catalog.courses)
     requirements = build_requirements(catalog.courses, cfg)
     write_json(COURSES_PATH, catalog.courses)

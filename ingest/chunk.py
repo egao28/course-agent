@@ -107,14 +107,25 @@ Corpus = Mapping[str, Mapping[str, Any]]
 # --- rendering ------------------------------------------------------------------------------------
 
 
-def format_credits(credits: float) -> str:
-    """Credit hours as they read in prose: ``3``, ``1.5``.
+def format_credits(raw: str | None) -> str:
+    """Credit hours as they read in prose: ``3``, ``1.5``, ``3 or 4``, ``1 to 5``.
 
-    ``0`` is a real value here -- ``parse_credits`` returns it for "hours to be arranged" -- and
-    is rendered as written rather than hidden, so the chunk never implies a credit count the
-    catalog does not give.
+    Renders the whole range rather than one end of it. 1,415 courses (31%) carry one, and the
+    single number the export used to keep put "Credits: 3" on AAS 465 -- a course that can be
+    taken for 4 -- so an agent grounding on the chunk answered 3 with the text to back it up
+    (#17). The catalog's own connector is kept, lower-cased, because the two are different
+    claims: a "3 OR 4" course is worth one of the two, a "1 TO 5" course anything between.
+
+    ``0`` is a real value (69 courses are "0 hours.") and is rendered as written. A string
+    :func:`parse_credit_hours` cannot read is echoed verbatim -- the chunk quotes the catalog
+    instead of inventing a number -- and an empty one reads "not listed", like the other fields.
+    Neither case survives :func:`export_almabot.check_credits`, so both are belt-and-braces.
     """
-    return f"{credits:g}"
+    credits = parse_credit_hours(raw)
+    if credits.low is None:
+        return credits.raw or "not listed"
+    low, high = f"{credits.low:g}", f"{credits.high:g}"
+    return low if low == high else f"{low} {credits.connector.lower()} {high}"
 
 
 def strip_requirements(desc: str, prereq_raw: str) -> str:
@@ -199,7 +210,7 @@ def _render_v1(course: Mapping[str, Any], corpus: Corpus) -> str:
     """
     lines = [
         f"{course['code']} — {course['name']}",
-        f"Credits: {format_credits(course['credits'])}",
+        f"Credits: {format_credits(course['creditsRaw'])}",
         f"Term: {course['term']}",
         f"Description: {course['desc']}",
         f"Prerequisites: {course['prereqRaw'] or 'None listed'}",
@@ -306,12 +317,21 @@ def chunk_metadata(
     Deliberately small: what a query filters or displays by, not a copy of the course record.
     ``prereq_codes`` is the unfiltered list from the export -- a reference to a course not offered
     this term stays visible here, unlike in ``prereqs.json``.
+
+    Credits are a *pair* of inclusive bounds, equal for a fixed-credit course, so one comparison
+    -- ``credits_min <= n <= credits_max`` -- answers "can this be taken for n credits" for both
+    kinds. The single ``credits`` this replaced could not: it held the low end of 1,211 ranges
+    and the high end of 204, so ``credits == 4`` missed every "3 OR 4" course (#17). The interval
+    is an approximation for an ``OR`` course -- AAS 465 is 3 or 4, never 3.5, and the bounds say
+    otherwise -- which is why ``creditsRaw`` stays in ``courses.json`` and in the rendered text as
+    the lossless form. Do not reconstruct a single number from these.
     """
     return {
         "code": course["code"],
         "subject": course["subject"],
         "number": course["number"],
-        "credits": course["credits"],
+        "credits_min": course["creditsMin"],
+        "credits_max": course["creditsMax"],
         "term": course["term"],
         "prereq_codes": list(course["prereqCodes"]),
         "gened_ids": gened_ids(course, categories),

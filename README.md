@@ -113,7 +113,7 @@ known data quality issues.
 
 ## Chunking
 
-One course is one chunk — descriptions are short (p50 111 tokens, max 523, against an 8191-token
+One course is one chunk — descriptions are short (p50 112 tokens, max 526, against an 8191-token
 embedding limit), so splitting would only scatter a course's facts across several vectors.
 
 ```bash
@@ -123,7 +123,7 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```
 doc_id   2026-sp:CS-374
-metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
+metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits_min": 4.0, "credits_max": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
 chroma   {"code": "CS 374", …, "prereq_codes": "CS 173|CS 225|MATH 213", "gened_ids": ""}
 text
 CS 374 — Introduction to Algorithms & Models of Computation
@@ -180,7 +180,9 @@ is quoted by seven), and an inherited description is the *source's* answer to "w
 about", which is only as true as the catalog's claim that the two are the same course.
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
-credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
+credits_min, credits_max, term, prereq_codes, gened_ids` for filtering — credits as a *pair*, because
+1,415 courses (31%) are variable-credit and one number could only ever name one end of the range
+(#17), so `credits_min <= n <= credits_max` is the filter for "can I take this for n credits". `chunks.jsonl` is **not** committed: unlike
 the exported `data/*.json`, it is rebuilt from them by the command above with no private input.
 Its `chunks.meta.json` sidecar records a `chunk_key` — a hash of just the term, strategy, template
 version and field list — so an index build can detect chunks left over from another template while

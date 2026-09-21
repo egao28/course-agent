@@ -12,10 +12,10 @@ files and the indexes built from them always belong to the same CSV. After repla
 
 | File | Source | Status |
 |---|---|---|
-| `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 2.9 MB, term `2026-sp` |
+| `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 3.2 MB, term `2026-sp` |
 | `prereqs.json` | Same source; `prereqCodes` / `coreqCodes` filtered to courses in the catalog | done — 2,086 prerequisite + 34 corequisite edges |
 | `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; major requirements are not in the CSV, source TBD | done — 13 Gen Ed categories, `majors: []` |
-| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.1 MB, **not committed** (rebuildable, see below) |
+| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.2 MB, **not committed** (rebuildable, see below) |
 
 Note: `almabot-web/public/courses.json` truncates `desc` to 240 chars and `attrs` to 160, and has no
 term field. **Do not copy it over.** Re-export the full text from the CSV.
@@ -36,7 +36,8 @@ each code wins.
 | `code`, `subject`, `number` | `"CS 374"`, `"CS"`, `"374"` |
 | `name` | HTML entities decoded |
 | `term` | From `YearTerm`, falling back to `Year` + `Term`; checked against `data.term` |
-| `credits` | First number in `Credit Hours`, or the maximum when the first is 0 (`"0 TO 4 hours."` → 4.0) |
+| `creditsRaw` | The `Credit Hours` column **verbatim** (`"3 OR 4 hours."`) — the only lossless form |
+| `creditsMin`, `creditsMax` | Inclusive bounds parsed from it (3.0 / 4.0), equal for a fixed-credit course |
 | `desc` | **Full** description, untruncated (p50 366 chars, max 2,429) |
 | `attrs` | Full `Degree Attributes` |
 | `prereqRaw` | The **whole** requirements block: from the `Prerequisite:` label to the end of the description |
@@ -89,9 +90,9 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```json
 {"doc_id": "2026-sp:CS-374", "text": "CS 374 — Introduction to Algorithms...",
- "metadata": {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0,
-              "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
-              "gened_ids": []}}
+ "metadata": {"code": "CS 374", "subject": "CS", "number": "374", "credits_min": 4.0,
+              "credits_max": 4.0, "term": "2026-sp",
+              "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}}
 ```
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` — readable in a ranked list, and term-scoped so a second term can
@@ -109,6 +110,32 @@ index build can tell whether the chunks on disk were built under its own config.
 which also moves when `seed`, `bm25` or `fusion` is tuned and the chunks on disk stay valid.
 `tokens` is `null` when the run could not fetch the tokenizer vocabulary, which also means those
 chunks were never checked against the 8191-token embedding limit.
+
+## How credit hours are read
+
+**1,415 of 4,502 courses (31%) are variable-credit** — 834 written `X TO Y`, 581 `X OR Y` — so no
+single number describes the catalog. `creditsRaw` keeps the column verbatim and the chunk renders
+the whole range:
+
+| `Credit Hours` | `creditsRaw` | min / max | rendered |
+|---|---|---|---|
+| `3 hours.` | `"3 hours."` | 3.0 / 3.0 | `Credits: 3` |
+| `3 OR 4 hours.` | `"3 OR 4 hours."` | 3.0 / 4.0 | `Credits: 3 or 4` |
+| `1 TO 5 hours.` | `"1 TO 5 hours."` | 1.0 / 5.0 | `Credits: 1 to 5` |
+| `0 hours.` | `"0 hours."` | 0.0 / 0.0 | `Credits: 0` |
+
+`credits_min <= n <= credits_max` is the filter for "can this be taken for n credits": it answers
+for fixed- and variable-credit courses alike, and finds 2,184 courses that can be taken for 4
+against the 1,009 a single number found. **The connector is kept because the two are different
+claims** — a `3 OR 4` course is worth one of the two, a `1 TO 5` course anything between — which
+also means the min/max *interval* over-reports an `OR` course: AAS 465 is 3 or 4, never 3.5. Read
+`creditsRaw` (or the rendered line) when the answer has to be exact.
+
+The export refuses to write a course whose `Credit Hours` it cannot read, rather than leaving
+`null` bounds that every credit filter skips silently; all 67 distinct strings in the pinned CSV
+parse. `Section Credit Hours` is a different column that can differ per section (3,257 of 12,823
+rows disagree with the course-level one, e.g. AAS 465 has both a 3-hour and a 4-hour section) — the
+course-level column is the one the catalog page shows, and the one exported here.
 
 ## How the requirements block is read
 

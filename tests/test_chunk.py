@@ -74,7 +74,7 @@ Degree Attributes: None"""
 
 #: ...and for one that fills none of the optional ones.
 CWL593_CHUNK = """CWL 593 — Directed Research
-Credits: 1
+Credits: 1 to 5
 Term: 2026-sp
 Description:
 Prerequisites: None listed
@@ -374,11 +374,43 @@ def test_crossref_counts_reports_what_a_template_could_resolve(courses):
 
 
 @pytest.mark.parametrize(
-    ("credits", "expected"),
-    [(3.0, "3"), (4.0, "4"), (1.5, "1.5"), (0.5, "0.5"), (0.0, "0")],
+    ("raw", "expected"),
+    [
+        ("3 hours.", "3"),
+        ("4 hours.", "4"),
+        ("1.5 hours.", "1.5"),
+        ("0.5 hours.", "0.5"),
+        ("0 hours.", "0"),  # a real value, rendered as written
+    ],
 )
-def test_format_credits_drops_a_trailing_zero(credits, expected):
-    assert ch.format_credits(credits) == expected
+def test_format_credits_renders_a_fixed_value_without_a_trailing_zero(raw, expected):
+    assert ch.format_credits(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("3 OR 4 hours.", "3 or 4"),
+        ("1 TO 5 hours.", "1 to 5"),
+        ("0 TO 16 hours.", "0 to 16"),
+        ("0 OR 1 hours.", "0 or 1"),
+    ],
+)
+def test_format_credits_renders_the_whole_range(raw, expected):
+    # Not one end of it: "Credits: 3" on a "3 OR 4" course is a number the catalog never gives,
+    # and it is the number an agent quotes back (#17). The catalog's connector is kept, because
+    # "3 or 4" and "1 to 5" are different claims about what the course can be taken for.
+    assert ch.format_credits(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("hours to be arranged.", "hours to be arranged."), ("", "not listed"), (None, "not listed")],
+)
+def test_format_credits_never_invents_a_number(raw, expected):
+    # A string the parser cannot read is quoted verbatim rather than flattened to 0 -- the
+    # export refuses to ship one, so this is the belt to that braces.
+    assert ch.format_credits(raw) == expected
 
 
 # --- doc_id -------------------------------------------------------------------------------------
@@ -411,12 +443,41 @@ def test_metadata_carries_exactly_the_filterable_fields(by_code, categories):
         "code": "CS 374",
         "subject": "CS",
         "number": "374",
-        "credits": 4.0,
+        "credits_min": 4.0,
+        "credits_max": 4.0,
         "term": "2026-sp",
         # Unfiltered: MATH 213 is not offered this term but stays visible in the metadata.
         "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
         "gened_ids": [],
     }
+
+
+def test_metadata_carries_a_variable_credit_course_as_two_bounds(by_code, categories):
+    meta = ch.chunk_metadata(by_code["CS 173"], categories)
+    assert (meta["credits_min"], meta["credits_max"]) == (3.0, 4.0)
+    assert "credits" not in meta  # the flattened value is gone, and held 3.0 for this course
+
+
+def test_metadata_answers_which_courses_can_be_taken_for_four_credits(courses, categories):
+    # The filter #17 asks for, run over the metadata a store would hold.
+    metas = [ch.chunk_metadata(c, categories) for c in courses]
+    four = sorted(m["code"] for m in metas if m["credits_min"] <= 4 <= m["credits_max"])
+    assert four == [
+        "ANTH 390",
+        "BADM 537",
+        "CS 173",
+        "CS 225",
+        "CS 233",
+        "CS 374",
+        "CS 421",
+        "CWL 593",
+        "ECON 102",
+        "PHYS 211",
+        "STAT 425",
+    ]
+    # ...and the chunk text agrees with the metadata, so an agent reading either gets the range.
+    cs173 = next(c for c in courses if c["code"] == "CS 173")
+    assert "Credits: 3 or 4" in ch.render_chunk(cs173, "v1")
 
 
 def test_gened_ids_follow_the_exported_rules(by_code, categories):
@@ -437,7 +498,7 @@ def test_chroma_metadata_flattens_lists_into_scalars(by_code, categories):
     flat = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
     assert flat["prereq_codes"] == "CS 173|CS 225|MATH 213"
     assert flat["gened_ids"] == ""
-    assert flat["credits"] == 4.0  # scalars are left alone
+    assert flat["credits_min"] == 4.0  # scalars are left alone
     assert all(isinstance(v, (str, int, float, bool)) for v in flat.values())
 
 

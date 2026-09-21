@@ -16,7 +16,7 @@ data:
 chunk:
   strategy: one_course_one_chunk
   template_version: v1
-  fields: [code, name, credits, term, desc, prereqRaw, attrs]
+  fields: [code, name, creditsRaw, term, desc, prereqRaw, attrs]
 embedding:
   provider: openai            # openai | local
   model: text-embedding-3-small
