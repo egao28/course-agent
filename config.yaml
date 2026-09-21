@@ -34,3 +34,11 @@ fusion:
   rrf_k: 60
   top_k_each: 20
   top_k_final: 5
+# The chat model, used exactly twice: the intent router and the grounded answer node. Hashed like
+# everything else here, so a report is named after the prompt settings that produced it — but it
+# reaches neither index key, so adding this section left both indexes where they were (see llm.py).
+llm:
+  provider: openai            # openai — the `local` route embedding: offers has no chat twin yet
+  model: gpt-4o-mini
+  temperature: 0              # routing and grounded answering are both deterministic tasks
+  max_tokens: 800

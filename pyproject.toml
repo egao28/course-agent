@@ -16,6 +16,12 @@ dependencies = [
     "tqdm",
     "python-dotenv",
     "tiktoken",
+    # Day 2: the agent graph, the MCP server over its tools, and the schemas those tools declare.
+    # pydantic already arrives transitively through chromadb and fastmcp, but the tool schemas are
+    # ours, so the import belongs to a direct dependency.
+    "langgraph",
+    "fastmcp",
+    "pydantic",
 ]
 
 [project.optional-dependencies]

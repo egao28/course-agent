@@ -35,7 +35,7 @@ from config import (
 FIXTURE = Path(__file__).parent / "fixtures" / "config_fixture.yaml"
 HEX8 = re.compile(r"^[0-9a-f]{8}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_SECTIONS = {"seed", "data", "chunk", "embedding", "bm25", "fusion"}
+REQUIRED_SECTIONS = {"seed", "data", "chunk", "embedding", "bm25", "fusion", "llm"}
 
 
 @pytest.fixture
@@ -238,6 +238,18 @@ def test_the_two_index_keys_do_not_move_each_other(cfg):
     other_model = {**cfg["embedding"], "model": "text-embedding-3-large"}
     remodelled = Config({**cfg.to_dict(), "embedding": other_model})
     assert bm25_key(remodelled, "c0ffee00") == bm25_key(cfg, "c0ffee00")
+
+
+def test_a_new_section_moves_the_config_hash_and_neither_index_key(cfg):
+    # Day 2 adds `llm:` to config.yaml, which is the general case: a section that no index is a
+    # function of must rename the reports and leave both indexes answering to the names they
+    # already have -- otherwise arriving at Day 2 orphans a dense index that cost money to build.
+    with_llm = Config(
+        {**cfg.to_dict(), "llm": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0}}
+    )
+    assert with_llm.hash != cfg.hash
+    assert collection_name(with_llm, "c0ffee00") == collection_name(cfg, "c0ffee00")
+    assert bm25_key(with_llm, "c0ffee00") == bm25_key(cfg, "c0ffee00")
 
 
 def test_bm25_key_says_so_when_there_is_no_section_to_hash(cfg):
