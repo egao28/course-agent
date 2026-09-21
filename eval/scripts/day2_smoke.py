@@ -25,9 +25,9 @@ answer, and whether a model stays inside its evidence, are *not* measured by it.
 
 **The report carries no timestamp and no latency**, so nothing in it moves unless the run did:
 under ``--fake-model`` a re-run rewrites a byte-identical file, and a live re-run differs exactly
-as much as the model answered differently (``temperature: 0`` is not determinism -- two
-consecutive live runs of the ten queries disagreed on one row, once answering it and once
-drafting an answer that cited nothing and was discarded). A diff under ``report/`` is therefore a
+as much as the model answered differently (``temperature: 0`` is not determinism -- over four
+live runs of the ten queries one row moved, answered three times and once drafted with no
+citation at all, which #38's check discarded). A diff under ``report/`` is therefore a
 change in behaviour, never a change in the clock. What the run was is in the name (the config
 hash) and in the header.
 """

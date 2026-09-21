@@ -9,12 +9,12 @@ uv run --env-file .env python -m eval.scripts.day2_smoke
 
 |  |  |
 | --- | --- |
-| config hash | `e0d6ff30` |
+| config hash | `7980f15f` |
 | catalog term | `2026-sp` |
 | retrieval mode | `bm25` (`agent.retrieval_mode`) |
 | index | `indexes/bm25_877a6610.pkl` |
 | evidence gate | `top_score`, bm25 threshold `15.0` |
-| prompts | router `v1`, answer `v1` |
+| prompts | router `v2`, answer `v1` |
 | answers written by | `gpt-4o-mini` |
 | queries | `eval/datasets/day2_queries.jsonl`, 10 rows |
 
@@ -32,8 +32,8 @@ What the run does establish: the graph, the dispatch table, the three tools, the
 | exit | expected | actual |
 | --- | --- | --- |
 | `answer` | 5 | 4 |
-| `refuse_handoff` | 4 | 3 |
-| `out_of_scope` | 1 | 3 |
+| `refuse_handoff` | 4 | 5 |
+| `out_of_scope` | 1 | 1 |
 
 **All three exits fired.** That is Day 2's acceptance, and this is the count.
 
@@ -47,32 +47,20 @@ What the run does establish: the graph, the dispatch table, the three tools, the
 | 4 | Which intro machine learning course should I take? | `compare_recommend` | `answer` |  |
 | 5 | What does the algorithms course cover? | `course_fact` | `answer` → `refuse_handoff` | ✗ |
 | 6 | What is left for the Physics major if I have taken PHYS 211? | `degree_requirement` | `refuse_handoff` |  |
-| 7 | What are the prerequisites? | `prereq_chain` → `out_of_scope` | `refuse_handoff` → `out_of_scope` | ✗ |
+| 7 | What are the prerequisites? | `prereq_chain` | `refuse_handoff` |  |
 | 8 | How many credits is CS 428? | `course_fact` | `refuse_handoff` |  |
-| 9 | Is there a course about quantum origami? | `compare_recommend` → `out_of_scope` | `refuse_handoff` → `out_of_scope` | ✗ |
+| 9 | Is there a course about quantum origami? | `compare_recommend` | `refuse_handoff` |  |
 | 10 | Who is the head football coach at Illinois? | `out_of_scope` | `out_of_scope` |  |
 
 ## Disagreements
 
-3 of 10 rows did something other than what the dataset expects. They are listed here rather than re-labelled in `day2_queries.jsonl`: the expectation is what the row should do, and the gap is the finding.
+1 of 10 rows did something other than what the dataset expects. They are listed here rather than re-labelled in `day2_queries.jsonl`: the expectation is what the row should do, and the gap is the finding.
 
 **5. What does the algorithms course cover?**
 
 - expected `answer` by way of `course_fact`, got `refuse_handoff` by way of `course_fact`
 - evidence: retrieve(bm25), 5 hits; gate: refused -- 11.7914 < 15.0 (bm25)
 - why the row is in the set: The other half of the course_fact row: same intent, no code in the question, so the fact has to come out of the retriever. expected_exit is what this should do once the dense index exists; on bm25 alone it does not, which is a finding and not a mislabelled row.
-
-**7. What are the prerequisites?**
-
-- expected `refuse_handoff` by way of `prereq_chain`, got `out_of_scope` by way of `out_of_scope`
-- evidence: not gathered -- the router's own exit ended the run; gate: not reached -- no evidence was gathered for this run
-- why the row is in the set: A prerequisite question that names no course. Which one was meant is not something to guess at: answering confidently about the wrong course is worse than not answering, so the hand-off asks for a code.
-
-**9. Is there a course about quantum origami?**
-
-- expected `refuse_handoff` by way of `compare_recommend`, got `out_of_scope` by way of `out_of_scope`
-- evidence: not gathered -- the router's own exit ended the run; gate: not reached -- no evidence was gathered for this run
-- why the row is in the set: A topical query with nothing behind it. BM25 always returns something -- the top hit is a real course about something else -- so this is the row the evidence gate exists for. The label is arguable (a code-free course_fact retrieves too, and lands in the same place); worth watching when the router is live.
 
 ## The 10 runs
 
@@ -172,7 +160,7 @@ uv run --env-file .env python -m agent "Which intro machine learning course shou
 
 **Answer** — written by the model, citing `2026-sp:IS-557` — each checked against the evidence above.
 
-> The catalog does not carry a recommendation for which intro machine learning course to take. [2026-sp:IS-557]
+> The catalog does not carry a recommendation for which intro machine learning course to take [2026-sp:IS-557].
 
 ### 5. What does the algorithms course cover?
 
@@ -242,14 +230,20 @@ uv run --env-file .env python -m agent "What are the prerequisites?"
 
 |  | expected | actual |  |
 | --- | --- | --- | --- |
-| intent | `prereq_chain` | `out_of_scope` | ✗ — classified |
-| exit | `refuse_handoff` | `out_of_scope` | ✗ |
+| intent | `prereq_chain` | `prereq_chain` | classified |
+| exit | `refuse_handoff` | `refuse_handoff` |  |
 
-**Evidence** — not gathered -- the router's own exit ended the run. Gate: not reached -- no evidence was gathered for this run.
+**Evidence** — none -- the tool it needed reported no_course_code. Gate: refused -- no_course_code: there is nothing to be confident about.
 
 **Answer** — fixed text: neither refusal exit calls a model.
 
-> That is outside what I can answer. I work from one source -- the University of Illinois course catalog for 2026-sp -- which lets me answer questions about course descriptions and credits, prerequisite chains, and progress against the Gen Ed requirements. I have not tried to answer this one from general knowledge.
+> I could not answer this from the 2026-sp course catalog, so I am handing it over rather than guessing.
+>
+> What you asked: What are the prerequisites?
+> Where I stopped: the question does not name a course, and which one was meant is not something to guess at -- answering confidently about the wrong course is worse than not answering
+> What would get it answered: name it by code: 'CS 374', 'cs 374' and 'CS374' all reach the same catalog record
+>
+> An academic advisor can also see what this catalog export cannot -- your transcript, program requirements outside the Gen Eds, and sections as they actually fill.
 
 ### 8. How many credits is CS 428?
 
@@ -286,14 +280,28 @@ uv run --env-file .env python -m agent "Is there a course about quantum origami?
 
 |  | expected | actual |  |
 | --- | --- | --- | --- |
-| intent | `compare_recommend` | `out_of_scope` | ✗ — classified |
-| exit | `refuse_handoff` | `out_of_scope` | ✗ |
+| intent | `compare_recommend` | `compare_recommend` | classified |
+| exit | `refuse_handoff` | `refuse_handoff` |  |
 
-**Evidence** — not gathered -- the router's own exit ended the run. Gate: not reached -- no evidence was gathered for this run.
+**Evidence** — retrieve(bm25), 5 hits. Gate: refused -- 11.0561 < 15.0 (bm25).
+
+| # | score | doc_id | first line of the block |
+| --- | --- | --- | --- |
+| 1 | 11.0561 | `2026-sp:ECE-305` | ECE 305 — Quantum Systems I |
+| 2 | 10.7406 | `2026-sp:PHYS-370` | PHYS 370 — Introduction to Quantum Information and Computing |
+| 3 | 10.4175 | `2026-sp:ECE-406` | ECE 406 — Quantum Optics and Devices |
+| 4 | 8.9002 | `2026-sp:CHEM-542` | CHEM 542 — Quantum Mech and Spectroscopy |
+| 5 | 8.7075 | `2026-sp:ECE-532` | ECE 532 — Compnd Semicond & Diode Lasers |
 
 **Answer** — fixed text: neither refusal exit calls a model.
 
-> That is outside what I can answer. I work from one source -- the University of Illinois course catalog for 2026-sp -- which lets me answer questions about course descriptions and credits, prerequisite chains, and progress against the Gen Ed requirements. I have not tried to answer this one from general knowledge.
+> I could not answer this from the 2026-sp course catalog, so I am handing it over rather than guessing.
+>
+> What you asked: Is there a course about quantum origami?
+> Where I stopped: nothing matched closely enough -- the best bm25 match scored 11.0561, against the bm25 threshold of 15.0
+> What would get it answered: try the words the catalog itself uses (a subject code, a course title), or ask for one course at a time
+>
+> An academic advisor can also see what this catalog export cannot -- your transcript, program requirements outside the Gen Eds, and sections as they actually fill.
 
 ### 10. Who is the head football coach at Illinois?
 
