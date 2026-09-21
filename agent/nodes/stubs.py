@@ -1,16 +1,16 @@
-"""The two nodes #37-#38 fill in, standing in until they do.
+"""The node #38 fills in, standing in until it does.
 
-Each one raises, and that is the decision worth explaining. A stub that returned something
-plausible -- an ``answer`` string, ``evidence_ok=True`` -- would let the graph run end to end
-today, and #39's smoke report would be produced from it: ten queries, three exits, a table of
-numbers, and not one model call behind any of it. A report that reads as a run is worse than no
-report, and the point of the whole Day 2 milestone is that the trace is honest.
+It raises, and that is the decision worth explaining. A stub that returned something plausible --
+an ``answer`` string -- would let the graph run end to end today, and #39's smoke report would be
+produced from it: ten queries, three exits, a table of numbers, and not one model call behind any
+of it. A report that reads as a run is worse than no report, and the point of the whole Day 2
+milestone is that the trace is honest.
 
-So ``build_graph()`` compiles with these in place -- the wiring, the routing, the two fixed exits
-and now the router and the dispatcher are all testable without them -- and ``run()`` raises the
-moment it reaches one, naming the issue that fills it in. The three exits are proven by injecting
-nodes (see ``tests/test_graph.py``), which is also how #37-#38 will each be tested on their own
-before either can run with the other.
+So ``build_graph()`` compiles with it in place -- the wiring, the routing, the two fixed exits and
+now the router, the dispatcher and the evidence gate are all testable without it -- and ``run()``
+raises the moment it reaches it, naming the issue that fills it in. The three exits are proven by
+injecting nodes (see ``tests/test_graph.py``), which is also how each real node was tested before
+the next one existed.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from config import Config
 #: The node name, the issue that implements it, and what it is for -- so a traceback names the
 #: work rather than the placeholder. An entry disappears from here as its issue lands.
 PENDING: dict[str, tuple[int, str]] = {
-    "check_evidence": (37, "decide whether the evidence is enough to answer from"),
     "answer": (38, "write the answer from the evidence and verify its citations"),
 }
 

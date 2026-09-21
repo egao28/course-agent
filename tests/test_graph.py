@@ -1,19 +1,18 @@
 """Tests for agent/graph.py and the two fixed exits: the wiring, the routing, the three exits.
 
-Every node here is injected. Two of the six are stubs until #37-#38 land, so the graph is driven
-with fakes -- which is not a workaround but the acceptance for #34: the skeleton is correct if a
-run reaches each of the three exits and the final state says which one it took, whatever the nodes
-themselves do. It is also how #37-#38 will each be tested before either can run with the other,
-and how #39's CLI runs at all while the account has no OpenAI credits. The two real nodes have
-their own files, ``tests/test_route_intent.py`` and ``tests/test_dispatch.py``; here they are fakes
-like the rest.
+Every node here is injected. One of the six is a stub until #38 lands, so the graph is driven with
+fakes -- which is not a workaround but the acceptance for #34: the skeleton is correct if a run
+reaches each of the three exits and the final state says which one it took, whatever the nodes
+themselves do. It is also how each real node was tested before the next one existed, and how #39's
+CLI runs at all while the account has no OpenAI credits. The three real nodes have their own files,
+``tests/test_route_intent.py``, ``tests/test_dispatch.py`` and ``tests/test_check_evidence.py``;
+here they are fakes like the rest.
 
 ``cfg`` is a synthetic config, not the live ``config.yaml``: the skeleton reads ``data.term`` from
-it for the two exit messages, the ``llm`` section is what the router validates when it is built
-and the ``agent`` section is what the dispatcher validates (no key is read, no client is made and
-no index is opened -- see ``agent/nodes/route_intent.py`` and ``agent/nodes/dispatch.py``). One
-section at the end runs against the live config, to prove the default ``run(query)`` path resolves
-it.
+it for the two exit messages, and the ``llm`` / ``agent`` / ``evidence`` sections are what the
+router, the dispatcher and the gate each validate when they are built (no key is read, no client is
+made and no index is opened -- see the three node modules). One section at the end runs against the
+live config, to prove the default ``run(query)`` path resolves it.
 """
 
 from __future__ import annotations
@@ -33,6 +32,9 @@ TERM = "2026-sp"
 LLM = {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0, "max_tokens": 800}
 #: bm25 because it is the mode that runs today; every test here overrides the node anyway.
 AGENT = {"retrieval_mode": "bm25"}
+#: What #37's gate validates when the graph builds it. Round numbers: the live thresholds are
+#: measured and are asserted in ``tests/test_check_evidence.py``.
+EVIDENCE = {"method": "top_score", "thresholds": {"bm25": 10.0, "dense": 0.4, "hybrid": 0.025}}
 LOOKUP = Evidence(
     doc_id="CS 374", text="CS 374 - Algorithms. 4 hours.", score=None, source="get_course"
 )
@@ -41,7 +43,7 @@ CHUNK = Evidence(doc_id="2026-sp:CS-374", text="CS 374 - Algorithms", score=29.0
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config({"data": {"term": TERM}, "llm": LLM, "agent": AGENT})
+    return Config({"data": {"term": TERM}, "llm": LLM, "agent": AGENT, "evidence": EVIDENCE})
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +79,7 @@ def dispatcher(docs: list[Evidence], tool_error: str | None = None, mode: str | 
 
 
 def gate(ok: bool, score: float | None = None, threshold: float | None = None):
-    """A stand-in for #37: the verdict, and the two numbers the hand-off message can quote."""
+    """A stand-in for the gate: the verdict, and the two numbers the hand-off can quote."""
 
     def node(state):
         return {
@@ -109,7 +111,7 @@ ANSWERING = {
 # --- the shape of the graph -----------------------------------------------------------------------
 
 
-def test_build_graph_compiles_with_the_remaining_nodes_still_stubs(cfg):
+def test_build_graph_compiles_with_the_remaining_node_still_a_stub(cfg):
     # #34's first acceptance: the skeleton stands up before the nodes behind it exist.
     compiled = ag.build_graph(cfg)
     assert sorted(compiled.get_graph().nodes) == [
@@ -361,28 +363,20 @@ def test_route_after_answer_ends_the_run_on_a_kept_answer():
 
 
 def test_the_pending_nodes_are_the_issues_still_open():
-    # One line shorter than it was: #36 landed, so dispatch is no longer among them.
-    assert {name: issue for name, (issue, _) in stubs.PENDING.items()} == {
-        "check_evidence": 37,
-        "answer": 38,
-    }
+    # One line shorter than it was: #37 landed, so the gate is no longer among them.
+    assert {name: issue for name, (issue, _) in stubs.PENDING.items()} == {"answer": 38}
 
 
-def test_a_stub_names_its_issue_and_the_key_it_owes(cfg):
+def test_a_stub_names_its_issue_and_the_key_it_owes():
     # It raises rather than returning something plausible: a stub that answered would let #39
-    # produce a smoke report with no model call and no gate behind any of its rows.
-    with pytest.raises(NotImplementedError, match=r"'check_evidence' node is a stub.*#37"):
-        ag.run(
-            "q",
-            cfg=cfg,
-            nodes={
-                "route_intent": router("course_fact"),
-                "dispatch": dispatcher([LOOKUP]),
-            },
-        )
+    # produce a smoke report with no model call behind any of its rows.
+    with pytest.raises(NotImplementedError, match=r"'answer' node is a stub.*answer, exit.*#38"):
+        stubs.stub("answer")(initial_state("q"))
 
 
-def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
+def test_a_run_reaches_the_stub_only_after_the_earlier_nodes_ran(cfg):
+    # Three real nodes deep now: the injected dispatcher's lookup block passes the real gate
+    # (score=None), and the run gets as far as the one node that is still nobody's.
     with pytest.raises(NotImplementedError, match=r"'answer' node is a stub.*#38"):
         ag.run(
             "q",
@@ -390,7 +384,6 @@ def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
             nodes={
                 "route_intent": router("course_fact"),
                 "dispatch": dispatcher([LOOKUP]),
-                "check_evidence": gate(True),
             },
         )
 
@@ -419,7 +412,8 @@ def test_an_override_replaces_one_node_and_leaves_the_other_five(cfg):
     built = ag.build_nodes(cfg, {"route_intent": fake})
     assert built["route_intent"] is fake
     assert len(built) == 6
-    assert built["check_evidence"].__name__ == "stub_check_evidence"
+    assert built["check_evidence"].__name__ == "check_evidence"
+    assert built["answer"].__name__ == "stub_answer"
 
 
 def test_an_overridden_node_is_never_built(cfg, monkeypatch):
@@ -444,7 +438,7 @@ def test_a_typo_in_an_override_is_refused_rather_than_ignored(cfg):
 
 def test_the_graph_is_compiled_once_per_config(cfg):
     assert ag.get_graph(cfg) is ag.get_graph(cfg)
-    other = Config({"data": {"term": "2026-fa"}, "llm": LLM, "agent": AGENT})
+    other = Config({"data": {"term": "2026-fa"}, "llm": LLM, "agent": AGENT, "evidence": EVIDENCE})
     assert ag.get_graph(other) is not ag.get_graph(cfg)
 
 

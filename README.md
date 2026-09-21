@@ -57,10 +57,10 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "51939bdf", frozen at load
+cfg.hash                         # "e0d6ff30", frozen at load
 collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
 bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_51939bdf.md  dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_e0d6ff30.md  dir created on demand
 rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
@@ -177,7 +177,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash 51939bdf  (chunk key 05d00726)
+config hash e0d6ff30  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -249,7 +249,7 @@ uv run python -m ingest.build_bm25
 ```
 
 ```
-config hash 51939bdf  (bm25 key 877a6610)
+config hash e0d6ff30  (bm25 key 877a6610)
 documents indexed      4502
 vocabulary             21500 terms
 terms emitted          298000  (mean 66.2 per chunk)
@@ -401,7 +401,7 @@ uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 1
 ```
 
 ```
-'CS 374'  ->  5 hits, mode bm25, config 51939bdf, 1.9 ms
+'CS 374'  ->  5 hits, mode bm25, config e0d6ff30, 1.9 ms
 
 #  doc_id             score  name                                            sources
 1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
@@ -428,7 +428,7 @@ between them.
 The result carries what a report has to quote next to the hits:
 
 ```python
-RetrievalResult(query=…, mode="hybrid", config_hash="51939bdf", hits=[Hit, …], latency_ms=128.4)
+RetrievalResult(query=…, mode="hybrid", config_hash="e0d6ff30", hits=[Hit, …], latency_ms=128.4)
 ```
 
 `config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
@@ -740,10 +740,10 @@ state["signals"]    # every number the run measured on the way
 
 `run(query, cfg=None, nodes=None)` is the whole public surface — the CLI ([#39](../../issues/39))
 and every test call that, not the compiled graph, so compilation, the config plumbing and the
-final-state check have one home. The router and the dispatcher are real (see
-[below](#intent-router)); the gate and the answer node are stubs until
-[#37](../../issues/37)–[#38](../../issues/38) land. `nodes=` replaces any of them by name, which is
-how the three exits are exercised today and how each node is tested on its own.
+final-state check have one home. The router, the dispatcher and the evidence gate are real (see
+[below](#intent-router)); the answer node is a stub until [#38](../../issues/38) lands. `nodes=`
+replaces any of them by name, which is how the three exits are exercised today and how each node is
+tested on its own.
 
 **`docs` is one record shape whatever produced it.** A retrieval `Hit` and a tool result both
 become `Evidence(doc_id, text, score, source)` in the dispatch node, so the answer node has a
@@ -788,12 +788,11 @@ An academic advisor can also see what this catalog export cannot -- your transcr
 requirements outside the Gen Eds, and sections as they actually fill.
 ```
 
-**The stubs raise rather than answer.** A stub that returned an `answer` string or
-`evidence_ok=True` would let the graph run end to end today, and #39's smoke report would come out
-of it: ten queries, three exits, a table of numbers, and not one model call behind any row.
-`build_graph()` still compiles with both in place — the wiring, the routing, the two exits, the
-router and the dispatcher are testable without them — and a `run()` that reaches one raises, naming
-the issue that fills it.
+**The stub raises rather than answers.** A stub that returned an `answer` string would let the
+graph run end to end today, and #39's smoke report would come out of it: ten queries, three exits, a
+table of numbers, and not one model call behind any row. `build_graph()` still compiles with it in
+place — the wiring, the routing, the two exits, the router, the dispatcher and the gate are all
+testable without it — and a `run()` that reaches it raises, naming the issue that fills it.
 
 ## Intent router
 
@@ -950,8 +949,105 @@ crash on query one. Adding the section moved the full hash (`ade2f799` → `5193
 **What the retrieval rows are worth today is bm25 alone, and it shows.** "What does the algorithms
 course cover?" is a `course_fact` with no code, so it retrieves — and on the live BM25 index the
 top five are ECON 300, ERAM 557, HDFS 322, UP 230 and IE 531, with CS 374 nowhere in them. That is
-the dense half's job, and the gate ([#37](../../issues/37)) is what has to refuse it in the
-meantime: the row is correct, the index behind it is half-built.
+the dense half's job, and the gate ([below](#evidence-gate)) is what refuses it in the meantime:
+11.79 against a `bm25` threshold of 15.0, so that row hands the question to a person today. The row
+is correct; the index behind it is half-built.
+
+## Evidence gate
+
+`agent/nodes/check_evidence.py` ([#37](../../issues/37)): the third node, and the only place the
+run decides there is not enough to answer from. Day 5 replaces it with conformal prediction; Day
+2's version is a threshold — one per source, because the scores are not comparable:
+
+```yaml
+evidence:
+  method: top_score     # day 5 adds "conformal"
+  thresholds:
+    bm25: 15.0          # Okapi BM25, unbounded
+    dense: 0.35         # 1 - cosine distance — UNMEASURED, the collection is still empty
+    hybrid: 0.025       # RRF = 2/(rrf_k + top_k_each): exactly "both retrievers returned it"
+```
+
+Four outcomes, and only the last one consults a threshold:
+
+| in `docs` / `signals` | verdict | why |
+|---|---|---|
+| `signals["tool_error"]` set | `False` | the tool produced nothing, so there is nothing to be confident *about* |
+| `docs` empty | `False` | a retrieval that came back with nothing — the honest bottom of the scale |
+| any block with `score=None` | `True` | an exact catalog lookup; there is no ranking to be unsure about |
+| otherwise | `score >= thresholds[source]` | the best score in the list, against its own source's number |
+
+**The module holds no number of its own** — a test reads its syntax tree and fails on any float.
+A threshold in the code would be a tuning decision outside the config hash, and the hash is what
+ties a refusal rate in a report to the threshold that produced it.
+
+**Both numbers are recorded on every run, passing or failing.** `signals["retrieval_top_score"]`
+and `signals["evidence_threshold"]`, which is what the hand-off message quotes, and what Day 5
+calibrates on: a gate that compared the score and dropped it would make Day 5 start by re-running
+everything. The *source* is not written twice — `signals["retrieval_mode"]` is the dispatcher's and
+for a scored block it is exactly `Evidence.source`.
+
+**The `bm25` number is a cutoff on this corpus, not a confidence, and the measurements say so.**
+Top-1 scores on the live index, against `bm25: 15.0`:
+
+| query | top-1 | what came first | verdict |
+|---|---|---|---|
+| `How many credits is MATH 241?` | 30.91 | MATH 241 | passes, right |
+| `CS 374` | 29.03 | CS 374 | passes, right |
+| `Which course covers organic chemistry?` | 18.65 | CHEM 360 (Chemistry of the Environment) | passes, wrong |
+| `Which intro machine learning course should I take?` | 18.27 | IS 557 | passes |
+| `I want a course on Shakespeare` | 16.22 | ENGL 218 (Introduction to Shakespeare) | passes, right |
+| `linear algebra` | 14.97 | MATH 227 (Linear Algebra for Data Science) | refused, right |
+| `What does the data structures course cover?` | 13.20 | ERAM 557 (Semiotics) | refused, wrong |
+| `machine learning` | 11.91 | IS 557 | refused |
+| `What does the algorithms course cover?` | 11.79 | ECON 300 | refused, wrong |
+| `Is there a course about quantum origami?` | 11.06 | ECE 305 | refused, wrong |
+| `introduction to statistics` | 9.00 | STAT 400 | refused, right |
+| `algorithms` | 8.48 | CS 374 | refused, right |
+| `asdfghjkl qwertyuiop` | — | no hits at all | refused before any threshold |
+
+Two rows are the whole argument. `algorithms` puts **CS 374 first at 8.48** — exactly right — and
+scores *below* `Is there a course about quantum origami?` at 11.06, which puts ECE 305 first and
+names a course that does not exist: no threshold on this scale admits the first without admitting
+the second. And `machine learning` (11.91) and `Which intro machine learning course should I take?`
+(18.27) return the **same document** — BM25 sums a contribution per query term, so the longer
+sentence scores 53% higher for the same match, which means part of what this threshold measures is
+how many words the question had. It separates the handwritten set correctly and it was chosen from
+that set. It is not a probability, and that gap is what Day 5 closes.
+
+**What an RRF threshold actually means: agreement — written down, because it is not confidence.**
+With `rrf_k: 60` and `top_k_each: 20`, a document one retriever ranked first scores `1/61 = 0.0164`
+and one both retrievers returned at the worst rank either reports scores `2/80 = 0.025`. So any
+threshold above `1/61` is unreachable by a single retriever, and `0.025` is exactly "both
+retrievers returned it" — with the consequence that in a hybrid run where one retriever is silent
+(a nonsense-word query returns no BM25 hits), nothing can clear it and the run hands over.
+
+**One scored source per run.** A `docs` list carrying two retrievers' raw scores is refused rather
+than resolved: "the top score" is only defined inside one source, the two numbers in `signals` can
+only describe one comparison, and a `max()` over two scales is not a decision. The dispatcher
+produces one source per run by construction, which is what makes that safe to rely on.
+
+The ten handwritten queries through the real graph — real dispatch, real gate, the router forced to
+each label so no model is asked (what #39's `--intent` will drive), a stand-in for #38 — on the live
+corpus and the live BM25 index:
+
+```
+exit            evidence_ok  top score  threshold  tool_error        query
+answer          True         —          —          —                 How many credits is MATH 241?
+answer          True         —          —          —                 What do I need before CS 374?
+answer          True         —          —          —                 Which Gen Eds do I still need if I have taken RHET 105 and MATH 241?
+answer          True         18.2746    15.0       —                 Which intro machine learning course should I take?
+refuse_handoff  False        11.7914    15.0       —                 What does the algorithms course cover?
+answer          True         —          —          —                 What is left for the Statistics major if I have taken STAT 200?
+refuse_handoff  False        —          —          no_course_code    What are the prerequisites?
+refuse_handoff  False        —          —          course_not_found  How many credits is CS 999?
+refuse_handoff  False        11.0561    15.0       —                 Is there a course about quantum origami?
+out_of_scope    None         —          —          —                 Who is the head football coach at Illinois?
+```
+
+Five answers (four of them exact lookups that never reached a threshold), four hand-offs, one out
+of scope. Adding the section moved the full hash (`51939bdf` → `e0d6ff30`) and left `chunk_key`
+`05d00726`, `dense_key` `094143d8` and `bm25_key` `877a6610` exactly where they were.
 
 ## Day 1 goal
 

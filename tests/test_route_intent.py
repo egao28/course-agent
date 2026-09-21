@@ -27,11 +27,13 @@ TERM = "2026-sp"
 LLM = {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0, "max_tokens": 800}
 #: What #36's dispatcher validates when the graph builds it; nothing here retrieves.
 AGENT = {"retrieval_mode": "bm25"}
+#: What #37's gate validates when the graph builds it; nothing here reaches it either.
+EVIDENCE = {"method": "top_score", "thresholds": {"bm25": 10.0, "dense": 0.4, "hybrid": 0.025}}
 
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config({"data": {"term": TERM}, "llm": LLM, "agent": AGENT})
+    return Config({"data": {"term": TERM}, "llm": LLM, "agent": AGENT, "evidence": EVIDENCE})
 
 
 @pytest.fixture(autouse=True)
