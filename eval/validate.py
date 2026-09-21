@@ -178,12 +178,19 @@ def parse_items(path: Path) -> tuple[list[Row], list[Violation]]:
             try:
                 rows.append(Row(line, EvalItem.model_validate(raw)))
             except ValidationError as exc:
-                violations.extend(_from_pydantic(line, found, exc))
+                violations.extend(pydantic_violations(line, found, exc))
     return rows, violations
 
 
-def _from_pydantic(line: int, item_id: str | None, exc: ValidationError) -> Iterator[Violation]:
-    """One :class:`Violation` per pydantic error, so a row with three faults reports three."""
+def pydantic_violations(
+    line: int, item_id: str | None, exc: ValidationError
+) -> Iterator[Violation]:
+    """One :class:`Violation` per pydantic error, so a row with three faults reports three.
+
+    Public because the drafting harness (#56) validates the same six fields out of a row that
+    also carries provenance, and a second rendering of pydantic's errors would be a second set
+    of messages for the same fault.
+    """
     for error in exc.errors():
         field = ".".join(str(part) for part in error["loc"]) or None
         message = error["msg"]

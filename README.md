@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1455,6 +1455,87 @@ Eight boundary cases, two per bucket, carry the rest. `tests/test_eval_guideline
 document back against the corpus so its examples cannot rot: every gold id it cites resolves,
 every course it names is in the catalog — except CS 428, whose absence *is* the term-scope rule,
 and which the test asserts is still absent.
+
+## Drafting harness
+
+`eval/scripts/draft_items.py` is the machine half of the eval set: it feeds a model **ten real
+course records at a time** and asks for questions in one bucket, with an answer and the ids that
+support it ([#56](../../issues/56)). It writes **drafts, never dataset rows** — everything lands
+in `eval/datasets/drafts/`, and only the verification pass ([#59](../../issues/59)) promotes
+anything into `v1.jsonl`.
+
+```bash
+uv run --env-file .env python -m eval.scripts.draft_items --bucket fact --batches 20
+uv run python -m eval.scripts.draft_items --bucket fact --batches 3 --fake-model   # no credits
+```
+
+```
+config hash 7980f15f  bucket fact
+batches                3 run, 0 already done, 0 failed  (plan 1-3, 10 records each)
+drafted by             stand-in, prompt v1
+kept                   9 this run, 9 in the file (v1-0001 .. v1-0009)
+dropped                0
+overlap                n 9  min 0.049  p50 0.066  p90 0.098  max 0.098   flagged 1 (>= 0.098)
+credit questions       9  (GUIDELINES rule 2 deletes the ones about a variable-credit course …)
+wrote                  eval/datasets/drafts/fact_7980f15f.standin.jsonl, sidecar … .meta.json
+```
+
+A draft row is a dataset row plus `provenance`, and the extra field is what makes it
+re-generatable and sliceable:
+
+```json
+{
+  "id": "v1-0001", "bucket": "fact",
+  "question": "how many hours is accy 290?",
+  "gold_answer": "ACCY 290 is 3 credit hours.",
+  "gold_doc_ids": ["2026-sp:ACCY-290"], "should_abstain": false,
+  "provenance": {
+    "batch": 1, "batch_doc_ids": ["2026-sp:ACCY-290", "2026-sp:EDUC-499", "…eight more"],
+    "cited_doc_ids": ["2026-sp:ACCY-290"], "subjects": ["ACCY"], "levels": [200],
+    "model": "gpt-4o-mini", "prompt_version": "v1", "config_hash": "7980f15f", "seed": 42,
+    "overlap": 0.0656, "flagged": false, "credit_question": true
+  }
+}
+```
+
+**The sample is seeded, stratified and a prefix.** The order is a function of the corpus and
+`seed` alone — shuffled inside each subject with a private `random.Random(cfg["seed"])`, then
+dealt one course per subject, round-robin — so `--batches 3` and a later `--batches 5` agree on
+batches 1–3 and the resume re-rolls nothing. 4,502 records make 450 batches of ten, each of them
+ten *different* subjects: MUSC's 123 courses get no more of the eval set than a department with
+three.
+
+**Resumable, and the sidecar is why.** `fact_{hash}.meta.json` records which batches ran, what
+each kept and what it dropped. A file of rows cannot say that batch 7 ran and produced nothing,
+and that is exactly the batch a resume must not pay for twice. Rows are appended before the
+sidecar is updated, so a crash between them costs a re-draft whose rows are then dropped as
+duplicates — never a row that was paid for.
+
+**The gold ids are constrained to the batch, and checked anyway.** The prompt hands the model the
+ten `doc_id`s; a row citing anything else is **dropped with a counted reason, never repaired** —
+separately for an id that is not in the corpus at all and one that is real but was not among the
+ten. Shape and the bucket's rules go through the same `eval/schema.py` and `eval.validate.check_row`
+that #59's output is held to, duplicates go through `normalize_question`, and the file is
+re-validated from disk when the run ends.
+
+**The hazard it measures.** A question drafted from a chunk reuses that chunk's rare vocabulary,
+BM25 finds it at rank 1, and the set reports retrieval recall the system does not have. So the
+prompt forbids copying distinctive phrases and asks for the question a student would type; every
+`fact`/`multihop` row records the Jaccard overlap between its question and its gold chunk over
+`ingest/tokenize.py`'s own tokenizer; and the top decile is marked `flagged` for rewriting during
+verification. The absolute numbers are small — a six-term question against a 110-term record
+cannot be otherwise — so what is acted on is the distribution and its top decile, not a threshold.
+
+**One limitation cannot be fixed here.** The drafter and the agent under test are the same model
+family, and shared blind spots inflate every number downstream; no human verification detects that
+a question is one this family finds easy. `--model` drafts with a different model where one is
+available **without touching `config.yaml`**, every row records who wrote it, and the rest is a
+limitation for #62 to report.
+
+`--fake-model` runs the whole harness with `StandInDrafter` and no network: real sampling, real
+parse, real checks, canned questions. Those rows go to a separate `.standin.jsonl` file that
+nothing downstream reads — a canned row in `fact_{hash}.jsonl` would be indistinguishable from a
+drafted one by the time anybody looked.
 
 ## Day 1 goal
 
