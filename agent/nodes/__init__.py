@@ -14,9 +14,10 @@ dictionary -- which is what makes the whole graph runnable with no OpenAI credit
 node is a one-argument function, which is the only thing LangGraph has to know about it.
 
 ``agent.graph`` holds the registry (:data:`~agent.graph.NODE_BUILDERS`), wires the six nodes
-together and wraps each one in :func:`~agent.state.check_update`. The two fixed exits live in
-:mod:`agent.nodes.exits`; the four nodes that are somebody else's issue are stubs in
-:mod:`agent.nodes.stubs` until #35-#38 replace them.
+together and wraps each one in :func:`~agent.state.check_update`. The router is
+:mod:`agent.nodes.route_intent` and the two fixed exits are :mod:`agent.nodes.exits`; the three
+nodes that are somebody else's issue are stubs in :mod:`agent.nodes.stubs` until #36-#38 replace
+them.
 """
 
 from __future__ import annotations

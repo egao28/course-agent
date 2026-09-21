@@ -3,7 +3,7 @@
 "How many credits is CS 374?" names the row it wants, so answering it is a lookup, not a search --
 putting that question through the retriever would rank five plausible chunks where the catalog
 holds one exact answer. This module is that lookup, and it is what the ``course_fact`` intent
-(#35) dispatches to when the query spells a code outright.
+routes to (#36) when the query spells a code outright.
 
 Plain functions over Pydantic models. ``agent/mcp_server.py`` registers them with FastMCP (#33)
 so an MCP client can call them; #36 imports :func:`get_course` and calls it directly,
@@ -63,8 +63,8 @@ class CourseQuery(BaseModel):
     """One course code, in whichever of its spellings the query happened to use.
 
     Declared as a model rather than left as a bare parameter because #33 hands this schema to an
-    MCP client and #35's router fills it from free text: the description below is the only
-    instruction either one gets about what belongs in the field.
+    MCP client and #36's dispatch node fills it from free text: the description below is the
+    only instruction either one gets about what belongs in the field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -200,7 +200,7 @@ def get_course(course_id: str) -> CourseDetail:
     The whole argument has to be one code. ``"CS 374 or ECE 374"`` names two and ``"what is cs 374
     about"`` is a question, and picking a code out of either would be a retrieval decision hiding
     inside a lookup -- both come back as ``found=False`` saying so, and pulling the code out of a
-    sentence is #35's job.
+    sentence is #36's job (the router only labels the question).
     """
     query = CourseQuery(course_id=course_id)
     code = normalize_code(query.course_id)
