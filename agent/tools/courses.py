@@ -6,9 +6,9 @@ holds one exact answer. This module is that lookup, and it is what the ``course_
 (#35) dispatches to when the query spells a code outright.
 
 Plain functions over Pydantic models. ``agent/mcp_server.py`` registers them with FastMCP (#33)
-so an MCP client can call them; #36 imports :func:`get_course` and calls it directly, in-process -- there is no stdio
-subprocess between the graph and its own tools -- and the models live here rather than in the
-server because the schema is the contract either way.
+so an MCP client can call them; #36 imports :func:`get_course` and calls it directly,
+in-process -- there is no stdio subprocess between the graph and its own tools -- and the models
+live here rather than in the server because the schema is the contract either way.
 
 Three decisions, all of them about what a graph can do with the result:
 
