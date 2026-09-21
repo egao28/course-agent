@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them (Day 3), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1428,6 +1428,33 @@ check that does not run on the machine it is for.
 `eval/datasets/day2_queries.jsonl` is **not** retrofitted into this shape. It is
 `{query, expected_intent, expected_exit, note}`, it exists to prove the wiring, and a test asserts
 that it still fails this validator — two artifacts with two jobs, not one artifact with a migration.
+
+## Annotation guidelines
+
+`eval/GUIDELINES.md` is the annotation spec, and it is written **before** the first question is
+drafted ([#55](../../issues/55)): the drafting prompt ([#56](../../issues/56)) is derived from it,
+the verification pass ([#59](../../issues/59)) judges against it, and the second annotator
+([#60](../../issues/60)) is handed that file and nothing else — an agreement number computed
+against a spec written afterwards measures nothing.
+
+One page, settling four things a second person has to be able to apply without asking: what the
+knowledge base is (`data/chunks.jsonl` at term `2026-sp`, the prereq graph, the Gen Ed set, and
+nothing else), when a `gold_answer` is correct, when a refusal is correct, and where the bucket
+boundaries run. Two rules carry most of the disagreements:
+
+- **A refusal is correct when the knowledge base does not hold the answer, not when retrieval
+  missed it.** That gap is the thing Day 4 measures, so relabelling a hard-to-retrieve question
+  `unanswerable` raises the score by deleting the measurement. Labels are read off the chunk —
+  never off a run of the agent, which is the system under test.
+- **`fact` vs `multihop` counts records, not reasoning steps.** CS 374's own chunk prints *"One of
+  CS 173, MATH 213; CS 225."*, so its prerequisite question is one hop however many codes that
+  sentence names; ECE 374's chunk is *"Same as CS 374. See CS 374."* with `Prerequisites: None
+  listed`, so the same question there is two records and a one-id row would certify *"none"*.
+
+Eight boundary cases, two per bucket, carry the rest. `tests/test_eval_guidelines.py` reads the
+document back against the corpus so its examples cannot rot: every gold id it cites resolves,
+every course it names is in the catalog — except CS 428, whose absence *is* the term-scope rule,
+and which the test asserts is still absent.
 
 ## Day 1 goal
 
