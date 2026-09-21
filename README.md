@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # graph.py, tools/          (Day 2+)
+├── agent/         # tools/ (get_course …), graph.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -494,6 +494,46 @@ post-generation citation check cannot see.
 The section is part of the full config hash and reaches neither index key, so adding it renamed the
 reports (`7045a614` → `ade2f799`) and left the dense collection (`094143d8`) and the BM25 pickle
 (`877a6610`) exactly where they were.
+
+## Course lookup
+
+`agent/tools/courses.py` is the first of Day 2's three tools. "How many credits is CS 374?" names
+the row it wants, so it is a lookup rather than a search — running it through the retriever would
+rank five plausible chunks where the catalog holds one exact answer.
+
+```python
+from agent.tools.courses import get_course
+
+get_course("cs 374").credits        # -> 4.0
+get_course("CS374").code            # -> 'CS 374'      (one normalizer, see below)
+get_course("CS 999").found          # -> False         (no exception)
+```
+
+**Not found is a value.** `CS 999`, and anything that is not a course code at all, comes back as
+`found=False` with a message naming the catalog that was searched — the one term `data/courses.json`
+covers, because "no such course" and "not offered this spring" are indistinguishable from inside the
+graph. A tool that raised here would take the "I don't know" exit away from the node that called it.
+
+**The code is normalized by `ingest/tokenize.py`'s matcher**, not by a second regex. `CODE_RE`
+already decides what a course code looks like — BM25 needs `CS 374` / `cs 374` / `CS374` to collapse
+into one term stream — so a tool with its own pattern would eventually accept a spelling the index
+cannot find, and nothing would report the divergence.
+
+**The corpus is read once**, lazily, into a `{code: record}` index behind a module-level cache
+(`clear_cache()` drops it). 4,502 records and 2.9 MB of JSON, several tool calls per query.
+
+The whole argument has to be one code: `"CS 374 or ECE 374"` and `"what is cs 374 about"` are both
+`found=False`. Pulling a code out of a sentence is the router's job ([#35](../../issues/35)).
+
+Both models are Pydantic and `extra="forbid"`: [#33](../../issues/33) registers these functions with
+FastMCP and publishes the schemas, while [#36](../../issues/36) imports `get_course` and calls it
+in-process — there is no stdio subprocess between the graph and its own tools.
+
+> `CourseDetail.credits` is provisional. A record on this branch carries `credits: 4.0`; open
+> [#25](../../issues/25) replaces it with `creditsRaw` / `creditsMin` / `creditsMax`, because 1,415
+> of the 4,502 courses have a credit *range*. Whichever merges second updates the model —
+> `build_index()` raises on a corpus that has already moved rather than report `credits=None` 4,502
+> times.
 
 ## Day 1 goal
 
