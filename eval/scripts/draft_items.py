@@ -860,14 +860,23 @@ class Draft(NamedTuple):
         return {**self.item.model_dump(), "provenance": self.provenance}
 
 
-def parse_drafts(path: Path) -> tuple[list[Draft], list[Violation]]:
+def parse_drafts(
+    path: Path, keys: Sequence[str] = PROVENANCE_KEYS
+) -> tuple[list[Draft], list[Violation]]:
     """Read a draft file into rows, reporting every line that is not one.
 
     A draft is a dataset row **plus** ``provenance``, so it is checked as both: the six fields
     against :class:`eval.schema.EvalItem` (which forbids extras, hence the split) and the
-    provenance object against :data:`PROVENANCE_KEYS`. A row whose provenance is missing or
-    short is an error and not a warning -- it is the half that makes the row re-generatable, and
-    a file of un-re-generatable drafts is a file of anonymous questions.
+    provenance object against ``keys``. A row whose provenance is missing or short is an error
+    and not a warning -- it is the half that makes the row re-generatable, and a file of
+    un-re-generatable drafts is a file of anonymous questions.
+
+    ``keys`` defaults to :data:`PROVENANCE_KEYS`, which is what a *drafted* row records. #57's
+    bucket is constructed rather than drafted, so its rows record a failure shape and a gate
+    reading where these record a batch, a model and a leakage overlap; it passes its own set. The
+    reader is shared because everything else about the two files -- the six fields, the id rules,
+    the duplicate check -- is the same, and a second copy of it would be a second set of messages
+    for one fault.
     """
     rows: list[Draft] = []
     violations: list[Violation] = []
@@ -898,8 +907,8 @@ def parse_drafts(path: Path) -> tuple[list[Draft], list[Violation]]:
                 )
                 provenance = {}
             else:
-                missing = [key for key in PROVENANCE_KEYS if key not in provenance]
-                unknown = [key for key in provenance if key not in PROVENANCE_KEYS]
+                missing = [key for key in keys if key not in provenance]
+                unknown = [key for key in provenance if key not in keys]
                 if missing:
                     violations.append(
                         Violation(line, found, "provenance", f"is missing {', '.join(missing)}")
@@ -920,14 +929,18 @@ def parse_drafts(path: Path) -> tuple[list[Draft], list[Violation]]:
     return rows, violations
 
 
-def check_drafts(path: Path, known: frozenset[str]) -> list[Violation]:
+def check_drafts(
+    path: Path, known: frozenset[str], keys: Sequence[str] = PROVENANCE_KEYS
+) -> list[Violation]:
     """Every check a draft file gets: the row's, the file's, and the provenance's.
 
     :func:`eval.validate.check_counts` is deliberately **not** among them. It compares a file
     against the 120-row plan, and a drafts file is one bucket, mid-run, by construction short --
     a warning saying so on every run is a warning nobody reads.
+
+    ``keys`` is the provenance set to hold the file to; see :func:`parse_drafts`.
     """
-    rows, violations = parse_drafts(path)
+    rows, violations = parse_drafts(path, keys)
     violations.extend(v for row in rows for v in check_row(Row(row.line, row.item), known))
     violations.extend(check_across_rows([Row(row.line, row.item) for row in rows]))
     violations.sort(key=lambda v: (v.line or 0, v.field or ""))

@@ -1,0 +1,39 @@
+{
+  "above_gate": [
+    "v1-2004",
+    "v1-2005",
+    "v1-2006",
+    "v1-2007",
+    "v1-2008",
+    "v1-2009",
+    "v1-2010",
+    "v1-2011",
+    "v1-2012",
+    "v1-2013",
+    "v1-2014",
+    "v1-2015",
+    "v1-2016",
+    "v1-2017",
+    "v1-2018",
+    "v1-2019",
+    "v1-2024"
+  ],
+  "bucket": "unanswerable",
+  "config_hash": "7980f15f",
+  "gate": 15.0,
+  "retrieval_mode": "bm25",
+  "rows": 25,
+  "scored": true,
+  "shapes": {
+    "field_absent": 6,
+    "invented": 6,
+    "not_course": 6,
+    "out_of_term": 7
+  },
+  "source": "constructed",
+  "top_score": {
+    "max": 39.9679,
+    "min": 7.4375,
+    "n": 25
+  }
+}
