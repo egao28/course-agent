@@ -9,10 +9,10 @@ answer in.
 
 The hand-off message is the "转人工" half of Day 2, so it is written as something a person would
 actually read: what was asked, where the run stopped, and what would get the question answered.
-The middle line comes from ``signals`` -- the gate's threshold and score, #36's ``tool_error``, the
-citation check's rejects -- which is the second reason those signals are recorded rather than
-compared and dropped. A refusal that cannot say why it refused teaches the reader nothing, and
-teaches Day 5 less.
+The middle line comes from ``signals`` -- the gate's threshold and score, #36's three
+``tool_error`` labels, the citation check's rejects -- which is the second reason those signals
+are recorded rather than compared and dropped. A refusal that cannot say why it refused teaches
+the reader nothing, and teaches Day 5 less.
 
 ``{term}`` comes from the config rather than from the text, because "the catalog does not say"
 means a particular catalog: ``data/courses.json`` holds one term, and a course that is simply not
@@ -44,9 +44,10 @@ HANDOFF_MESSAGE = (
     "program requirements outside the Gen Eds, and sections as they actually fill."
 )
 
-#: Reason and remedy for each ``signals['tool_error']`` a node can set. #36 defines
-#: ``no_course_code``; anything else is quoted verbatim by :func:`handoff_reason` rather than
-#: guessed at, so a new tool error reaches the reader as itself and shows up here afterwards.
+#: Reason and remedy for each ``signals['tool_error']`` a node can set -- #36's three, declared in
+#: :data:`agent.nodes.dispatch.TOOL_ERRORS` and cross-checked by a test. Anything else is quoted
+#: verbatim by :func:`handoff_reason` rather than guessed at, so a new tool error reaches the
+#: reader as itself and shows up here afterwards.
 REASONS: dict[str, tuple[str, str]] = {
     "no_course_code": (
         (
@@ -54,6 +55,28 @@ REASONS: dict[str, tuple[str, str]] = {
             "guess at -- answering confidently about the wrong course is worse than not answering"
         ),
         "name it by code: 'CS 374', 'cs 374' and 'CS374' all reach the same catalog record",
+    ),
+    "course_not_found": (
+        (
+            "I looked the course up and this catalog does not have it -- either there is no such "
+            "course, or it is not offered in the one term this export covers"
+        ),
+        (
+            "check the subject and the number, or ask for the code it is cross-listed under -- "
+            "the catalog lists 'CS 374' and 'ECE 374' as separate records"
+        ),
+    ),
+    "no_program": (
+        (
+            "I could not tell which program to audit -- this export carries the campus General "
+            "Education rules and a small number of hand-transcribed degrees, and auditing you "
+            "against a program you are not in is wrong in the direction that costs a semester"
+        ),
+        (
+            "name it: 'gened' for the campus General Education requirements, or one of the degrees "
+            "this export carries, the way the catalog spells it -- for anything else, the "
+            "program's catalog page and your department advisor are the source"
+        ),
     ),
 }
 

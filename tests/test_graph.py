@@ -1,16 +1,19 @@
 """Tests for agent/graph.py and the two fixed exits: the wiring, the routing, the three exits.
 
-Every node here is injected. Three of the six are stubs until #36-#38 land, so the graph is driven
+Every node here is injected. Two of the six are stubs until #37-#38 land, so the graph is driven
 with fakes -- which is not a workaround but the acceptance for #34: the skeleton is correct if a
 run reaches each of the three exits and the final state says which one it took, whatever the nodes
-themselves do. It is also how #36-#38 will each be tested before any two of them can run together,
-and how #39's CLI runs at all while the account has no OpenAI credits. The real router (#35) has
-its own file, ``tests/test_route_intent.py``; here it is a fake like the rest.
+themselves do. It is also how #37-#38 will each be tested before either can run with the other,
+and how #39's CLI runs at all while the account has no OpenAI credits. The two real nodes have
+their own files, ``tests/test_route_intent.py`` and ``tests/test_dispatch.py``; here they are fakes
+like the rest.
 
 ``cfg`` is a synthetic config, not the live ``config.yaml``: the skeleton reads ``data.term`` from
-it for the two exit messages, and the ``llm`` section is what the router validates when it is built
-(no key is read and no client is made -- see ``agent/nodes/route_intent.py``). One section at the
-end runs against the live config, to prove the default ``run(query)`` path resolves it.
+it for the two exit messages, the ``llm`` section is what the router validates when it is built
+and the ``agent`` section is what the dispatcher validates (no key is read, no client is made and
+no index is opened -- see ``agent/nodes/route_intent.py`` and ``agent/nodes/dispatch.py``). One
+section at the end runs against the live config, to prove the default ``run(query)`` path resolves
+it.
 """
 
 from __future__ import annotations
@@ -28,6 +31,8 @@ from config import Config
 
 TERM = "2026-sp"
 LLM = {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0, "max_tokens": 800}
+#: bm25 because it is the mode that runs today; every test here overrides the node anyway.
+AGENT = {"retrieval_mode": "bm25"}
 LOOKUP = Evidence(
     doc_id="CS 374", text="CS 374 - Algorithms. 4 hours.", score=None, source="get_course"
 )
@@ -36,7 +41,7 @@ CHUNK = Evidence(doc_id="2026-sp:CS-374", text="CS 374 - Algorithms", score=29.0
 
 @pytest.fixture
 def cfg() -> Config:
-    return Config({"data": {"term": TERM}, "llm": LLM})
+    return Config({"data": {"term": TERM}, "llm": LLM, "agent": AGENT})
 
 
 @pytest.fixture(autouse=True)
@@ -143,9 +148,9 @@ def test_compiling_opens_no_index_and_needs_no_key(cfg, monkeypatch):
 
 
 def test_importing_the_graph_pulls_in_neither_openai_nor_chromadb():
-    # The #22 rule, one layer up: #36 reaches retrieve() through a lazy builder, so a run that
-    # never retrieves must not pay for chromadb -- and the graph must import in a checkout with no
-    # index and no key.
+    # The #22 rule, one layer up: the dispatcher imports `retrieval`, which builds its retrievers
+    # lazily, so a run that answers from a tool must not pay for chromadb -- and the graph must
+    # import in a checkout with no index and no key.
     code = "import agent.graph, sys; print('openai' in sys.modules, 'chromadb' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False False"
@@ -356,9 +361,8 @@ def test_route_after_answer_ends_the_run_on_a_kept_answer():
 
 
 def test_the_pending_nodes_are_the_issues_still_open():
-    # One line shorter than it was: #35 landed, so route_intent is no longer among them.
+    # One line shorter than it was: #36 landed, so dispatch is no longer among them.
     assert {name: issue for name, (issue, _) in stubs.PENDING.items()} == {
-        "dispatch": 36,
         "check_evidence": 37,
         "answer": 38,
     }
@@ -366,14 +370,7 @@ def test_the_pending_nodes_are_the_issues_still_open():
 
 def test_a_stub_names_its_issue_and_the_key_it_owes(cfg):
     # It raises rather than returning something plausible: a stub that answered would let #39
-    # produce a smoke report with no model call and no lookup behind any of its rows.
-    with pytest.raises(NotImplementedError, match=r"'dispatch' node is a stub.*#36"):
-        ag.run(
-            "How many credits is CS 374?", cfg=cfg, nodes={"route_intent": router("course_fact")}
-        )
-
-
-def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
+    # produce a smoke report with no model call and no gate behind any of its rows.
     with pytest.raises(NotImplementedError, match=r"'check_evidence' node is a stub.*#37"):
         ag.run(
             "q",
@@ -381,6 +378,19 @@ def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
             nodes={
                 "route_intent": router("course_fact"),
                 "dispatch": dispatcher([LOOKUP]),
+            },
+        )
+
+
+def test_a_run_reaches_a_later_stub_only_after_the_earlier_nodes_ran(cfg):
+    with pytest.raises(NotImplementedError, match=r"'answer' node is a stub.*#38"):
+        ag.run(
+            "q",
+            cfg=cfg,
+            nodes={
+                "route_intent": router("course_fact"),
+                "dispatch": dispatcher([LOOKUP]),
+                "check_evidence": gate(True),
             },
         )
 
@@ -409,7 +419,7 @@ def test_an_override_replaces_one_node_and_leaves_the_other_five(cfg):
     built = ag.build_nodes(cfg, {"route_intent": fake})
     assert built["route_intent"] is fake
     assert len(built) == 6
-    assert built["dispatch"].__name__ == "stub_dispatch"
+    assert built["check_evidence"].__name__ == "stub_check_evidence"
 
 
 def test_an_overridden_node_is_never_built(cfg, monkeypatch):
@@ -434,7 +444,7 @@ def test_a_typo_in_an_override_is_refused_rather_than_ignored(cfg):
 
 def test_the_graph_is_compiled_once_per_config(cfg):
     assert ag.get_graph(cfg) is ag.get_graph(cfg)
-    other = Config({"data": {"term": "2026-fa"}, "llm": LLM})
+    other = Config({"data": {"term": "2026-fa"}, "llm": LLM, "agent": AGENT})
     assert ag.get_graph(other) is not ag.get_graph(cfg)
 
 

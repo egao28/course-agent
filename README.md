@@ -36,7 +36,7 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key, prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -57,10 +57,10 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "ade2f799", frozen at load
+cfg.hash                         # "51939bdf", frozen at load
 collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
 bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_ade2f799.md  dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_51939bdf.md  dir created on demand
 rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
@@ -177,7 +177,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash ade2f799  (chunk key 05d00726)
+config hash 51939bdf  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -249,7 +249,7 @@ uv run python -m ingest.build_bm25
 ```
 
 ```
-config hash ade2f799  (bm25 key 877a6610)
+config hash 51939bdf  (bm25 key 877a6610)
 documents indexed      4502
 vocabulary             21500 terms
 terms emitted          298000  (mean 66.2 per chunk)
@@ -401,7 +401,7 @@ uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 1
 ```
 
 ```
-'CS 374'  ->  5 hits, mode bm25, config ade2f799, 1.9 ms
+'CS 374'  ->  5 hits, mode bm25, config 51939bdf, 1.9 ms
 
 #  doc_id             score  name                                            sources
 1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
@@ -428,7 +428,7 @@ between them.
 The result carries what a report has to quote next to the hits:
 
 ```python
-RetrievalResult(query=…, mode="hybrid", config_hash="ade2f799", hits=[Hit, …], latency_ms=128.4)
+RetrievalResult(query=…, mode="hybrid", config_hash="51939bdf", hits=[Hit, …], latency_ms=128.4)
 ```
 
 `config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
@@ -740,10 +740,10 @@ state["signals"]    # every number the run measured on the way
 
 `run(query, cfg=None, nodes=None)` is the whole public surface — the CLI ([#39](../../issues/39))
 and every test call that, not the compiled graph, so compilation, the config plumbing and the
-final-state check have one home. The router is real (see [below](#intent-router)); the three nodes
-behind it are stubs until [#36](../../issues/36)–[#38](../../issues/38) land. `nodes=` replaces any
-of them by name, which is how the three exits are exercised today and how each node is tested on
-its own.
+final-state check have one home. The router and the dispatcher are real (see
+[below](#intent-router)); the gate and the answer node are stubs until
+[#37](../../issues/37)–[#38](../../issues/38) land. `nodes=` replaces any of them by name, which is
+how the three exits are exercised today and how each node is tested on its own.
 
 **`docs` is one record shape whatever produced it.** A retrieval `Hit` and a tool result both
 become `Evidence(doc_id, text, score, source)` in the dispatch node, so the answer node has a
@@ -790,10 +790,10 @@ requirements outside the Gen Eds, and sections as they actually fill.
 
 **The stubs raise rather than answer.** A stub that returned an `answer` string or
 `evidence_ok=True` would let the graph run end to end today, and #39's smoke report would come out
-of it: ten queries, three exits, a table of numbers, and not one catalog lookup behind any row.
-`build_graph()` still compiles with all three in place — the wiring, the routing, the two exits and
-the router are testable without them — and a `run()` that reaches one raises, naming the issue that
-fills it.
+of it: ten queries, three exits, a table of numbers, and not one model call behind any row.
+`build_graph()` still compiles with both in place — the wiring, the routing, the two exits, the
+router and the dispatcher are testable without them — and a `run()` that reaches one raises, naming
+the issue that fills it.
 
 ## Intent router
 
@@ -858,6 +858,100 @@ there — it reaches `openai` and `OPENAI_API_KEY` through `embedding.py`, and `
 stay callable in a checkout with no key. The `llm` config section *is* validated at build time:
 that costs nothing, and a config naming a provider with no client should not survive until the
 first query.
+
+## Evidence dispatch
+
+`agent/nodes/dispatch.py`: the second node, and the only place an intent becomes an action.
+
+| intent | where the evidence comes from |
+|---|---|
+| `course_fact` | `get_course(code)` when the question names a code — otherwise `retrieve()` |
+| `prereq_chain` | `get_prereq_chain(code)`; no code is a refusal, never a guessed course |
+| `degree_requirement` | `check_requirement(major, taken)`, both read out of the question |
+| `compare_recommend` | `retrieve()` — several ranked candidates is the shape of that answer |
+| `out_of_scope` | never arrives: the router's own exit ended the run before this node |
+
+```python
+from agent.nodes.dispatch import dispatch_node
+
+node = dispatch_node(cfg)                  # the mode comes from config.yaml's agent.retrieval_mode
+node = dispatch_node(cfg, mode="hybrid")   # an ablation, or a test that ignores the shipped config
+node = dispatch_node(cfg, retrieve=fake)   # how the retrieval rows are tested with no index on disk
+```
+
+The alternative — four conditional edges into four near-identical nodes — would put this table in
+the graph's wiring, where the rows could not be read side by side.
+
+**Everything becomes `Evidence`.** A retrieval hit keeps its score and names the mode; a tool
+result is rendered to text, carries `score=None` and names the tool (`get_course`,
+`get_prereq_chain`, `check_requirement`). One record shape is what gives [#38](../../issues/38) a
+single input format, and the `None` is what tells [#37](../../issues/37) that an exact catalog
+lookup has no ranking to be unsure about. A lookup block is rendered in the **chunk template's own
+labels**, so an answer built from `get_course` and one built from a retrieved chunk of the same
+course are reading the same shape:
+
+```
+CS 374 — what the catalog requires before it
+Prerequisite statement: One of CS 173, MATH 213; CS 225.
+Immediately before it: CS 173 — Discrete Structures; CS 225 — Data Structures; MATH 213 — Basic Discrete Mathematics
+2 steps back: CS 124 — Introduction to Computer Science I; CS 128 — …
+16 courses over 4 levels, 26 prerequisite edges.
+A level names every course the statements at that depth mention; where a statement says "one of", only one of them is required.
+The catalog's own prerequisites form a cycle inside this chain — some of these courses list each other — so the walk stopped rather than looping.
+```
+
+That last-but-one line is not decoration. The layers flatten the booleans — CS 374 asks for CS 225
+and *one of* CS 173 / MATH 213 — and 744 of the catalog's 1,135 prerequisite statements contain a
+disjunction, so the block says what it is rather than letting an answer read three required courses
+off it. The catalog's own sentence comes first for the same reason: it is the only part that is
+exactly right.
+
+**A tool that came back empty produces no evidence, not evidence about its emptiness.** `docs` is
+empty and `signals["tool_error"]` says which of three things happened; `agent/nodes/exits.py` has
+the sentence and the remedy for each, and a test asserts it still does.
+
+| `tool_error` | when |
+|---|---|
+| `no_course_code` | the question needs one course and names none ("What are the prerequisites?") |
+| `course_not_found` | it names a course this export does not have (`CS 999`, or `CS 428`, real but not offered in 2026-sp) |
+| `no_program` | no program this corpus can audit could be read out of it ("the Physics major") |
+
+Putting "CS 999 is not in the catalog" into `docs` instead would hand the answer node a sentence
+about the absence of an answer as though it were a source, and a model given that writes a fluent
+refusal with a guess folded into it — which is the whole reason the two refusal exits are fixed
+text. It is also why the requirement row resolves the program against `ingest/majors.json` itself:
+`check_requirement`'s own `supported=False` refusal is for the MCP surface, where a client names a
+program directly.
+
+**Codes come out of free text through the matcher the BM25 index was built with** — `CODE_RE`, then
+`normalize_code`, so `CS 374` / `cs 374` / `CS374` reach one catalog record and a query cannot
+retrieve under one normalization and look up under another. What this node adds is the catalog's
+own subject vocabulary, **187 subjects** in this term: "I have 100 credits" matches the pattern and
+there is no subject `HAVE`, so it names no course. The cost is that a code whose *subject* has
+nothing at all in the export reads as no code — accepting "have 100" and "top 100" as courses is
+the worse trade, and either way the hand-off asks for a course code. A question naming several
+codes looks up the first the catalog holds (so a stray match cannot shadow a real course) and falls
+back to the first named (so `CS 999` still gets "not in this catalog" rather than "you named no
+course"); only the transcript row reads every code in the question.
+
+**Gen Ed wins when a question names both a degree and the Gen Eds**, because a degree's audit is
+the one that cannot answer it — every program reports the campus General Education requirements in
+`not_checked`, unevaluated. Course codes are stripped before any program name is looked for, since
+`stat` is both a Statistics-degree alias and the subject of `STAT 200`, and a transcript is not a
+program.
+
+**The mode is a config value**, `agent.retrieval_mode`, not a constant in the node: which retriever
+answers is an experiment setting, it belongs in the hash the report is named after, and a checkout
+with no dense index has to be able to run. It says `bm25` today because the dense collection is
+still empty ([#5](../../issues/5) is blocked on OpenAI credits) and a default nothing can run is a
+crash on query one. Adding the section moved the full hash (`ade2f799` → `51939bdf`) and left
+`chunk_key` `05d00726`, `dense_key` `094143d8` and `bm25_key` `877a6610` exactly where they were.
+
+**What the retrieval rows are worth today is bm25 alone, and it shows.** "What does the algorithms
+course cover?" is a `course_fact` with no code, so it retrieves — and on the live BM25 index the
+top five are ECON 300, ERAM 557, HDFS 322, UP 230 and IE 531, with CS 374 nowhere in them. That is
+the dense half's job, and the gate ([#37](../../issues/37)) is what has to refuse it in the
+meantime: the row is correct, the index behind it is half-built.
 
 ## Day 1 goal
 
