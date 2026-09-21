@@ -59,6 +59,27 @@ reference are omitted entirely.
 (DANC 498 ↔ DANC 499, MACS 480 ↔ MACS 481) that folding them in would turn correct data into
 cycles.
 
+**That is necessary and not sufficient: `prereqs` alone is not acyclic, so every walk needs a
+visited set.** Seven strongly-connected components over 19 courses, no self-loops:
+
+| cycle | |
+|---|---|
+| `THEA 375 → 376 → 377 → 378 →` | 4-cycle |
+| `THEA 475 → 476 → 477 → 478 →` | 4-cycle |
+| `CS 225 → CS 374 → MATH 412 → CS 225` | 3-cycle |
+| `ACCY 301 ↔ ACCY 302`, `CHEM 204 ↔ CHEM 205`, `MCB 581 ↔ MCB 582`, `SE 311 ↔ SE 312` | mutual pairs |
+
+16 of those 19 are corequisites after all, stated *inside* the prerequisite sentence ("SE 310;
+concurrent registration in SE 312."), where `coreq_codes` cannot reach them — it only reads a
+continuation sentence. The other three are disjunction members: `MATH 412` is one alternative in
+`CS 225`'s "One of CS 173, CS 413, MATH 213, MATH 314, MATH 347, MATH 412", and `MATH 412` lists
+`CS 374`, which requires `CS 225`.
+
+Walking the graph from each of the 1,135 records: the deepest chain is 9 levels by shortest
+distance (`CEE 560`, `ECE 454`, `ECE 575`, `ECE 585`, `ME 547`) and 13 courses along the longest
+cycle-free path (`SE 495`); the largest transitive closure is 47 courses (`IS 557`), the median 4;
+165 of the 1,135 closures contain one of the cycles above. `agent/tools/prereqs.py` is the walk.
+
 ## requirements.json
 
 The 13 campus Gen Ed categories as declarative rules: a course matches when its `attrs` contains
@@ -183,4 +204,9 @@ Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every 
   chunk's `gened_ids`: #14.
 - **Prerequisite text is prose, not a grammar.** `prereqCodes` is a bag of codes: "One of CS 173,
   MATH 213; CS 225" loses the "one of" structure, so a planner cannot tell alternatives from
-  conjunctions. Parsing that structure is a separate job.
+  conjunctions. **744 of the 1,135 requirement statements contain a disjunction** (`or`, `one of`),
+  and for **397** of them the code list has more than one entry — `ABE 228` reads "One of MATH 220,
+  MATH 221, MATH 234." and exports `["MATH 220", "MATH 234"]`, where the student needs one. **299
+  statements** also offer a "consent of …" escape hatch no code list can express. So a consumer
+  must carry `raw` and quote it rather than read the list as a conjunction; `agent/tools/prereqs.py`
+  puts it on every node of a chain. Parsing that structure into an AND/OR tree is a separate job.
