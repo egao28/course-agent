@@ -2,8 +2,9 @@
 
 The store is real -- a ``PersistentClient`` under ``tmp_path`` -- because the properties worth
 testing here are the ones a fake store would define away: that the collection is created in cosine
-space, that ``count()`` is what the idempotency check reads, that the flattened metadata survives a
-round trip. Only the *embedder* is fake, since that is the part that costs money.
+space, that ``count()`` is what the idempotency check reads, that the metadata survives a round
+trip and can be filtered on once it is in there. Only the *embedder* is fake, since that is the
+part that costs money.
 
 ``redirect_paths`` is autouse and points the corpus, the sidecar and ``INDEXES_DIR`` into tmp_path:
 no test can read the live ``data/chunks.jsonl`` or write into the real ``indexes/chroma``. It
@@ -242,15 +243,16 @@ def test_another_encoder_builds_its_own_collection(corpus, cfg, store):
     assert result["name"] != collection_name(cfg, chunk_key(cfg))
 
 
-def test_build_stores_the_text_and_the_flattened_metadata(corpus, cfg, store):
+def test_build_stores_the_text_and_the_metadata(corpus, cfg, store):
     bd.build(cfg, client=store, embedder=FakeEmbedder(), progress=False)
     collection = bd.get_collection(store, collection_name(cfg, chunk_key(cfg)))
 
     row = collection.get(ids=["2026-sp:CS-446"], include=["documents", "metadatas"])
     assert row["documents"][0] == CHUNKS[0]["text"]
-    # Chroma holds scalars; ingest.chunk owns the encoding and retrieval.dense reverses it.
-    assert row["metadatas"][0]["prereq_codes"] == "CS 374"
-    assert row["metadatas"][0]["gened_ids"] == ""
+    # ingest.chunk owns the encoding and retrieval.dense reverses it: lists go in as lists, and
+    # an empty one goes in as no key at all, which is the one thing Chroma will not store.
+    assert row["metadatas"][0]["prereq_codes"] == ["CS 374"]
+    assert "gened_ids" not in row["metadatas"][0]
     assert row["metadatas"][0]["credits"] == 3.0
 
 

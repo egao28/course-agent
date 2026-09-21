@@ -59,10 +59,9 @@ STRATEGY = "one_course_one_chunk"
 TOKEN_ENCODING = "cl100k_base"
 #: Hard per-input limit of text-embedding-3-small: the API rejects a longer chunk outright.
 EMBEDDING_TOKEN_LIMIT = 8191
-#: Chroma metadata values must be scalars, so list fields are joined on this.
-LIST_SEPARATOR = "|"
-#: The metadata fields that hold a list. Named rather than sniffed by type: after the join, a
-#: decoder cannot tell "CS 173|CS 225" from a string that happens to contain a pipe.
+#: The metadata fields that hold a list of strings. Named rather than sniffed by type: Chroma
+#: refuses to store an empty list, so those go in as an absent key, and only a name can tell the
+#: query side which keys to read back as ``[]``.
 LIST_FIELDS = ("prereq_codes", "gened_ids")
 
 #: Course fields each template reads, in the order they appear in the rendered text. Checked
@@ -161,6 +160,23 @@ def gened_ids(course: Mapping[str, Any], categories: Sequence[Mapping[str, Any]]
     return [c["id"] for c in categories if matches_attrs(c, course["attrs"])]
 
 
+def catalog_number(course: Mapping[str, Any]) -> int:
+    """``course['number']`` as an int, refusing anything that is not digits.
+
+    The export copies the catalog's ``Number`` column verbatim: every one of the 4,502 courses in
+    2026-sp is three digits, but nothing upstream enforces it. A non-numeric number is refused
+    here rather than stored as-is, because one string value among 4,501 ints would make every
+    range filter on the key skip that course without saying so.
+    """
+    number = str(course["number"])
+    if not number.isdigit():
+        raise ValueError(
+            f"course {course['code']}: catalog number {number!r} is not digits, so it cannot be "
+            "stored as the int a `number` or `level` filter compares against"
+        )
+    return int(number)
+
+
 def chunk_metadata(
     course: Mapping[str, Any], categories: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
@@ -169,11 +185,18 @@ def chunk_metadata(
     Deliberately small: what a query filters or displays by, not a copy of the course record.
     ``prereq_codes`` is the unfiltered list from the export -- a reference to a course not offered
     this term stays visible here, unlike in ``prereqs.json``.
+
+    ``number`` is an int, and ``level`` is it rounded down to the hundred, because Chroma compares
+    numbers and not numeric strings: "400-level CS" is ``level == 400`` and "CS 400 or above" is
+    ``number >= 400``, neither of which a string key can express. The catalog's zero-padded
+    spelling survives in ``code`` (``MUS 090``), which is what a result displays.
     """
+    number = catalog_number(course)
     return {
         "code": course["code"],
         "subject": course["subject"],
-        "number": course["number"],
+        "number": number,
+        "level": number // 100 * 100,
         "credits": course["credits"],
         "term": course["term"],
         "prereq_codes": list(course["prereqCodes"]),
@@ -181,15 +204,27 @@ def chunk_metadata(
     }
 
 
-def chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, str | int | float | bool]:
-    """``metadata`` with its list fields flattened, for a store that only holds scalars.
+def chroma_metadata(
+    metadata: Mapping[str, Any],
+) -> dict[str, str | int | float | bool | list[str]]:
+    """``metadata`` as Chroma stores it: the lists stay lists, and an empty one is left out.
 
-    Chroma rejects a list metadata value, so ``prereq_codes`` / ``gened_ids`` go in joined on
-    ``LIST_SEPARATOR`` (``"CS 173|CS 225"``, ``""`` when empty). Flattening lives here so the
-    dense and BM25 sides cannot disagree about the encoding; ``chunks.jsonl`` keeps the lists.
+    chromadb 1.5.9 does hold a list metadata value -- homogeneous and non-empty -- and filters it
+    with ``$contains`` / ``$not_contains``, which is what makes "courses that satisfy cultus" and
+    "courses that need CS 225" expressible. They are list operators, not substring tests: joining
+    the lists into one string (the earlier encoding) left ``$eq`` / ``$in`` / ``$ne`` matching the
+    whole joined value, i.e. only a course whose list was exactly that.
 
-    A list field missing from :data:`LIST_FIELDS` is refused rather than flattened: it would
-    write fine and come back from a query as a string nothing splits again.
+    The empty list is the one value Chroma refuses, so the key is dropped instead and
+    :func:`decode_chroma_metadata` restores it. Dropping it is also the right filter behaviour: a
+    course with no Gen Ed should not match ``$contains``. It does match ``$not_contains``, which
+    holds for a missing key as well as for a list without the value.
+
+    The encoding lives here, beside its inverse, so the build side and the query side cannot
+    disagree about it; ``chunks.jsonl`` keeps the lists either way.
+
+    A list field missing from :data:`LIST_FIELDS` is refused rather than written: when such a
+    field is empty its key silently vanishes, and nothing on the query side knows to put it back.
     """
     unnamed = [k for k, v in metadata.items() if isinstance(v, list) and k not in LIST_FIELDS]
     if unnamed:
@@ -197,23 +232,26 @@ def chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, str | int | float 
             f"metadata field(s) {', '.join(unnamed)} hold a list but are not in LIST_FIELDS; "
             "add them there, or decode_chroma_metadata cannot restore them"
         )
-    return {k: LIST_SEPARATOR.join(v) if isinstance(v, list) else v for k, v in metadata.items()}
+    return {
+        k: list(v) if isinstance(v, list) else v
+        for k, v in metadata.items()
+        if not (isinstance(v, list) and not v)
+    }
 
 
 def decode_chroma_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     """Inverse of :func:`chroma_metadata`, for what a dense query reads back out of Chroma.
 
     BM25 (#6) takes its metadata straight from ``chunks.jsonl``, where the lists are still lists.
-    The dense side only has what Chroma stored, so it splits them again here -- beside the join,
-    so the two encodings cannot drift -- and a ``Hit`` means the same thing whichever retriever
-    produced it. An empty string decodes to ``[]``, not ``[""]``.
+    The dense side only has what Chroma stored, and Chroma cannot store an empty list, so every
+    :data:`LIST_FIELDS` key that came back missing is restored as ``[]``. A ``Hit`` then means the
+    same thing whichever retriever produced it, rather than a course with no prerequisites having
+    no ``prereq_codes`` key at all.
     """
-    return {
-        k: [part for part in v.split(LIST_SEPARATOR) if part]
-        if k in LIST_FIELDS and isinstance(v, str)
-        else v
-        for k, v in metadata.items()
-    }
+    decoded = {k: list(v) if isinstance(v, list) else v for k, v in metadata.items()}
+    for field in LIST_FIELDS:
+        decoded.setdefault(field, [])
+    return decoded
 
 
 # --- building -------------------------------------------------------------------------------------

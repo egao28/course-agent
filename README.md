@@ -123,8 +123,8 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```
 doc_id   2026-sp:CS-374
-metadata {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
-chroma   {"code": "CS 374", …, "prereq_codes": "CS 173|CS 225|MATH 213", "gened_ids": ""}
+metadata {"code": "CS 374", "subject": "CS", "number": 374, "level": 300, "credits": 4.0, "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}
+chroma   {"code": "CS 374", …, "prereq_codes": ["CS 173", "CS 225", "MATH 213"]}
 text
 CS 374 — Introduction to Algorithms & Models of Computation
 Credits: 4
@@ -150,7 +150,11 @@ otherwise, so the hash can never describe a corpus that was not built. It also r
 chunk over the 8191-token limit, rather than letting the embedding call discover it mid-batch.
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` (`2026-sp:CS-374`), and `metadata` carries `code, subject, number,
-credits, term, prereq_codes, gened_ids` for filtering. `chunks.jsonl` is **not** committed: unlike
+level, credits, term, prereq_codes, gened_ids` for filtering. The `chroma` line above is the same
+record as Chroma stores it: the lists stay lists, so `{"gened_ids": {"$contains": "cultus"}}` and
+`{"$and": [{"subject": "CS"}, {"level": 400}]}` are answerable, and an *empty* list is dropped
+rather than stored, because that is the one value Chroma refuses. Which field supports which
+operator is tabulated in [data/README.md](data/README.md#metadata-what-each-field-is-good-for). `chunks.jsonl` is **not** committed: unlike
 the exported `data/*.json`, it is rebuilt from them by the command above with no private input.
 Its `chunks.meta.json` sidecar records a `chunk_key` — a hash of just the term, strategy, template
 version and field list — so an index build can detect chunks left over from another template while
@@ -214,8 +218,9 @@ DenseRetriever(load_config()).search("machine learning", 5)
 `search` returns `Hit(doc_id, score, rank, text, metadata)` — the same shape BM25 returns, so RRF can
 fuse two lists without knowing which retriever produced either. `score` is `1 - cosine_distance`:
 higher is better, and comparable only *within* one list, which is why fusion works on `rank`. Text
-and metadata come back out of the index rather than `chunks.jsonl`, with the joined metadata lists
-split into lists again so a dense hit and a BM25 hit mean the same thing.
+and metadata come back out of the index rather than `chunks.jsonl`, with the list fields Chroma
+could not store — the empty ones — restored as `[]`, so a dense hit and a BM25 hit mean the same
+thing.
 
 ### Embeddings
 

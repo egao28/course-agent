@@ -80,7 +80,7 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```json
 {"doc_id": "2026-sp:CS-374", "text": "CS 374 — Introduction to Algorithms...",
- "metadata": {"code": "CS 374", "subject": "CS", "number": "374", "credits": 4.0,
+ "metadata": {"code": "CS 374", "subject": "CS", "number": 374, "level": 300, "credits": 4.0,
               "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
               "gened_ids": []}}
 ```
@@ -90,6 +90,46 @@ join the same collection without colliding. `text` is rendered by `render_chunk(
 template named by `chunk.template_version`; see [the chunking section of the top-level
 README](../README.md#chunking). `prereq_codes` is the **unfiltered** list, so a reference to a
 course not offered this term stays visible in metadata even though `prereqs.json` drops it.
+
+### Metadata: what each field is good for
+
+Every field below is *displayable* — it comes back on a `Hit` from either retriever. The
+**Filter with** column is what Chroma's `where` can do with it once the dense index holds it;
+`chroma_metadata()` in `ingest/chunk.py` owns the encoding and `decode_chroma_metadata()` reverses
+it, so a BM25 hit (which reads this file) and a dense hit (which reads Chroma) agree.
+
+| Field | In Chroma | Filter with | Notes |
+| --- | --- | --- | --- |
+| `code` | `str` | `$eq`, `$in`, `$ne` | The display form, and the only one that keeps the catalog's zero padding (`MUS 090`) |
+| `subject` | `str` | `$eq`, `$in`, `$ne` | |
+| `number` | `int` | `$eq`, `$in`, `$gte`/`$gt`/`$lte`/`$lt` | 90–799 here. An int because Chroma compares numbers, not numeric strings |
+| `level` | `int` | `$eq`, `$in`, ranges | `number` rounded down to the hundred, so "400-level" is one clause. `MUS 090` is level `0` |
+| `credits` | `float` | `$eq`, `$in`, ranges | |
+| `term` | `str` | `$eq`, `$in`, `$ne` | |
+| `prereq_codes` | `list[str]`, **absent when empty** | `$contains`, `$not_contains` | The unfiltered list; the prerequisite *graph* is `prereqs.json` |
+| `gened_ids` | `list[str]`, **absent when empty** | `$contains`, `$not_contains` | Ids from `requirements.json`, not the raw `Degree Attributes` string |
+
+```python
+{"gened_ids": {"$contains": "cultus"}}                       # 101 courses
+{"$and": [{"subject": "CS"}, {"level": 400}]}                #  47
+{"$and": [{"subject": "CS"}, {"number": {"$gte": 400}}]}     #  70
+{"prereq_codes": {"$contains": "CS 225"}}                    #  31
+```
+
+Three things about that encoding are worth knowing before writing a filter, all pinned by
+`tests/test_chroma_filters.py`:
+
+- **`$contains` on metadata is list membership, not a substring test.** It matches nothing against
+  a string value (`{"subject": {"$contains": "CS"}}` → no rows). The substring operator of the same
+  name applies to the chunk *text*, and lives under `where_document`.
+- **An empty list is not storable**, so the key is left out of the record entirely rather than
+  written as `[]` or as an empty string. A course with no Gen Ed therefore never matches
+  `$contains` and always matches `$not_contains`, which is what those questions mean anyway.
+  `decode_chroma_metadata()` puts the `[]` back, so a `Hit` always carries both list fields.
+- **The metadata encoding is not part of any index key.** `chunk_key` covers the chunk *text*
+  (term, strategy, template, field list), so re-encoding metadata leaves the name of an existing
+  collection unchanged: a collection built before this encoding keeps the old one until it is
+  rebuilt with `--rebuild`.
 
 Neither file is committed, unlike the three above: they are rebuilt from those by one command with
 no private input and no API key, and a template change rewrites all 3 MB. `chunks.meta.json` records

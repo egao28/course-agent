@@ -196,7 +196,8 @@ def test_metadata_carries_exactly_the_filterable_fields(by_code, categories):
     assert meta == {
         "code": "CS 374",
         "subject": "CS",
-        "number": "374",
+        "number": 374,
+        "level": 300,
         "credits": 4.0,
         "term": "2026-sp",
         # Unfiltered: MATH 213 is not offered this term but stays visible in the metadata.
@@ -219,12 +220,33 @@ def test_gened_ids_read_the_file_the_corpus_came_with(corpus, by_code):
     assert ch.gened_ids(by_code["STAT 100"], ch.load_gened_categories()) == []
 
 
-def test_chroma_metadata_flattens_lists_into_scalars(by_code, categories):
-    flat = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
-    assert flat["prereq_codes"] == "CS 173|CS 225|MATH 213"
-    assert flat["gened_ids"] == ""
-    assert flat["credits"] == 4.0  # scalars are left alone
-    assert all(isinstance(v, (str, int, float, bool)) for v in flat.values())
+def test_catalog_number_is_an_int_and_level_rounds_it_down(by_code, categories):
+    # Chroma compares numbers, not numeric strings: "400-level" has to be an int to be filterable.
+    meta = ch.chunk_metadata(by_code["STAT 100"], categories)
+    assert (meta["number"], meta["level"]) == (100, 100)
+
+
+def test_catalog_number_refuses_a_number_that_is_not_digits(by_code, categories):
+    # The export copies the Number column verbatim; one string among the ints would be skipped by
+    # every range filter without saying so.
+    odd = {**by_code["CS 374"], "number": "374X"}
+    with pytest.raises(ValueError, match="not digits"):
+        ch.chunk_metadata(odd, categories)
+
+
+def test_chroma_metadata_keeps_the_lists_as_lists(by_code, categories):
+    # Chroma 1.5.9 stores a non-empty list and filters it with $contains; joining the values into
+    # one string left them matchable only in full.
+    stored = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
+    assert stored["prereq_codes"] == ["CS 173", "CS 225", "MATH 213"]
+    assert stored["credits"] == 4.0  # scalars are left alone
+
+
+def test_chroma_metadata_drops_an_empty_list_because_chroma_refuses_one(by_code, categories):
+    # "Expected metadata list value ... to be non-empty in add" -- CS 374 satisfies no Gen Ed.
+    stored = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
+    assert "gened_ids" not in stored
+    assert all(v != [] for v in stored.values())
 
 
 def test_chroma_metadata_round_trips_through_the_decoder(by_code, categories):
@@ -233,13 +255,21 @@ def test_chroma_metadata_round_trips_through_the_decoder(by_code, categories):
     assert ch.decode_chroma_metadata(ch.chroma_metadata(metadata)) == metadata
 
 
-def test_decode_chroma_metadata_reads_an_empty_field_as_an_empty_list():
-    assert ch.decode_chroma_metadata({"gened_ids": ""})["gened_ids"] == []
+def test_decode_chroma_metadata_restores_a_dropped_field_as_an_empty_list():
+    decoded = ch.decode_chroma_metadata({"code": "CS 374", "prereq_codes": ["CS 173"]})
+    assert decoded == {"code": "CS 374", "prereq_codes": ["CS 173"], "gened_ids": []}
 
 
 def test_decode_chroma_metadata_leaves_scalars_alone():
-    decoded = ch.decode_chroma_metadata({"code": "CS 374", "credits": 4.0, "number": "374"})
-    assert decoded == {"code": "CS 374", "credits": 4.0, "number": "374"}
+    # The two list fields are restored; every scalar comes back as it went in, the int included.
+    decoded = ch.decode_chroma_metadata({"code": "CS 374", "credits": 4.0, "number": 374})
+    assert decoded == {
+        "code": "CS 374",
+        "credits": 4.0,
+        "number": 374,
+        "prereq_codes": [],
+        "gened_ids": [],
+    }
 
 
 def test_chroma_metadata_refuses_a_list_field_the_decoder_could_not_restore():
