@@ -19,8 +19,8 @@ back to.
 ``agent.graph`` holds the registry (:data:`~agent.graph.NODE_BUILDERS`), wires the six nodes
 together and wraps each one in :func:`~agent.state.check_update`. The router is
 :mod:`agent.nodes.route_intent`, the dispatcher :mod:`agent.nodes.dispatch`, the evidence gate
-:mod:`agent.nodes.check_evidence` and the two fixed exits :mod:`agent.nodes.exits`; the answer
-node is a stub in :mod:`agent.nodes.stubs` until #38 replaces it.
+:mod:`agent.nodes.check_evidence`, the answer node :mod:`agent.nodes.answer` and the two fixed
+exits :mod:`agent.nodes.exits`. All six are real as of #38.
 """
 
 from __future__ import annotations

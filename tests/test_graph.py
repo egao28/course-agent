@@ -1,12 +1,11 @@
 """Tests for agent/graph.py and the two fixed exits: the wiring, the routing, the three exits.
 
-Every node here is injected. One of the six is a stub until #38 lands, so the graph is driven with
-fakes -- which is not a workaround but the acceptance for #34: the skeleton is correct if a run
-reaches each of the three exits and the final state says which one it took, whatever the nodes
-themselves do. It is also how each real node was tested before the next one existed, and how #39's
-CLI runs at all while the account has no OpenAI credits. The three real nodes have their own files,
-``tests/test_route_intent.py``, ``tests/test_dispatch.py`` and ``tests/test_check_evidence.py``;
-here they are fakes like the rest.
+Every node here is injected. That is not a workaround but the acceptance for #34: the skeleton is
+correct if a run reaches each of the three exits and the final state says which one it took,
+whatever the nodes themselves do. It is also how each real node was tested before the next one
+existed, and how #39's CLI runs at all while the account has no OpenAI credits. The four real nodes
+have their own files -- ``tests/test_route_intent.py``, ``tests/test_dispatch.py``,
+``tests/test_check_evidence.py`` and ``tests/test_answer.py``; here they are fakes like the rest.
 
 ``cfg`` is a synthetic config, not the live ``config.yaml``: the skeleton reads ``data.term`` from
 it for the two exit messages, and the ``llm`` / ``agent`` / ``evidence`` sections are what the
@@ -24,7 +23,7 @@ import pytest
 from langgraph.graph import END
 
 from agent import graph as ag
-from agent.nodes import exits, stubs
+from agent.nodes import exits
 from agent.state import Evidence, initial_state
 from config import Config
 
@@ -90,29 +89,33 @@ def gate(ok: bool, score: float | None = None, threshold: float | None = None):
     return node
 
 
-def writer(text: str):
-    """A stand-in for #38 that answers."""
-    return lambda state: {"answer": text, "exit": "answer"}
+def writer(text: str, cited: list[str] | None = None):
+    """A stand-in for the answer node: the text, and the ids its citation check verified."""
+    signals = {"citations_verified": list(cited or []), "citations_unknown": None}
+    return lambda state: {"answer": text, "exit": "answer", "signals": signals}
 
 
 def rejector(unknown: list[str]):
-    """A stand-in for #38 whose citation check rejected the draft: no answer, the hand-off exit."""
-    return lambda state: {"exit": "refuse_handoff", "signals": {"citations_unknown": unknown}}
+    """The answer node whose citation check rejected the draft: no answer, the hand-off exit."""
+    return lambda state: {
+        "exit": "refuse_handoff",
+        "signals": {"citations_verified": [], "citations_unknown": unknown},
+    }
 
 
 ANSWERING = {
     "route_intent": router("course_fact", "course_fact"),
     "dispatch": dispatcher([LOOKUP]),
     "check_evidence": gate(True),
-    "answer": writer("CS 374 is 4 hours [CS 374]."),
+    "answer": writer("CS 374 is 4 hours [CS 374].", ["CS 374"]),
 }
 
 
 # --- the shape of the graph -----------------------------------------------------------------------
 
 
-def test_build_graph_compiles_with_the_remaining_node_still_a_stub(cfg):
-    # #34's first acceptance: the skeleton stands up before the nodes behind it exist.
+def test_build_graph_compiles_every_node_from_the_registry(cfg):
+    # #34's first acceptance, which held before any of the six nodes existed and still does.
     compiled = ag.build_graph(cfg)
     assert sorted(compiled.get_graph().nodes) == [
         "__end__",
@@ -169,8 +172,8 @@ def test_a_grounded_run_exits_by_answer(cfg):
 
 
 def test_an_out_of_scope_query_exits_before_any_evidence_is_gathered(cfg):
-    # The dispatch stub would raise if the router did not send this straight to its exit, which is
-    # the assertion: nothing downstream of the router ran.
+    # The real dispatcher raises if it is reached with this label, which is the assertion:
+    # nothing downstream of the router ran.
     state = ag.run(
         "What's the weather in Champaign?",
         cfg=cfg,
@@ -236,7 +239,7 @@ def test_every_nodes_signals_survive_to_the_end_of_the_run(cfg):
             "route_intent": router("compare_recommend", "compare_recommend"),
             "dispatch": dispatcher([CHUNK], mode="bm25"),
             "check_evidence": gate(True, score=29.0337, threshold=10.0),
-            "answer": writer("CS 446 [2026-sp:CS-374]."),
+            "answer": writer("CS 446 [2026-sp:CS-374].", ["2026-sp:CS-374"]),
         },
     )
     assert state["signals"] == {
@@ -246,6 +249,7 @@ def test_every_nodes_signals_survive_to_the_end_of_the_run(cfg):
         "tool_error": None,
         "retrieval_top_score": 29.0337,
         "evidence_threshold": 10.0,
+        "citations_verified": ["2026-sp:CS-374"],
         "citations_unknown": None,
     }
 
@@ -359,38 +363,23 @@ def test_route_after_answer_ends_the_run_on_a_kept_answer():
     assert ag.route_after_answer({"exit": "refuse_handoff"}) == "refuse_handoff"
 
 
-# --- the stubs ------------------------------------------------------------------------------------
+# --- no node is a stand-in any more ---------------------------------------------------------------
 
 
-def test_the_pending_nodes_are_the_issues_still_open():
-    # One line shorter than it was: #37 landed, so the gate is no longer among them.
-    assert {name: issue for name, (issue, _) in stubs.PENDING.items()} == {"answer": 38}
+def test_every_node_the_graph_builds_is_the_real_one(cfg):
+    # #38 was the last stub. Each built node is named after the node it is, which is what the
+    # stub's `stub_answer` name used to give away -- and what a future stand-in would again.
+    built = ag.build_nodes(cfg)
+    assert {name: node.__name__ for name, node in built.items()} == {
+        name: name for name in ag.NODE_BUILDERS
+    }
 
 
-def test_a_stub_names_its_issue_and_the_key_it_owes():
-    # It raises rather than returning something plausible: a stub that answered would let #39
-    # produce a smoke report with no model call behind any of its rows.
-    with pytest.raises(NotImplementedError, match=r"'answer' node is a stub.*answer, exit.*#38"):
-        stubs.stub("answer")(initial_state("q"))
-
-
-def test_a_run_reaches_the_stub_only_after_the_earlier_nodes_ran(cfg):
-    # Three real nodes deep now: the injected dispatcher's lookup block passes the real gate
-    # (score=None), and the run gets as far as the one node that is still nobody's.
-    with pytest.raises(NotImplementedError, match=r"'answer' node is a stub.*#38"):
-        ag.run(
-            "q",
-            cfg=cfg,
-            nodes={
-                "route_intent": router("course_fact"),
-                "dispatch": dispatcher([LOOKUP]),
-            },
-        )
-
-
-def test_an_unknown_stub_name_is_refused():
-    with pytest.raises(KeyError, match="no pending node named 'summarize'"):
-        stubs.stub("summarize")
+def test_the_run_with_no_overrides_at_all_is_a_whole_run(cfg, monkeypatch):
+    # Not invoked -- the two model calls would need credits -- but built: nothing in the six is a
+    # placeholder that would raise on the way past, which is what #39's CLI depends on.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert len(ag.build_nodes(cfg)) == 6
 
 
 # --- building the nodes ---------------------------------------------------------------------------
@@ -413,12 +402,13 @@ def test_an_override_replaces_one_node_and_leaves_the_other_five(cfg):
     assert built["route_intent"] is fake
     assert len(built) == 6
     assert built["check_evidence"].__name__ == "check_evidence"
-    assert built["answer"].__name__ == "stub_answer"
+    assert built["answer"].__name__ == "answer"
 
 
 def test_an_overridden_node_is_never_built(cfg, monkeypatch):
-    # The router validates the `llm` config section when it is built, and #38 will open a chat
-    # client. Building one only to discard it would make an injected fake depend on both.
+    # The router and the answer node validate the `llm` config section when they are built, and
+    # each opens a chat client on its first query. Building one only to discard it would make an
+    # injected fake depend on a config section it does not use.
     def explode(_cfg):
         raise AssertionError("the real builder ran for a node that was overridden")
 
@@ -510,6 +500,9 @@ def test_the_hand_off_message_says_what_was_asked_and_where_it_stopped(cfg):
         ({"tool_error": "no_course_code"}, [], "does not name a course"),
         ({"tool_error": "corpus_unreadable"}, [], "reported 'corpus_unreadable'"),
         ({"citations_unknown": ["CS 999"]}, [CHUNK], "cited CS 999"),
+        # `[]` is "the answer node ran and its draft cited nothing"; `None` is "it never ran".
+        ({"citations_verified": []}, [CHUNK], "pointed at none of the evidence"),
+        ({"citations_verified": ["CS 374"]}, [CHUNK], "was not enough to answer from"),
         ({"retrieval_top_score": 3.1, "evidence_threshold": 10.0}, [CHUNK], "scored 3.1000"),
         ({}, [], "nothing in the catalog came back"),
         ({}, [CHUNK], "was not enough to answer from"),

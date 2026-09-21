@@ -40,6 +40,10 @@ the way :func:`retrieval.get_retriever` caches retrievers: #39 runs ten queries 
 the router (#35) and the answer node (#38) each open a chat client on their first query, while
 dispatch (#36) reaches a retriever and a 2.9 MB catalog index through caches of their own. A graph
 built with injected nodes is never cached -- a fake must not outlive the test that made it.
+
+All six nodes are real as of #38. Until then the answer node was a stub that raised rather than
+returning a plausible answer, so that no report could be produced with no model behind it; the
+pattern is in this file's history if a later day needs it again.
 """
 
 from __future__ import annotations
@@ -51,11 +55,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.nodes import Node, NodeBuilder
+from agent.nodes.answer import answer_node
 from agent.nodes.check_evidence import check_evidence_node
 from agent.nodes.dispatch import dispatch_node
 from agent.nodes.exits import out_of_scope_node, refuse_handoff_node
 from agent.nodes.route_intent import route_intent_node
-from agent.nodes.stubs import stub_builder
 from agent.state import (
     EXITS,
     INTENTS,
@@ -67,14 +71,14 @@ from agent.state import (
 )
 from config import Config, load_config
 
-#: How to build each of the six nodes. One is a stub today; #38 replaces that entry with its real
-#: builder and deletes its line from :data:`agent.nodes.stubs.PENDING`. A test passes already-built
-#: nodes to :func:`build_graph` instead of patching this.
+#: How to build each of the six nodes -- all six real as of #38, so a ``run(query)`` with no
+#: overrides is a whole run. A test passes already-built nodes to :func:`build_graph` instead of
+#: patching this.
 NODE_BUILDERS: dict[str, NodeBuilder] = {
     "route_intent": route_intent_node,
     "dispatch": dispatch_node,
     "check_evidence": check_evidence_node,
-    "answer": stub_builder("answer"),
+    "answer": answer_node,
     "out_of_scope": out_of_scope_node,
     "refuse_handoff": refuse_handoff_node,
 }
@@ -87,15 +91,14 @@ def build_nodes(cfg: Config, nodes: Mapping[str, Node] | None = None) -> dict[st
     """The six nodes, built from ``cfg``, with anything in ``nodes`` used as given.
 
     ``nodes`` is a partial override: naming one leaves the other five at their registered builder,
-    which is what lets a test drive one exit with a single fake and lets one real node be tried
-    against the real graph while #38 is still a stub. An unknown name is refused rather than
-    ignored -- a typo'd override would otherwise be a fake that never ran and a test that passed
-    anyway.
+    which is what lets a test drive one exit with a single fake, and lets the two nodes that call a
+    model run against a fake client while the account has no credits. An unknown name is refused
+    rather than ignored -- a typo'd override would otherwise be a fake that never ran and a test
+    that passed anyway.
 
-    An overridden node is never *built*: the router validates the ``llm`` config section, the
-    dispatcher its ``agent`` one and the gate its ``evidence`` one (and #38 will read the first),
-    so building one only to throw it away would make an injected fake depend on a config section
-    it does not use.
+    An overridden node is never *built*: the router and the answer node validate the ``llm`` config
+    section, the dispatcher its ``agent`` one and the gate its ``evidence`` one, so building one
+    only to throw it away would make an injected fake depend on a config section it does not use.
     """
     unknown = sorted(set(nodes or ()) - set(NODE_BUILDERS))
     if unknown:
@@ -273,8 +276,9 @@ def run(
     to their own dict cannot change what a cached graph was built from.
 
     ``nodes`` replaces individual nodes for the duration of one call and bypasses the graph cache
-    entirely, which is how the three exits are exercised while #38 is a stub. A stubbed node that
-    is actually reached raises :class:`NotImplementedError` naming its issue.
+    entirely: a fake chat client behind the router and the answer node is how the three exits are
+    exercised with no credits, and ``route_intent_node(cfg, forced=...)`` is how #39's ``--intent``
+    skips the classification without skipping anything else.
     """
     state = initial_state(query)
     config = cfg if isinstance(cfg, Config) else load_config() if cfg is None else Config(cfg)

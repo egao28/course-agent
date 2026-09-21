@@ -382,6 +382,7 @@ def test_an_unparseable_classification_ends_the_run_at_the_same_exit(cfg):
         "tool_error": None,
         "retrieval_top_score": None,
         "evidence_threshold": None,
+        "citations_verified": None,
         "citations_unknown": None,
     }
 

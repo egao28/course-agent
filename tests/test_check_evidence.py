@@ -469,6 +469,7 @@ def test_the_real_dispatcher_and_the_real_gate_agree_on_a_measured_score(cfg):
         "tool_error": None,
         "retrieval_top_score": 18.2746,
         "evidence_threshold": 10.0,
+        "citations_verified": None,
         "citations_unknown": None,
     }
 

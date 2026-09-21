@@ -3,16 +3,18 @@
 Both messages are fixed text with the run's own facts filled in, and no completion is requested
 for either. Nothing grounds a generated refusal -- there is no evidence behind it by definition --
 and a model asked to write one will negotiate with itself and produce a partial answer with a
-hedge in front of it, which is the failure the evidence gate exists to prevent. #38's answer node
-is the only node that calls a model, and it is only reached when there is something to ground an
-answer in.
+hedge in front of it, which is the failure the evidence gate exists to prevent. The answer node
+(#38) is the only node that calls a model, and it is only reached when there is something to
+ground an answer in -- and when its own citation check throws the draft away it writes no refusal
+of its own: it claims the hand-off exit, and the message is minted here, once.
 
 The hand-off message is the "转人工" half of Day 2, so it is written as something a person would
 actually read: what was asked, where the run stopped, and what would get the question answered.
 The middle line comes from ``signals`` -- the gate's threshold and score, #36's three
-``tool_error`` labels, the citation check's rejects -- which is the second reason those signals
-are recorded rather than compared and dropped. A refusal that cannot say why it refused teaches
-the reader nothing, and teaches Day 5 less.
+``tool_error`` labels, the citation check's rejects, a draft that cited nothing -- which is the
+second reason those signals are recorded rather than compared and dropped, and they are read in
+order of how specific the run can be about itself rather than of which node wrote last. A refusal
+that cannot say why it refused teaches the reader nothing, and teaches Day 5 less.
 
 ``{term}`` comes from the config rather than from the text, because "the catalog does not say"
 means a particular catalog: ``data/courses.json`` holds one term, and a course that is simply not
@@ -99,6 +101,16 @@ CITATION_REASON = (
 )
 CITATION_REMEDY = "ask again, more narrowly; the evidence I did retrieve is listed in the trace"
 
+#: When #38's draft cited nothing at all. A different failure from an invented citation and so a
+#: different sentence: nothing was made up, but nothing in the draft could be traced to a catalog
+#: entry either -- and the answer prompt's fourth rule means even "the catalog does not say" cites
+#: the block it looked in, so there is no honest answer this case describes.
+UNCITED_REASON = (
+    "I drafted an answer and then found that it pointed at none of the evidence I had retrieved -- "
+    "an answer I cannot trace back to a catalog entry is not one I will pass on, so I dropped it"
+)
+UNCITED_REMEDY = "ask again about one course, or one requirement, at a time"
+
 EMPTY_REASON = "nothing in the catalog came back for it at all"
 EMPTY_REMEDY = (
     "the course may not be offered in {term}, or may be listed under a different subject code"
@@ -131,6 +143,13 @@ def handoff_reason(state: AgentState, term: str) -> tuple[str, str]:
     if unknown:
         ids = unknown if isinstance(unknown, str) else ", ".join(unknown)
         return CITATION_REASON.format(ids=ids), CITATION_REMEDY
+
+    # `None` is "the answer node never ran"; an empty list is "it ran and its draft cited nothing",
+    # which is the one hand-off the evidence itself was fine for. Checked after the fabrication
+    # above, because a draft can do both.
+    verified = signals.get("citations_verified")
+    if verified is not None and not verified:
+        return UNCITED_REASON, UNCITED_REMEDY
 
     score = signals.get("retrieval_top_score")
     threshold = signals.get("evidence_threshold")
