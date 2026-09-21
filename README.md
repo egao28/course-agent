@@ -36,8 +36,8 @@ course-agent/
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
-├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py   (Day 2)
-├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
+├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
+├── eval/          # datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -57,10 +57,10 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "e0d6ff30", frozen at load
+cfg.hash                         # "7980f15f", frozen at load
 collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
 bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_e0d6ff30.md  dir created on demand
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_7980f15f.md  dir created on demand
 rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
@@ -177,7 +177,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash e0d6ff30  (chunk key 05d00726)
+config hash 7980f15f  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -249,7 +249,7 @@ uv run python -m ingest.build_bm25
 ```
 
 ```
-config hash e0d6ff30  (bm25 key 877a6610)
+config hash 7980f15f  (bm25 key 877a6610)
 documents indexed      4502
 vocabulary             21500 terms
 terms emitted          298000  (mean 66.2 per chunk)
@@ -401,7 +401,7 @@ uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 1
 ```
 
 ```
-'CS 374'  ->  5 hits, mode bm25, config e0d6ff30, 1.9 ms
+'CS 374'  ->  5 hits, mode bm25, config 7980f15f, 1.9 ms
 
 #  doc_id             score  name                                            sources
 1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
@@ -428,7 +428,7 @@ between them.
 The result carries what a report has to quote next to the hits:
 
 ```python
-RetrievalResult(query=…, mode="hybrid", config_hash="e0d6ff30", hits=[Hit, …], latency_ms=128.4)
+RetrievalResult(query=…, mode="hybrid", config_hash="7980f15f", hits=[Hit, …], latency_ms=128.4)
 ```
 
 `config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
@@ -492,6 +492,11 @@ one when a completion arrives with no answer in it: no choices, an empty or refu
 reply cut off at `max_tokens`. The last matters most for the answer node — a truncated answer keeps
 its citation and loses the claim that citation was supporting, which is the one failure a
 post-generation citation check cannot see.
+
+`llm.StandInChat` is the one canned client that ships with the module: it answers with the first
+line of the evidence it was handed and cites that block's `doc_id`, which is what lets the whole
+graph — prompt, citation check, exit — run end to end with nothing behind it. It is reachable only
+through [`--fake-model`](#command-line), and it names itself `stand-in` everywhere it is printed.
 
 The section is part of the full config hash and reaches neither index key, so adding it renamed the
 reports (`7045a614` → `ade2f799`) and left the dense collection (`094143d8`) and the BM25 pickle
@@ -852,6 +857,23 @@ built per query and thrown away, and hashing it into the config would rename bot
 every report name to record that an example sentence was reworded. A digest test pins the text to
 its version, so editing one without the other fails rather than publishing a second "v1".
 
+**v2: two examples, against a mistake the rules already forbade.** The first live run with a real
+model (gpt-4o-mini, 2026-09-21) labelled two questions `out_of_scope` that are not:
+`What are the prerequisites?` and `Is there a course about quantum origami?`. Both are covered in
+words — rule 2 says to classify what the question asks for and not whether the catalog can answer
+it, rule 3 says a question that names no course is still `prereq_chain` — and neither rule held,
+because every example in the prompt was a question the catalog *can* answer. The cost is not a
+mislabelled row: the first hands a person "that is outside what I can answer" when the honest
+reply asks which course, and the second never reaches the evidence gate that exists to refuse it.
+So `prereq_chain` gained a course-less example and `compare_recommend` an existence question, the
+version went to `v2`, and the digest moved with it.
+
+Neither new example is one of the two questions above: they are rows of
+`eval/datasets/day2_queries.jsonl`, and a prompt that quotes its own evaluation set stops measuring
+anything. They teach the same two shapes on questions the set does not contain — a test asserts
+that, because the temptation to paste the failing string in is exactly what makes a smoke run look
+green.
+
 The chat client is built on the **first query**, not when the node is built, and `llm` is imported
 there — it reaches `openai` and `OPENAI_API_KEY` through `embedding.py`, and `build_graph()` has to
 stay callable in a checkout with no key. The `llm` config section *is* validated at build time:
@@ -964,8 +986,8 @@ evidence:
   method: top_score     # day 5 adds "conformal"
   thresholds:
     bm25: 15.0          # Okapi BM25, unbounded
-    dense: 0.35         # 1 - cosine distance — UNMEASURED, the collection is still empty
-    hybrid: 0.025       # RRF = 2/(rrf_k + top_k_each): exactly "both retrievers returned it"
+    dense: 0.46         # 1 - cosine distance — measured, band 0.4529–0.6781
+    hybrid: 0.025       # RRF — kept, but top_score refuses to gate on it at all
 ```
 
 Four outcomes, and only the last one consults a threshold:
@@ -1015,12 +1037,32 @@ sentence scores 53% higher for the same match, which means part of what this thr
 how many words the question had. It separates the handwritten set correctly and it was chosen from
 that set. It is not a probability, and that gap is what Day 5 closes.
 
-**What an RRF threshold actually means: agreement — written down, because it is not confidence.**
-With `rrf_k: 60` and `top_k_each: 20`, a document one retriever ranked first scores `1/61 = 0.0164`
-and one both retrievers returned at the worst rank either reports scores `2/80 = 0.025`. So any
-threshold above `1/61` is unreachable by a single retriever, and `0.025` is exactly "both
-retrievers returned it" — with the consequence that in a hybrid run where one retriever is silent
-(a nonsense-word query returns no BM25 hits), nothing can clear it and the run hands over.
+**The dense number is a cutoff on thinner evidence than the BM25 one.** Top-1 cosine similarity
+over the same twelve queries (collection `courses_094143d8`, measured 2026-09-21) runs from
+**0.4529 to 0.6781** — so the `0.35` this section carried while the collection was empty sat below
+the entire band and refused nothing, twelve passes out of twelve. `dense: 0.46` refuses exactly one
+row, `Is there a course about quantum origami?` at 0.4529, and the next row up (`algorithms`,
+0.4619) clears it by 0.002. One negative example and a 2% margin is a floor fitted to a single
+query, not a tuned threshold; Day 4's negative set is what earns it. Dense top-1 is also the right
+course only 6 times in 12 — `CS 374` returns **CS 473** first, at 0.6200 — so it is no more a
+confidence than the BM25 number is.
+
+**An RRF threshold cannot be a gate at all, and the measurement is what says so.** With `rrf_k: 60`
+and `top_k_each: 20`, a document one retriever ranked first scores `1/61 = 0.0164` and one both
+retrievers returned at the worst rank either reports scores `2/80 = 0.025`, so `0.025` is exactly
+"both retrievers returned it" — which is what this section claimed for it while the dense index was
+unbuilt. With the index built, top-1 over those twelve queries spans **0.0296 to 0.0328**, and
+`Is there a course about quantum origami?` scores **0.0325 — fourth highest of the twelve**, with
+six answerable queries *below* it. The top document of a fused list is nearly always one that both
+retrievers returned near the top, whatever it is, so the score barely moves with the query and no
+cutoff separates the set.
+
+So `top_score` **refuses** a hybrid block instead of comparing it (`UNGATEABLE` in
+`check_evidence.py`), and `check_evidence_node` raises when it is built if `agent.retrieval_mode`
+is `hybrid` — not on the fifth query, the first one whose evidence carried a score. Passing
+everything is worse than handing over: in a report it is indistinguishable from evidence that was
+checked and found good. The number stays in the table so it holds one entry per retrieval mode, and
+so Day 5's calibrated method has somewhere to land.
 
 **One scored source per run.** A `docs` list carrying two retrievers' raw scores is refused rather
 than resolved: "the top score" is only defined inside one source, the two numbers in `signals` can
@@ -1178,8 +1220,132 @@ and the router's 449, and the five answering rows send 5,314 input tokens in tot
 MATH 241 lookup, 1,341 for the five-chunk retrieval row) — so the whole ten-query run is about 10k
 input tokens plus at most five completions.
 
-No config value moved: the prompt version is a module constant, so the hash is still `e0d6ff30`
+No config value moved there: the prompt version is a module constant, so #38 left the hash where it found it
 and `chunk_key` / `dense_key` / `bm25_key` are untouched.
+
+## Command line
+
+`python -m agent` is the agent as a person uses it: one question in, one of three exits out, and
+the whole run printed.
+
+```bash
+uv run --env-file .env python -m agent "What do I need before CS 374?"
+uv run python -m agent "..." --intent prereq_chain --fake-model   # no model, no key
+```
+
+```
+query     What do I need before CS 374?
+intent    prereq_chain       classified
+evidence  get_prereq_chain, 1 block
+
+  #  score  doc_id  first line
+  1      —  CS 374  CS 374 — what the catalog requires before it
+
+gate      passed -- an exact catalog lookup carries no score, so no threshold was consulted
+exit      answer             cited CS 374
+answer    generated by gpt-4o-mini from the evidence above
+
+Before CS 374, you need "one of CS 173, MATH 213; CS 225" [CS 374].
+
+(config 7980f15f, prompts router v2 / answer v1, 2.2 s including any index load)
+```
+
+| flag | what it does |
+| --- | --- |
+| `--intent` | skip the classifier and force one of the five labels ([#35](../../issues/35)). Everything downstream still runs — the dispatch table, the three tools, the retriever, the gate — and `signals["intent_raw"]` stays empty, which is what the trace prints as "no model was asked". |
+| `--fake-model` | answer with `llm.StandInChat`: it replies with the first line of the first evidence block and cites that block's `doc_id`. Requires `--intent`, because a stand-in cannot classify. Nothing is sent and no key is read, which is how the graph was built and tested before the account had credits — and still the way to exercise it for free. |
+| `--config` | a config file other than `config.yaml`. |
+
+**It prints a trace, not an answer.** Which label was chosen, which row of the dispatch table ran,
+what the gate compared and which exit was taken are the things that go wrong; the answer alone
+shows none of them, and on the two refusal exits it is fixed text that reads the same however the
+run got there. `agent/trace.py` renders it from the final state and nothing else, so the smoke
+report below can print the same facts per query without a second formatter to drift.
+
+**`--fake-model` is loud everywhere it touches.** The client names itself `stand-in` rather than
+the configured model, the trace says the text is canned, and the report says so in its header, in
+a section of its own and beside every answer. What it buys is that the prompt, the citation parse,
+the check against `docs` and the exit the node claims are all real, which is the most a run can
+honestly show with nothing behind it. What it does not buy is any evidence about *wording* —
+whether a real model stays inside its evidence is the one thing a stand-in cannot demonstrate,
+and it is what the live run below is for.
+
+## Day 2 smoke report
+
+`eval/scripts/day2_smoke.py` runs the ten handwritten queries in
+`eval/datasets/day2_queries.jsonl` end to end and writes
+[`report/day2_smoke_7980f15f.md`](report/day2_smoke_7980f15f.md):
+
+```bash
+uv run --env-file .env python -m eval.scripts.day2_smoke   # the committed report
+uv run python -m eval.scripts.day2_smoke --fake-model      # the same run with no model, no key
+```
+
+```
+config hash 7980f15f  (mode bm25)
+queries                10  (eval/datasets/day2_queries.jsonl)
+answers written by     gpt-4o-mini
+exits                  answer 4, refuse_handoff 5, out_of_scope 1
+agreement              intent 10/10, exit 9/10
+wrote                  report/day2_smoke_7980f15f.md  (17 KB)
+```
+
+Each row is `{query, expected_intent, expected_exit, note}`: all five intents are covered, and all
+three exits are expected by at least one row. The set is **handwritten, not sampled** — it exists
+to prove the wiring, and Day 4's ablation set is a different artifact with a different job.
+
+| exit | expected | actual |
+| --- | --- | --- |
+| `answer` | 5 | 4 |
+| `refuse_handoff` | 4 | 5 |
+| `out_of_scope` | 1 | 1 |
+
+**`expected_intent` and `expected_exit` are what a row should do, not what it does today**, so a
+row that does something else is reported as a disagreement rather than re-labelled in the dataset.
+One row still is:
+
+- **`What does the algorithms course cover?`** — a `course_fact` with no code, so it retrieves,
+  and BM25 alone puts ECON 300 first at 11.79 against a threshold of 15.0. The refusal is right
+  for that evidence; the row stays as written, and `agent.retrieval_mode` is what has to move.
+
+The other two disagreements this set had are gone, and they are worth keeping in the record: under
+router prompt `v1`, `gpt-4o-mini` sent **"What are the prerequisites?"** and **"Is there a course
+about quantum origami?"** to `out_of_scope`, so a person asking either got "that is outside what
+I can answer" where the honest answers are "name the course by code" and "I looked and this
+catalog does not have it". The prompt's rules already said both belong elsewhere; what was missing
+was an example of each shape, since every example above them named a course the catalog has.
+[Prompt `v2`](#intent-router) adds one apiece — deliberately not the eval set's own strings — and
+on this run both land where they belong, the origami query refusing at the gate (11.06 against
+15.0) rather than at the router. Intent agreement went 8/10 → **10/10**, and
+`intent_unparsed` was `false` on every row both times, so #35's strict validator has still never
+cost this set anything.
+
+**The acceptance is a check, not a sentence in a report.** The runner writes the report and then
+exits non-zero if any of the three exits never fired, so a regression is a failed command and not
+a table nobody re-read.
+
+**A live run is not reproducible, and `temperature: 0` does not make it one.** The report carries
+no timestamp and no latency, so nothing in it can move unless the run did — under `--fake-model`
+a re-run rewrites a byte-identical file. Across four live runs, one row has moved: "Which intro
+machine learning course should I take?" was answered three times ("The catalog does not carry a
+recommendation …", citing IS 557) and once drafted with **no citation at all**, which
+[#38](../../issues/38)'s check discarded for the hand-off exit. That is the uncited-draft path
+firing on its own, and it is also the sharpest thing these runs say about the *answer* prompt: for
+`compare_recommend`, rule 2 ("say plainly when the evidence does not carry it") is winning against
+a row whose whole shape is several ranked candidates, and the model declines to recommend at all.
+That one is open as [#53](../../issues/53); Day 4 ablates the prompt, and this is the row to
+ablate it on.
+
+Every path in the file goes through `rel_to_repo()`, so no home directory lands in a tracked file,
+and the caveats are generated from the run rather than pasted in — the stand-in report says "no
+model was called anywhere in this run" and the live one does not.
+
+**What the live run still does not measure:** `agent.retrieval_mode` is `bm25`, so the retrieval
+rows were answered lexically and the hybrid path is plumbing-verified, not result-verified. Which
+mode runs is a config value, so switching it is a new hash and a new report rather than a footnote
+to this one — and on this corpus that switch is [not a free one](#evidence-gate): the fused score
+of a top-1 document barely moves between a good match and a bad one, which is why `top_score`
+refuses a hybrid block instead of comparing it.
 
 ## Day 1 goal
 
@@ -1195,3 +1361,19 @@ retrieve("machine learning courses", mode="hybrid")   # mode ∈ {dense, bm25, h
 - Acceptance: hand-check top-5 for 5 queries
 
 Progress is tracked in GitHub Issues (milestone: Day 1).
+
+## Day 2 goal
+
+One message in, one of three exits out:
+
+```python
+from agent.graph import run
+run("What do I need before CS 374?")["exit"]   # 'answer' | 'refuse_handoff' | 'out_of_scope'
+```
+
+- Five intents, a dispatch table over three tools and `retrieve()`, a threshold on the evidence,
+  and an answer whose citations are verified before anyone reads it
+- The same three tools served over MCP — the external surface, not the graph's transport
+- Acceptance: ten handwritten queries from the command line, all three exits, one report
+
+Progress is tracked in GitHub Issues (milestone: Day 2).

@@ -23,7 +23,7 @@ from agent.state import INTENTS
 #: sha256 of ROUTER_SYSTEM_PROMPT, first 16 hex chars, for version v1. Change the prompt and this
 #: test fails: bump ROUTER_PROMPT_VERSION and this literal in the same commit, so that a report
 #: naming a version names one text.
-V1_DIGEST = "84658d6a8d14d8cd"
+V2_DIGEST = "3314cfc1f5e97a27"
 
 #: The same, for ANSWER_SYSTEM_PROMPT at ANSWER_PROMPT_VERSION v1.
 ANSWER_V1_DIGEST = "6de696d3d0873e19"
@@ -37,8 +37,8 @@ def digest(text: str) -> str:
 
 
 def test_the_router_prompt_is_the_text_its_version_names():
-    assert prompts.ROUTER_PROMPT_VERSION == "v1"
-    assert digest(prompts.ROUTER_SYSTEM_PROMPT) == V1_DIGEST
+    assert prompts.ROUTER_PROMPT_VERSION == "v2"
+    assert digest(prompts.ROUTER_SYSTEM_PROMPT) == V2_DIGEST
 
 
 def test_the_prompt_is_a_constant_and_rendering_it_again_reproduces_it():
@@ -48,11 +48,28 @@ def test_the_prompt_is_a_constant_and_rendering_it_again_reproduces_it():
 # --- it teaches the five labels, and only those ---------------------------------------------------
 
 
-def test_every_label_has_a_gloss_and_two_distinct_examples():
+def test_every_label_has_a_gloss_and_at_least_two_distinct_examples():
     assert set(prompts.ROUTER_GLOSSES) == set(INTENTS)
     assert set(prompts.ROUTER_EXAMPLES) == set(INTENTS)
     for label, examples in prompts.ROUTER_EXAMPLES.items():
-        assert len(set(examples)) == 2, label
+        assert len(set(examples)) >= 2, label
+
+
+def test_v2_teaches_the_two_shapes_the_model_sent_out_of_scope():
+    # Rules 2 and 3 already covered both, and gpt-4o-mini labelled them out_of_scope anyway
+    # (2026-09-21): a prerequisite question naming no course, and an existence question about a
+    # topic the catalog probably does not carry. Each needed an example of its shape.
+    assert "What do I need to take first?" in prompts.ROUTER_EXAMPLES["prereq_chain"]
+    assert "Is there a course about beekeeping?" in prompts.ROUTER_EXAMPLES["compare_recommend"]
+
+
+def test_the_examples_are_not_the_questions_the_router_is_evaluated_on():
+    # eval/datasets/day2_queries.jsonl carries both of these. A prompt that quotes its own
+    # evaluation set turns the smoke run into a lookup, so v2 teaches their shapes on other
+    # questions.
+    evaluated = {"What are the prerequisites?", "Is there a course about quantum origami?"}
+    taught = {example for examples in prompts.ROUTER_EXAMPLES.values() for example in examples}
+    assert not (taught & evaluated)
 
 
 def test_the_prompt_names_each_label_with_both_of_its_examples():

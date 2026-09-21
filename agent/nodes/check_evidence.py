@@ -14,8 +14,8 @@ comparable within one result list, meaningless across two.
 | source | scale | observed on this corpus |
 |---|---|---|
 | ``bm25`` | Okapi BM25, unbounded | 7.2-30.9 top-1 over the queries below |
-| ``dense`` | ``1 - cosine_distance``, higher better | ~0.2-0.6, **unmeasured**: no index yet |
-| ``hybrid`` | RRF, ``sum 1/(rrf_k + rank)`` | 0.0164 (one retriever, rank 1) to 0.0328 (both) |
+| ``dense`` | ``1 - cosine_distance``, higher better | 0.4529-0.6781 top-1 over the queries below |
+| ``hybrid`` | RRF, ``sum 1/(rrf_k + rank)`` | 0.0296-0.0328 top-1 -- not gateable, see below |
 
 So the threshold is per source, in ``config.yaml``'s ``evidence`` section, and this module holds no
 number of its own -- not even a default. A float here would be a tuning decision outside the config
@@ -50,14 +50,31 @@ separates the handwritten set correctly, and it is chosen from that set; it is n
 and nothing here should be read as one. That is the gap Day 5's calibration closes, and it is why
 both numbers are recorded on every run rather than compared and dropped.
 
-**What the RRF threshold actually means: agreement.** With ``rrf_k: 60`` and ``top_k_each: 20``, a
-document one retriever ranked first scores ``1/61 = 0.0164``, and one both retrievers returned at
-their worst reported rank scores ``2/80 = 0.025``. Any threshold above ``1/61`` is therefore
-unreachable by a single retriever, and ``0.025`` -- which is what the config says -- is exactly
-"both retrievers returned it". That may be a decent proxy for confidence, but it is not one, it is
-written down as such in ``config.yaml``, and it has a consequence worth stating: in a hybrid run
-where one retriever is silent (a nonsense-word query returns no BM25 hits at all), no document can
-clear it and the run hands over.
+**The dense number is the same kind of cutoff, on thinner evidence.** Top-1 cosine similarities
+over those same twelve queries (collection ``courses_094143d8``, measured 2026-09-21) run from
+**0.4529 to 0.6781**, so the ``0.35`` this section carried while the index was unbuilt passed all
+twelve -- it refused nothing. ``dense: 0.46`` refuses exactly one row: ``Is there a course about
+quantum origami?`` at 0.4529, the one question with no answer, and the next row up (``algorithms``
+at 0.4619) clears it by 2%. One negative example and a 2% margin is a floor fitted to a single
+query, not a tuned threshold; it is written down here so a report naming it says what it rests on,
+and Day 4's negative set is what replaces it. Dense top-1 is the right course only 6 times in 12
+(``CS 374`` returns **CS 473** first, at 0.6200), so it is no more a confidence than BM25's is.
+
+**What the RRF threshold turned out to mean: nothing that can be gated on.** With ``rrf_k: 60``
+and ``top_k_each: 20``, a document one retriever ranked first scores ``1/61 = 0.0164`` and one both
+retrievers returned at their worst reported rank scores ``2/80 = 0.025`` -- so ``0.025`` is exactly
+"both retrievers returned it", which is what ``config.yaml`` claimed for it. Measured on
+2026-09-21, once the dense index existed, that is not a blunt gate but **no gate at all**: top-1
+over the same twelve queries spans **0.0296 to 0.0328**, and ``Is there a course about quantum
+origami?`` scores **0.0325**, fourth highest of the twelve. The top document of a fused list is
+nearly always one that both retrievers returned near the top, whatever it is, so the score is
+almost constant across queries and no cutoff admits the answerable rows while refusing that one.
+
+So ``top_score`` **refuses** a hybrid block rather than comparing it (:data:`UNGATEABLE`). Passing
+everything is worse than handing over: it reads in a report as a gate that looked and agreed.
+:func:`check_retrieval_mode` raises when the node is built rather than on the first scored query,
+so flipping ``agent.retrieval_mode`` to ``hybrid`` fails immediately and visibly instead of
+quietly un-gating every answer the agent gives.
 
 **A tool result bypasses the threshold.** ``score is None`` means #36 rendered an exact catalog
 lookup, and ``get_course("CS 374")`` returning the record *is* the evidence -- there is no ranking
@@ -107,6 +124,21 @@ METHODS: dict[str, str] = {
 #: tool result has no score to compare -- so an extra key here is a typo (``bm_25``) or a threshold
 #: nothing will ever read, and both are better as an error than as a line in a tracked config.
 SOURCES: tuple[str, ...] = retrieval.MODES
+
+#: Sources whose scores ``top_score`` refuses to compare against a threshold at all, with the
+#: measurement that says why. This is not a tuning choice that a config could overrule: a number
+#: that is nearly the same for a right answer and for a question with no answer cannot be made
+#: into a gate by moving the cutoff, only by changing the method (Day 5's ``conformal``).
+UNGATEABLE: dict[str, str] = {
+    "hybrid": (
+        "an RRF score is a sum of 1/(rrf_k + rank) over the retrievers that returned the "
+        "document, so the top document of a fused list scores almost the same whatever it is -- "
+        "measured over the twelve queries in tests/test_check_evidence.py the whole top-1 range "
+        "is 0.0296 to 0.0328, and the one question with no answer ('Is there a course about "
+        "quantum origami?') scores 0.0325, fourth highest of the twelve, so no cutoff separates "
+        "that set"
+    ),
+}
 
 
 class Verdict(NamedTuple):
@@ -251,6 +283,51 @@ def threshold_for(source: str, table: Mapping[str, float]) -> float:
     return table[source]
 
 
+def gateable() -> str:
+    """The sources a ``top_score`` gate can still judge, for the messages that have to name them."""
+    return ", ".join(source for source in SOURCES if source not in UNGATEABLE)
+
+
+def check_gateable(source: str) -> str:
+    """Refuse a scored block from a source whose scale this method cannot judge.
+
+    Raised rather than passed or failed, because either verdict would be a claim this gate cannot
+    support: passing reads as "the evidence was good enough" and failing as "it was not", and the
+    measurement in :data:`UNGATEABLE` says the number distinguishes neither. A run that got here
+    was configured to gate something ungateable, and that is a question for ``config.yaml``.
+    """
+    if source in UNGATEABLE:
+        raise ValueError(
+            f"evidence from {source!r} cannot be gated by top_score: {UNGATEABLE[source]}. "
+            f"Gate a mode whose score means something per document (agent.retrieval_mode: "
+            f"{gateable()}), or wait for the calibrated method Day 5 adds as evidence.method"
+        )
+    return source
+
+
+def check_retrieval_mode(cfg: Mapping[str, Any]) -> None:
+    """Refuse, when the node is built, a config that would run the gate on an ungateable mode.
+
+    ``agent.retrieval_mode`` belongs to #36 and is validated there; this reads it only to fail
+    early, because the alternative is a graph that builds, answers the first four questions and
+    raises on the fifth -- the first one whose evidence carried a score. A mode this cannot gate
+    is a decision about the whole run, and a run should not start by half-making it.
+
+    Only an exact ungateable name is refused. A missing section, or a mode that is not a string,
+    is dispatch's error to report in its own words rather than this node's to guess at.
+    """
+    section = cfg.get("agent") or {}
+    mode = section.get("retrieval_mode") if isinstance(section, Mapping) else None
+    if isinstance(mode, str) and mode in UNGATEABLE:
+        raise ValueError(
+            f"config sets agent.retrieval_mode to {mode!r} and evidence.method to 'top_score', "
+            f"which cannot gate it: {UNGATEABLE[mode]}. Every run would pass the gate, which in a "
+            f"report is indistinguishable from evidence that was checked and found good. Set "
+            f"agent.retrieval_mode to one of {gateable()}, or gate it with the calibrated method "
+            "Day 5 adds as evidence.method"
+        )
+
+
 # --- the decision ---------------------------------------------------------------------------------
 
 
@@ -288,8 +365,9 @@ def judge(docs: Sequence[Evidence], tool_error: Any, table: Mapping[str, float])
     * no ``docs``: a retrieval that came back empty, which is the honest bottom of the scale.
     * any block with ``score is None``: an exact catalog lookup is in the evidence, and it passes
       without a threshold. Any, not all -- one certain block is enough, whatever came with it.
-    * otherwise: the best score in the list against its own source's threshold, ``>=`` passing, so
-      hybrid's ``0.025`` admits the document both retrievers returned at their worst rank.
+    * otherwise: the best score in the list against its own source's threshold, ``>=`` passing --
+      unless the source is one :data:`UNGATEABLE` names, which raises instead of returning a
+      verdict the number cannot support.
     """
     if tool_error:
         return Verdict(False, None, None)
@@ -298,6 +376,7 @@ def judge(docs: Sequence[Evidence], tool_error: Any, table: Mapping[str, float])
     if any(block.score is None for block in docs):
         return Verdict(True, None, None)
     source, score = one_source(docs)
+    check_gateable(source)
     threshold = threshold_for(source, table)
     return Verdict(score >= threshold, score, threshold)
 
@@ -312,6 +391,7 @@ def check_evidence_node(cfg: Config) -> Node:
     gets a new hash and a new report name for free.
     """
     check_method(cfg)
+    check_retrieval_mode(cfg)
     table = thresholds(cfg)
 
     def node(state: AgentState) -> dict[str, Any]:
