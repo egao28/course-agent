@@ -1,0 +1,4 @@
+{"id": "v1-0001", "bucket": "fact", "question": "How many credits is MATH 241?", "gold_answer": "4 credit hours.", "gold_doc_ids": ["2026-sp:MATH-241"], "should_abstain": false}
+{"id": "v1-0002", "bucket": "multihop", "question": "Is CS 225 on its own enough to take CS 374?", "gold_answer": "No. CS 374 lists one of CS 173 or MATH 213 alongside CS 225, so CS 225 alone does not satisfy it.", "gold_doc_ids": ["2026-sp:CS-374", "2026-sp:CS-225"], "should_abstain": false}
+{"id": "v1-0003", "bucket": "unanswerable", "question": "Who teaches CS 374 next fall?", "gold_answer": "This catalog covers 2026 spring and carries no instructor, so neither the term nor the instructor is in it.", "gold_doc_ids": [], "should_abstain": true}
+{"id": "v1-0004", "bucket": "ambiguous", "question": "What are the prerequisites?", "gold_answer": "Which course do you mean?", "gold_doc_ids": [], "should_abstain": true}
