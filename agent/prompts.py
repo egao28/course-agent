@@ -45,7 +45,7 @@ from agent.state import INTENTS, Evidence, Intent
 
 #: Bumped whenever :data:`ROUTER_SYSTEM_PROMPT` changes in any way a model could notice. Pinned by
 #: a digest test, so the bump is not something to remember -- it is something that fails.
-ROUTER_PROMPT_VERSION = "v1"
+ROUTER_PROMPT_VERSION = "v2"
 
 #: What each label covers, in the words the model reads. One line each: a gloss long enough to
 #: separate it from its neighbours and short enough that the examples do the real teaching.
@@ -57,12 +57,25 @@ ROUTER_GLOSSES: dict[Intent, str] = {
     "out_of_scope": "not a question about courses in a course catalog at all",
 }
 
-#: Two example questions per label. The second of each pair is chosen against the mistake the
-#: first one invites: a code-free ``course_fact`` (so a course code stops looking like the thing
-#: that decides the label), a yes/no prerequisite question, a *major* requirement rather than a
-#: Gen Ed one, a two-course comparison, and an ``out_of_scope`` question that is about the
+#: At least two example questions per label. The second of each pair is chosen against the mistake
+#: the first one invites: a code-free ``course_fact`` (so a course code stops looking like the
+#: thing that decides the label), a yes/no prerequisite question, a *major* requirement rather
+#: than a Gen Ed one, a two-course comparison, and an ``out_of_scope`` question that is about the
 #: university but not about its courses.
-ROUTER_EXAMPLES: dict[Intent, tuple[str, str]] = {
+#:
+#: The **third** examples were added in v2, against a mistake the rules state and gpt-4o-mini made
+#: anyway: on 2026-09-21 it labelled "What are the prerequisites?" and "Is there a course about
+#: quantum origami?" ``out_of_scope``, so an underspecified prerequisite question answered "that
+#: is outside what I can answer" instead of asking which course, and a topical question that the
+#: evidence gate was there to refuse never reached it. Rules 2 and 3 already said both belong
+#: here; what was missing was an example of each shape, since the pairs above only ever showed
+#: questions the catalog can answer.
+#:
+#: Deliberately *not* the two strings above: those are rows of ``eval/datasets/day2_queries.jsonl``,
+#: and a prompt that quotes its own evaluation set stops measuring anything. These teach the same
+#: two shapes -- a prerequisite question naming no course, an existence question about a topic the
+#: catalog probably does not carry -- on questions the set does not contain.
+ROUTER_EXAMPLES: dict[Intent, tuple[str, ...]] = {
     "course_fact": (
         "How many credits is CS 374?",
         "How many hours is the intro programming course?",
@@ -70,6 +83,7 @@ ROUTER_EXAMPLES: dict[Intent, tuple[str, str]] = {
     "prereq_chain": (
         "What do I need before SE 495?",
         "Do I have to take CS 225 before CS 374?",
+        "What do I need to take first?",
     ),
     "degree_requirement": (
         "Which Gen Eds do I still need?",
@@ -78,6 +92,7 @@ ROUTER_EXAMPLES: dict[Intent, tuple[str, str]] = {
     "compare_recommend": (
         "Which intro ML course should I take?",
         "Should I take CS 411 or CS 441 next semester?",
+        "Is there a course about beekeeping?",
     ),
     "out_of_scope": (
         "What's the weather in Champaign?",
@@ -141,11 +156,11 @@ def check_router_labels() -> None:
                 f"missing {missing or 'nothing'}, unknown {extra or 'nothing'} -- the prompt must "
                 "teach exactly the labels the router validates against"
             )
-    thin = [label for label, examples in ROUTER_EXAMPLES.items() if len(set(examples)) != 2]
+    thin = [label for label, examples in ROUTER_EXAMPLES.items() if len(set(examples)) < 2]
     if thin:
         raise ValueError(
-            f"ROUTER_EXAMPLES needs two distinct examples for {', '.join(thin)}; one example per "
-            "label teaches the label's easiest case and nothing about its boundary"
+            f"ROUTER_EXAMPLES needs at least two distinct examples for {', '.join(thin)}; one "
+            "example per label teaches the label's easiest case and nothing about its boundary"
         )
 
 
@@ -286,8 +301,10 @@ def check_answer_examples() -> None:
     here so that editing the examples in this file fails in this file.
     """
     if not ANSWER_EXAMPLES:
-        raise ValueError("ANSWER_EXAMPLES is empty; the 'the catalog does not say' answer is the "
-                         "one behaviour this prompt has to demonstrate")
+        raise ValueError(
+            "ANSWER_EXAMPLES is empty; the 'the catalog does not say' answer is the "
+            "one behaviour this prompt has to demonstrate"
+        )
     citation = f"[{ANSWER_EXAMPLE_ID}]"
     uncited = [question for question, answer in ANSWER_EXAMPLES if citation not in answer]
     if uncited:

@@ -27,9 +27,12 @@ from agent.nodes import exits
 from agent.nodes.check_evidence import (
     METHODS,
     SOURCES,
+    UNGATEABLE,
     check_evidence_node,
+    check_gateable,
     check_method,
     check_number,
+    check_retrieval_mode,
     evidence_section,
     judge,
     one_source,
@@ -67,6 +70,45 @@ MEASURED: tuple[tuple[str, float, bool], ...] = (
     ("introduction to statistics", 9.0038, False),  # STAT 400, right -- refused
     ("algorithms", 8.4812, False),  # CS 374, exactly right -- refused
 )
+
+
+#: Top-1 on the live dense collection (``courses_094143d8``), measured 2026-09-21 over the same
+#: twelve queries, and which side of the live ``dense: 0.46`` each falls on. The band is narrow
+#: and sits entirely above the ``0.35`` this section carried while the index was unbuilt.
+DENSE_MEASURED: tuple[tuple[str, float, bool], ...] = (
+    ("How many credits is MATH 241?", 0.6781, True),  # MATH 241, right
+    ("Which course covers organic chemistry?", 0.6290, True),  # CHEM 236, right
+    ("CS 374", 0.6200, True),  # CS 473, wrong -- and the second highest score of the twelve
+    ("What does the data structures course cover?", 0.5783, True),  # CI 487, wrong
+    ("Which intro machine learning course should I take?", 0.5607, True),  # LING 448
+    ("I want a course on Shakespeare", 0.5367, True),  # ENGL 218, right
+    ("What does the algorithms course cover?", 0.5327, True),  # MATH 473, wrong
+    ("introduction to statistics", 0.5071, True),  # STAT 400, right
+    ("linear algebra", 0.5028, True),  # MATH 415, right
+    ("machine learning", 0.4721, True),  # CS 446, right
+    ("algorithms", 0.4619, True),  # MATH 473, wrong -- and 0.002 above the threshold
+    ("Is there a course about quantum origami?", 0.4529, False),  # PHYS 370, no such course
+)
+
+#: Top-1 on the same twelve, fused. Recorded to show that no threshold works on this scale rather
+#: than to justify one: the unanswerable query is fourth highest.
+HYBRID_MEASURED: tuple[tuple[str, float], ...] = (
+    ("How many credits is MATH 241?", 0.0328),
+    ("I want a course on Shakespeare", 0.0328),
+    ("introduction to statistics", 0.0328),
+    ("linear algebra", 0.0325),
+    ("Is there a course about quantum origami?", 0.0325),
+    ("algorithms", 0.0325),
+    ("CS 374", 0.0323),
+    ("Which intro machine learning course should I take?", 0.0323),
+    ("What does the data structures course cover?", 0.0323),
+    ("Which course covers organic chemistry?", 0.0315),
+    ("What does the algorithms course cover?", 0.0315),
+    ("machine learning", 0.0311),
+)
+
+#: The one query in either table that nothing should answer.
+UNANSWERABLE = "Is there a course about quantum origami?"
 
 
 @pytest.fixture
@@ -498,7 +540,7 @@ def test_the_graph_builds_the_real_gate_for_the_live_config():
 def test_the_live_config_carries_the_section_this_node_reads():
     live = load_config()
     assert check_method(live) == "top_score"
-    assert thresholds(live) == {"bm25": 15.0, "dense": 0.35, "hybrid": 0.025}
+    assert thresholds(live) == {"bm25": 15.0, "dense": 0.46, "hybrid": 0.025}
 
 
 def test_the_evidence_section_renames_no_index():
@@ -551,3 +593,111 @@ def test_a_longer_question_scores_the_same_document_half_again_higher():
     live = thresholds(load_config())
     assert judge([hit(asked)], None, live).ok
     assert not judge([hit(bare)], None, live).ok
+
+
+# --- the dense threshold, once there was an index to measure --------------------------------------
+
+
+@pytest.mark.parametrize(("query", "score", "passes"), DENSE_MEASURED)
+def test_each_measured_dense_query_falls_on_the_side_it_was_measured_on(query, score, passes):
+    live = load_config()
+    docs = [Evidence(doc_id="2026-sp:CS-374", text="a course", score=score, source="dense")]
+    assert judge(docs, None, thresholds(live)).ok is passes
+
+
+def test_the_dense_threshold_the_empty_index_guessed_would_have_refused_nothing():
+    # Why the number moved: 0.35 was the middle of a band nobody could measure, and the band it
+    # was guarding turned out to start at 0.4529. Twelve queries, twelve passes, including the one
+    # with no answer -- a gate that never fires reads in a report exactly like one that agreed.
+    assert all(score >= 0.35 for _, score, _ in DENSE_MEASURED)
+    assert thresholds(load_config())["dense"] > 0.35
+
+
+def test_the_dense_threshold_sits_between_the_only_two_rows_it_can_sit_between():
+    # And how thin that is: one negative example, and the answerable row above it clears the
+    # threshold by 0.002. This is a floor fitted to a single query, which is what config.yaml
+    # says it is -- Day 4's negative set is what earns it.
+    scores = {query: score for query, score, _ in DENSE_MEASURED}
+    live = thresholds(load_config())["dense"]
+    answerable = [score for query, score, _ in DENSE_MEASURED if query != UNANSWERABLE]
+    assert scores[UNANSWERABLE] < live <= min(answerable)
+    assert min(answerable) - scores[UNANSWERABLE] < 0.01
+
+
+# --- the hybrid scale, which no threshold can gate ------------------------------------------------
+
+
+def test_no_hybrid_cutoff_separates_the_queries_that_have_an_answer_from_the_one_that_does_not():
+    # The measurement behind UNGATEABLE, and the reason this is a refusal rather than a number to
+    # re-tune: six answerable queries score below the unanswerable one, so every cutoff either
+    # admits it or refuses them.
+    scores = dict(HYBRID_MEASURED)
+    answerable = {q: s for q, s in scores.items() if q != UNANSWERABLE}
+    below = [q for q, s in answerable.items() if s < scores[UNANSWERABLE]]
+    assert len(below) == 6
+    assert max(scores.values()) - min(scores.values()) < 0.002  # the whole band, 0.0311-0.0328
+
+
+def test_a_scored_hybrid_block_is_refused_rather_than_judged():
+    docs = [Evidence(doc_id="2026-sp:CS-374", text="a course", score=0.0325, source="hybrid")]
+    with pytest.raises(ValueError, match="cannot be gated by top_score"):
+        judge(docs, None, {"bm25": 15.0, "dense": 0.46, "hybrid": 0.025})
+
+
+def test_the_refusal_names_the_modes_that_can_still_be_gated():
+    with pytest.raises(ValueError, match="agent.retrieval_mode: dense, bm25"):
+        check_gateable("hybrid")
+
+
+def test_the_two_gateable_modes_pass_through_untouched():
+    assert check_gateable("dense") == "dense"
+    assert check_gateable("bm25") == "bm25"
+
+
+def test_ungateable_covers_hybrid_and_only_hybrid():
+    assert set(UNGATEABLE) == {"hybrid"}
+    assert set(UNGATEABLE) < set(MODES)
+
+
+def test_a_tool_block_still_passes_beside_a_hybrid_one_because_nothing_is_compared():
+    # The refusal is about comparing a hybrid score, not about the mode being present: an exact
+    # lookup in the list still passes the gate without a threshold, as it does for any source.
+    docs = [
+        lookup(),
+        Evidence(doc_id="2026-sp:CS-374", text="a course", score=0.0325, source="hybrid"),
+    ]
+    assert judge(docs, None, {"bm25": 15.0, "dense": 0.46, "hybrid": 0.025}).ok
+
+
+# --- and it fails when the node is built, not on the fifth query ----------------------------------
+
+
+def test_a_config_that_would_gate_the_ungateable_mode_is_refused_at_build_time(cfg):
+    hybrid = Config({**cfg.to_dict(), "agent": {"retrieval_mode": "hybrid"}})
+    with pytest.raises(ValueError, match="which cannot gate it"):
+        check_evidence_node(hybrid)
+
+
+def test_the_build_time_message_names_the_key_a_reader_has_to_change(cfg):
+    hybrid = Config({**cfg.to_dict(), "agent": {"retrieval_mode": "hybrid"}})
+    with pytest.raises(ValueError, match=r"config sets agent\.retrieval_mode to 'hybrid'"):
+        check_retrieval_mode(hybrid)
+
+
+@pytest.mark.parametrize("mode", ["bm25", "dense"])
+def test_a_gateable_mode_builds(cfg, mode):
+    assert check_evidence_node(Config({**cfg.to_dict(), "agent": {"retrieval_mode": mode}}))
+
+
+def test_a_config_without_an_agent_section_is_dispatch_s_problem_not_this_node_s():
+    # This node reads agent.retrieval_mode only to fail early on one value; everything else about
+    # the key -- missing, misspelled, not a string -- is #36's to report in its own words.
+    check_retrieval_mode({"evidence": EVIDENCE})
+    check_retrieval_mode({"agent": {}})
+    check_retrieval_mode({"agent": {"retrieval_mode": 7}})
+
+
+def test_the_live_config_still_runs_a_mode_this_gate_can_judge():
+    live = load_config()
+    assert live["agent"]["retrieval_mode"] not in UNGATEABLE
+    assert check_evidence_node(live)
