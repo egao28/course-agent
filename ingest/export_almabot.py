@@ -25,8 +25,9 @@ Outputs
     ``dag.ts::prereqs()`` applies at read time). Courses with no surviving edge are omitted.
 ``data/requirements.json``
     The 13 campus Gen Ed categories from ``almabot-web/src/lib/gened.ts``, as declarative
-    ``Degree Attributes`` substring rules. Major requirements are not in the CSV: ``majors`` is an
-    empty placeholder.
+    ``Degree Attributes`` substring rules, and the two degree programs hand-transcribed into
+    ``ingest/majors.json`` -- major requirements are not in the CSV, which lists sections, so that
+    file is their source and this export only checks and measures them (see :mod:`ingest.majors`).
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from config import REPO_ROOT, Config, load_config, rel_to_repo, verify_source
+from ingest.majors import build_majors, check_coverage
 
 DATA_DIR = REPO_ROOT / "data"
 COURSES_PATH = DATA_DIR / "courses.json"
@@ -186,8 +188,10 @@ GENED: tuple[dict[str, Any], ...] = (
 
 MAJORS_NOTE = (
     "Major and degree requirements are not present in course-catalog.csv, which lists sections "
-    "only. A separate source (catalog.illinois.edu program pages, or a department-provided plan) "
-    "has to be scraped before this can be filled in."
+    "only. The programs in `majors` were transcribed by hand from the catalog.illinois.edu "
+    "program pages each one names, for the catalog year in force for this term; they are two of "
+    "the roughly 250 the campus offers. Requirements a course list cannot decide -- credit hours, "
+    "GPA, placement, approved lists -- are marked kind 'advising' and are never counted as met."
 )
 CULTURAL_STUDIES_NOTE = (
     "Each campus Gen Ed category needs at least one course; Cultural Studies needs all three of "
@@ -439,10 +443,13 @@ def matches_attrs(category: Mapping[str, Any], attrs: str) -> bool:
 
 
 def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, Any]) -> dict:
-    """Gen Ed rules plus the placeholder for major requirements.
+    """Gen Ed rules and the hand-encoded degree programs, both measured against this export.
 
     ``courseCount`` is how many courses in *this* export satisfy each category -- derived from the
-    same CSV in the same run, so it is a sanity check on the rules, not an independent source.
+    same CSV in the same run, so it is a sanity check on the rules, not an independent source. The
+    same field on a major's requirement group means the same thing, and
+    :func:`~ingest.majors.build_majors` adds the program page and catalog year each group was read
+    off, so an audit can cite the source of every line it reports.
     """
     categories = []
     for category in GENED:
@@ -456,11 +463,12 @@ def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, A
     return {
         "term": cfg["data"]["term"],
         "source": (
-            "almabot-web/src/lib/gened.ts (GENED), matched against the catalog's "
-            "'Degree Attributes' column"
+            "genEd: almabot-web/src/lib/gened.ts (GENED), matched against the catalog's "
+            "'Degree Attributes' column. majors: ingest/majors.json, hand-transcribed from the "
+            "catalog.illinois.edu program page each one names"
         ),
         "genEd": categories,
-        "majors": [],
+        "majors": build_majors(courses),
         "notes": {"majors": MAJORS_NOTE, "culturalStudies": CULTURAL_STUDIES_NOTE},
     }
 
@@ -515,6 +523,18 @@ def summarize(
         f"courses with attrs     {with_attrs}",
     ]
     lines += [f"  {c['id']:<12} {c['courseCount']:>4}  {c['label']}" for c in requirements["genEd"]]
+    for major in requirements["majors"]:
+        checked = [g for g in major["groups"] if g["rule"]["kind"] != "advising"]
+        absent = sorted({code for g in major["groups"] for code in g["notOffered"]})
+        advising = len(major["groups"]) - len(checked)
+        lines += [
+            f"{major['label']}  ({major['catalogYear']} catalog)",
+            (
+                f"  requirement groups   {len(major['groups'])}  ({len(checked)} checked against "
+                f"a course list, {advising} needing an advisor)"
+            ),
+            f"  named, not this term {len(absent)}" + (f"  {absent}" if absent else ""),
+        ]
     return lines
 
 
@@ -527,6 +547,7 @@ def export(cfg: Config) -> dict[str, Any]:
     check_terms(catalog, cfg)
     prereqs = build_prereqs(catalog.courses)
     requirements = build_requirements(catalog.courses, cfg)
+    check_coverage(requirements["majors"], rel_to_repo(REQUIREMENTS_PATH))
     write_json(COURSES_PATH, catalog.courses)
     write_json(PREREQS_PATH, prereqs)
     write_json(REQUIREMENTS_PATH, requirements)

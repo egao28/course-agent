@@ -15,6 +15,15 @@ worth pinning is that the tool agrees with the exporter's evaluator whichever ru
 ``fresh_cache`` is autouse and clears all three tool caches: the audit reads the catalog index for
 every course in the transcript, so a test that left ``courses``'s cache behind would audit the next
 one's transcript against the wrong corpus.
+
+#32 added the second half of this tool: ``requirements.json`` now carries two hand-encoded degree
+programs, so "Computer Science, BS" is audited where it used to be refused, and the refusal moved
+to the programs the file does not hold. The major tests run against the same fixture corpus, which
+offers almost none of the courses a CS degree requires -- and that is the point of the last major
+section: a requirement is credited from the *codes* a student gives, not from the catalog, or a
+transcript full of courses this one term does not offer would audit as an empty one. The rule
+language itself (``all_of`` / ``n_of`` / ``n_of_matching`` / ``advising``) is pinned in
+``tests/test_majors.py``; what is pinned here is what the tool does with it.
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from agent.tools import courses as tc
 from agent.tools import prereqs as tp
 from agent.tools import requirements as tr
 from ingest import export_almabot as ex
+from ingest import majors as mj
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "catalog_sample.csv"
 
@@ -101,10 +111,9 @@ def test_every_spelling_of_general_education_is_audited(corpus, major):
 @pytest.mark.parametrize(
     "major",
     [
-        "Computer Science, BS",
-        "computer science",
-        "CS",
-        "cs major",
+        "Aerospace Engineering, BS",
+        "Statistics & Computer Science, BSLAS",  # a real degree, and not one of the two encoded
+        "computer engineering",
         "Liberal Arts & Sciences",
         "my major",
         "gen",
@@ -113,32 +122,59 @@ def test_every_spelling_of_general_education_is_audited(corpus, major):
         "   ",
     ],
 )
-def test_anything_that_is_not_general_education_is_refused(corpus, major):
+def test_a_program_this_corpus_has_no_requirements_for_is_refused(corpus, major):
     assert tr.check_requirement(major, ["STAT 100"]).supported is False
 
 
+@pytest.mark.parametrize(
+    "major",
+    [
+        "Computer Science, BS",
+        "computer science",
+        "CS",
+        "cs",
+        "cs major",
+        "cs-bs",
+        "Bachelor of Science in Computer Science",
+    ],
+)
+def test_every_spelling_of_an_encoded_degree_reaches_it(corpus, major):
+    # An alias list is how a router's free text finds a program. Matching is exact on the
+    # normalized form, which is why "Statistics & Computer Science" above does not land here.
+    status = tr.check_requirement(major, [])
+    assert (status.supported, status.program) == (True, "Computer Science, BS")
+
+
 def test_a_refusal_leaves_nothing_for_an_answer_node_to_paraphrase(corpus):
-    # The whole point of the typed refusal: no categories, satisfied or otherwise, so a fluent
+    # The whole point of the typed refusal: no requirements, satisfied or otherwise, so a fluent
     # answer node has no material to assemble a degree plan out of.
-    status = tr.check_requirement("Computer Science, BS", TRANSCRIPT)
-    assert (status.satisfied, status.unsatisfied, status.unknown_courses) == ([], [], [])
-    assert status.major == "Computer Science, BS"
+    status = tr.check_requirement("Aerospace Engineering, BS", TRANSCRIPT)
+    assert (status.satisfied, status.unsatisfied, status.not_checked) == ([], [], [])
+    assert (status.unknown_courses, status.catalog_year, status.program) == ([], None, None)
+    assert status.major == "Aerospace Engineering, BS"
 
 
 def test_a_refusal_says_what_is_missing_and_what_is_available(corpus):
-    message = tr.check_requirement("Computer Science, BS", []).message
+    # #32 changed what "available" means: the refusal used to say this corpus has no degree
+    # requirements at all, and now it has two -- a refusal that does not name them sends a student
+    # away from an answer that exists.
+    message = tr.check_requirement("Aerospace Engineering, BS", []).message
+    assert "Aerospace Engineering, BS" in message
     assert "Computer Science, BS" in message
-    assert "no major or degree requirements" in message
+    assert "Statistics, BSLAS" in message
     assert "gened" in message
     assert "advisor" in message
 
 
-def test_a_refusal_never_reads_the_rules(tmp_path, monkeypatch):
-    # Refused before any I/O, so a program this tool cannot audit is declined the same way whether
-    # or not the corpus is even built -- and the refusal can never fail with a FileNotFoundError.
+def test_a_refusal_now_reads_the_rules_because_the_programs_are_data(tmp_path, monkeypatch):
+    # Before #32 this tool could refuse a degree without any I/O: the answer was always no. Which
+    # programs exist is now a property of the file, so it has to be read before anything can be
+    # declined -- and a missing corpus must say so rather than refuse on the grounds that a
+    # program it cannot see does not exist.
     monkeypatch.setattr(tr, "REQUIREMENTS_PATH", tmp_path / "gone.json")
     monkeypatch.setattr(tc, "COURSES_PATH", tmp_path / "gone.json")
-    assert tr.check_requirement("Computer Science, BS", ["CS 374"]).supported is False
+    with pytest.raises(FileNotFoundError, match="export_almabot"):
+        tr.check_requirement("Aerospace Engineering, BS", ["CS 374"])
 
 
 @pytest.mark.parametrize(
@@ -355,11 +391,32 @@ def test_a_rule_on_a_field_the_lookup_does_not_return_is_refused(corpus):
         tr.check_requirement("gened", [])
 
 
-def test_major_requirements_in_the_file_are_refused_loudly(corpus):
-    # #32's data arriving is the day this tool's refusal becomes a lie. Fail then, rather than keep
-    # telling a student their program cannot be audited while the file on disk holds it.
+def test_a_major_the_shared_checker_refuses_is_refused_here_too(corpus):
+    # Before #32 any major in this file was refused outright. Now the file is read, and what
+    # guards it is ingest.majors.check_majors -- the same function that guards the hand-written
+    # source, so a document edited on disk cannot get past the tool by skipping the export.
     rewrite(corpus["requirements"], majors=[{"id": "cs-bs", "label": "Computer Science, BS"}])
-    with pytest.raises(ValueError, match="#32"):
+    with pytest.raises(ValueError, match="missing"):
+        tr.check_requirement("gened", [])
+
+
+def test_a_corpus_with_no_degrees_at_all_still_refuses_in_a_sentence(corpus):
+    # The pre-#32 state of this file, and the state of any export whose majors were dropped: the
+    # refusal has no programs to offer and must not say "0 programs -- " and trail off.
+    rewrite(corpus["requirements"], majors=[])
+    message = tr.check_requirement("Computer Science, BS", []).message
+    assert "no major or degree requirements at all" in message
+    assert "gened" in message and "advisor" in message
+
+
+def test_a_program_answering_to_gened_is_refused(corpus):
+    # GENED_ALIASES is checked first, so such a program could never be reached -- and a student
+    # asking for "general education" would get the campus audit while believing they asked for
+    # the degree. ingest/majors.json has no way to know which spellings this module reserves.
+    doc = json.loads(corpus["requirements"].read_text(encoding="utf-8"))
+    hijacker = {**doc["majors"][0], "id": "hijack", "label": "Gen Ed, BS", "aliases": ["gened"]}
+    rewrite(corpus["requirements"], majors=[hijacker])
+    with pytest.raises(ValueError, match="could never be reached"):
         tr.check_requirement("gened", [])
 
 
@@ -394,6 +451,163 @@ def test_the_rules_are_read_once(corpus, monkeypatch):
     assert len(reads) == 2
 
 
+# --- the degree audit #32 added ------------------------------------------------------------------
+
+
+#: A transcript of the first two years of the CS degree, in the fixture corpus's own terms: none of
+#: these courses are in it, which is exactly the case a degree audit has to get right.
+CS_TRANSCRIPT = ["CS 124", "CS 128", "CS 173", "CS 222", "CS 225", "MATH 221", "MATH 231"]
+
+
+def group_ids(statuses) -> list[str]:
+    return [status.id for status in statuses]
+
+
+def test_a_degree_audit_says_which_edition_of_the_requirements_it_used(corpus):
+    # A student is held to the catalog year they enrolled under, and this is a hand transcription
+    # of one page of one edition: an audit that does not name it cannot be checked by anybody.
+    status = tr.check_requirement("Computer Science, BS", CS_TRANSCRIPT)
+    assert (status.supported, status.program) == (True, "Computer Science, BS")
+    assert status.major == "Computer Science, BS"
+    assert status.catalog_year == "2025-2026"
+    assert status.source.startswith("https://catalog.illinois.edu/")
+
+
+def test_every_requirement_group_is_reported_exactly_once_in_the_files_order(corpus):
+    status = tr.check_requirement("Computer Science, BS", CS_TRANSCRIPT)
+    program = next(m for m in tr.requirements_doc()["majors"] if m["id"] == "cs-bs")
+    listed = [g["id"] for g in program["groups"]]
+    reported = group_ids(status.satisfied) + group_ids(status.unsatisfied)
+    reported += group_ids(status.not_checked)
+    assert sorted(reported) == sorted(listed)
+    for half in (status.satisfied, status.unsatisfied, status.not_checked):
+        assert group_ids(half) == [i for i in listed if i in group_ids(half)]
+
+
+def test_a_requirement_a_course_list_cannot_decide_is_never_counted(corpus):
+    # The honest third list. 128 hours, a 2.0 technical GPA, a language placement: reporting them
+    # as satisfied would be a guess, and dropping them would read as "you are done".
+    status = tr.check_requirement("Computer Science, BS", CS_TRANSCRIPT)
+    assert "total-hours" in group_ids(status.not_checked)
+    assert "total-hours" not in group_ids(status.satisfied) + group_ids(status.unsatisfied)
+    for group in status.not_checked:
+        assert (group.credited, group.still_needed, group.options) == ([], 0, [])
+        assert group.note and group.source  # the catalog's own words, and where to read them
+
+
+def test_a_partly_finished_requirement_names_what_is_left(corpus):
+    status = tr.check_requirement("Computer Science, BS", CS_TRANSCRIPT)
+    core = next(g for g in status.unsatisfied if g.id == "cs-core")
+    assert core.credited == ["CS 124", "CS 128", "CS 173", "CS 222", "CS 225"]
+    assert core.still_needed == 6
+    assert core.options == ["CS 233", "CS 341", "CS 357", "CS 361", "CS 374", "CS 421"]
+    assert core.group == "Computer Science Technical Core"
+
+
+def test_a_requirement_with_one_course_left_to_choose_offers_the_alternatives(corpus):
+    status = tr.check_requirement("Computer Science, BS", CS_TRANSCRIPT)
+    linear = next(g for g in status.unsatisfied if g.id == "linear-algebra")
+    assert (linear.credited, linear.still_needed) == ([], 1)
+    assert linear.options == ["MATH 257", "MATH 415", "MATH 416"]
+
+
+def test_a_course_this_catalog_does_not_offer_still_credits_the_requirement_that_names_it(corpus):
+    # The decision #32 turns on. MATH 221 is required by both degrees and is not offered in
+    # 2026-sp, so an audit that resolved requirements through the catalog index would tell a
+    # student who has taken Calculus I to take it again -- wrong in the direction they cannot
+    # check. It is credited, and it is still reported as outside the catalog.
+    status = tr.check_requirement("Computer Science, BS", ["MATH 221"])
+    assert group_ids(status.satisfied) == ["calculus-i"]
+    assert next(g for g in status.satisfied if g.id == "calculus-i").satisfied_by == "MATH 221"
+    assert status.unknown_courses == ["MATH 221"]
+
+
+def test_an_entry_that_is_not_a_course_code_credits_nothing(corpus):
+    status = tr.check_requirement("Computer Science, BS", ["intro to calculus"])
+    assert status.satisfied == []
+    assert status.unknown_courses == ["intro to calculus"]
+
+
+def test_a_retake_listed_twice_is_credited_once(corpus):
+    status = tr.check_requirement("Computer Science, BS", ["cs124", "CS 124", " CS  124 "])
+    assert next(g for g in status.unsatisfied if g.id == "cs-core").credited == ["CS 124"]
+
+
+def test_the_technical_electives_are_counted_by_pattern_and_refuse_the_core(corpus):
+    # Six CS 400-level courses. CS 421 is in the technical core, so it cannot also be an elective;
+    # CS 400 the catalog excludes by name; CS 225 is not 400-level at all.
+    taken = ["CS 411", "CS 412", "CS 425", "CS 446", "CS 450", "CS 421", "CS 400", "CS 225"]
+    status = tr.check_requirement("Computer Science, BS", taken)
+    electives = next(g for g in status.unsatisfied if g.id == "technical-electives")
+    assert electives.credited == ["CS 411", "CS 412", "CS 425", "CS 446", "CS 450"]
+    assert electives.still_needed == 1
+    # The answer to "what else counts" is 44 courses in this term, so the rule does not list them.
+    assert electives.options == []
+    # CS 411 is on the team project list, and the catalog lets it count for both.
+    assert "technical-elective-team-project" in group_ids(status.satisfied)
+
+
+def test_a_degree_audit_always_carries_its_caveats(corpus):
+    message = tr.check_requirement("Computer Science, BS", ["MATH 221", "ZZZ 100"]).message
+    assert "2025-2026" in message and "2026-sp" in message
+    assert "catalog.illinois.edu" in message
+    assert "8 of the 17 requirement groups" in message  # what it could not check
+    assert "MATH 221" in message  # required, not offered this term
+    assert "ZZZ 100" in message  # given, not in this catalog
+
+
+def test_the_second_program_is_audited_from_its_own_page(corpus):
+    status = tr.check_requirement("statistics", ["STAT 400", "STAT 410", "STAT 425", "STAT 426"])
+    assert status.program == "Statistics, BSLAS"
+    assert "statistics-bslas" in status.source
+    assert "stat-core" in group_ids(status.satisfied)
+    electives = next(g for g in status.unsatisfied if g.id == "advanced-electives")
+    assert electives.still_needed == 4
+
+
+def test_the_requirements_come_from_the_file_and_not_from_the_tool(corpus):
+    # The same guard the Gen Ed rules have. A tool carrying its own copy of a degree would keep
+    # answering from it after the catalog year turned over and the file was re-transcribed.
+    invented = {
+        "id": "demo-bs",
+        "label": "Demonstration, BS",
+        "college": "A College",
+        "source": "https://example.edu/demo-bs/",
+        "catalogYear": "2025-2026",
+        "aliases": ["demo"],
+        "groups": [
+            {
+                "id": "only",
+                "label": "The only requirement",
+                "group": "Everything",
+                "rule": {"kind": "all_of", "courses": ["STAT 100"]},
+                "source": "https://example.edu/demo-bs/",
+                "catalogYear": "2025-2026",
+                "courseCount": 1,
+                "notOffered": [],
+            }
+        ],
+    }
+    rewrite(corpus["requirements"], majors=[invented])
+    assert tr.check_requirement("Computer Science, BS", []).supported is False
+    status = tr.check_requirement("demo", ["STAT 100"])
+    assert (status.program, group_ids(status.satisfied)) == ("Demonstration, BS", ["only"])
+
+
+def test_the_audit_agrees_with_the_shared_evaluator(corpus):
+    # ingest.majors owns the rule language; this tool owns the walk over the groups. If the two
+    # ever disagreed, the file would say one thing and the answer another.
+    taken = ["CS 124", "CS 128", "MATH 221", "CS 411", "CS 412"]
+    status = tr.check_requirement("Computer Science, BS", taken)
+    reported = {g.id: (g.credited, g.still_needed) for g in status.satisfied + status.unsatisfied}
+    program = next(m for m in tr.requirements_doc()["majors"] if m["id"] == "cs-bs")
+    for group in program["groups"]:
+        if group["rule"]["kind"] == "advising":
+            continue
+        credit = mj.credit_rule(group["rule"], taken)
+        assert reported[group["id"]] == (credit.credited, credit.still_needed)
+
+
 # --- the schemas MCP will publish -----------------------------------------------------------------
 
 
@@ -406,6 +620,25 @@ def test_the_query_schema_tells_a_router_that_a_major_cannot_be_audited():
 
 def test_a_result_requires_only_whether_it_is_supported_and_what_was_asked():
     assert tr.RequirementStatus.model_json_schema()["required"] == ["supported", "major"]
+
+
+def test_the_query_schema_names_the_programs_a_router_may_ask_for():
+    # #35's router fills this from free text and this description is all the instruction it gets.
+    # Before #32 it said no degree could be audited; saying so now would cost two real answers.
+    description = tr.RequirementQuery.model_json_schema()["properties"]["major"]["description"]
+    assert "Computer Science, BS" in description
+    assert "Statistics, BSLAS" in description
+    assert "must not be guessed at" in description
+
+
+def test_the_fields_the_degree_audit_added_default_to_the_gen_ed_shape():
+    # A Gen Ed category is one course and no citation, so every field #32 added has to be optional
+    # or the 13 categories would have to carry empty values they cannot fill.
+    category = tr.CategoryStatus(id="qr1", label="X", group="G")
+    assert (category.credited, category.still_needed, category.options) == ([], 0, [])
+    assert (category.note, category.source) == (None, None)
+    status = tr.RequirementStatus(supported=True, major="gened")
+    assert (status.not_checked, status.catalog_year, status.program) == ([], None, None)
 
 
 @pytest.mark.parametrize(
@@ -439,11 +672,11 @@ def test_live_the_acceptance_query_credits_composition_and_flags_the_rest():
     assert "MATH 221" in status.message
 
 
-def test_live_a_degree_program_is_refused_by_name():
-    status = tr.check_requirement("Computer Science, BS", ["CS 173", "CS 225", "CS 374"])
+def test_live_a_degree_this_corpus_does_not_carry_is_refused_by_name():
+    status = tr.check_requirement("Aerospace Engineering, BS", ["CS 173", "CS 225", "CS 374"])
     assert status.supported is False
-    assert (status.satisfied, status.unsatisfied) == ([], [])
-    assert "Computer Science, BS" in status.message
+    assert (status.satisfied, status.unsatisfied, status.not_checked) == ([], [], [])
+    assert "Aerospace Engineering, BS" in status.message
 
 
 def test_live_every_category_is_reachable():
@@ -486,3 +719,55 @@ def test_live_a_first_year_transcript_leaves_the_right_categories_open():
         "cultus",
     ]
     assert status.unknown_courses == []
+
+
+def test_live_a_second_year_cs_transcript_reads_the_way_the_program_page_does():
+    # Everything the sample sequence puts in the first two years, minus the ethics course. The
+    # catalog is one spring term and MATH 221 is not in it; the audit credits it anyway.
+    # fmt: off
+    taken = ["CS 124", "CS 128", "CS 173", "CS 222", "CS 225", "CS 233", "CS 341",
+             "MATH 221", "MATH 231", "MATH 241", "MATH 257", "PHYS 211", "PHYS 212", "ENG 100"]
+    # fmt: on
+    status = tr.check_requirement("Computer Science, BS", taken)
+    assert group_ids(status.satisfied) == [
+        "orientation",
+        "calculus-i",
+        "calculus-sequence",
+        "linear-algebra",
+        "physics",
+    ]
+    assert group_ids(status.unsatisfied) == [
+        "ethics",
+        "cs-core",
+        "technical-electives",
+        "technical-elective-team-project",
+    ]
+    core = next(g for g in status.unsatisfied if g.id == "cs-core")
+    assert (core.still_needed, core.options) == (4, ["CS 357", "CS 361", "CS 374", "CS 421"])
+    assert status.unknown_courses == ["MATH 221"]
+
+
+def test_live_the_gen_ed_half_of_a_degree_is_handed_back_as_its_own_question():
+    # A degree page says "follows the campus General Education requirements" and stops. Rather
+    # than fold 13 categories into a degree audit, the group says where the other half lives.
+    status = tr.check_requirement("Computer Science, BS", ["RHET 105"])
+    gened = next(g for g in status.not_checked if g.id == "gened")
+    assert "gened" in gened.note
+    # And that request is a different answer about the same transcript.
+    assert tr.check_requirement("gened", ["RHET 105"]).satisfied[0].id == "comp1"
+
+
+def test_live_a_degree_audit_credits_a_course_that_carries_a_gen_ed_too():
+    # CS 225 is a technical core course and a Quantitative Reasoning II course. Both audits count
+    # it, which is what the campus rule says: the degree does not spend the Gen Ed.
+    degree = tr.check_requirement("Computer Science, BS", ["CS 225"])
+    assert "CS 225" in next(g for g in degree.unsatisfied if g.id == "cs-core").credited
+    assert credited(tr.check_requirement("gened", ["CS 225"])) == {"qr2": "CS 225"}
+
+
+def test_live_the_refusal_names_exactly_the_programs_the_corpus_carries():
+    labels = [m["label"] for m in tr.requirements_doc()["majors"]]
+    assert labels == ["Computer Science, BS", "Statistics, BSLAS"]
+    message = tr.check_requirement("Aerospace Engineering, BS", []).message
+    for label in labels:
+        assert label in message

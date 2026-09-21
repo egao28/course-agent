@@ -34,7 +34,7 @@ course-agent/
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── llm.py         # prompt → text: the one chat client the router and the answer node share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
-├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
+├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # tools/ (get_course, get_prereq_chain, check_requirement …), graph.py   (Day 2)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
@@ -107,7 +107,9 @@ de-duplication, credit parsing, prerequisite extraction.
 uv run python -m ingest.export_almabot   # -> data/{courses,prereqs,requirements}.json + stats
 ```
 
-4,502 courses (term `2026-sp`), 2,086 prerequisite and 34 corequisite edges, 13 Gen Ed categories.
+4,502 courses (term `2026-sp`), 2,086 prerequisite and 34 corequisite edges, 13 Gen Ed categories,
+and the 2 degree programs of `ingest/majors.json` (the CSV has no degree requirements in it, so
+those are transcribed by hand from the catalog program pages and checked against the export).
 The outputs are committed, so a clone can build indexes without the private CSV; see
 [data/README.md](data/README.md) for the schema, how the requirements block is parsed, and the
 known data quality issues.
@@ -588,11 +590,13 @@ offered this term or only a corequisite (`PHYS 211`: "PHYS 211 placement test or
 
 ## Requirement check
 
-`agent/tools/requirements.py` is the third tool, and the one with a hole in its data. "What Gen Eds
-do I still need?" is a question about a rule set rather than about a course, and
-`data/requirements.json` answers half of it: `genEd` holds the 13 campus categories as declarative
-rules, `majors` is `[]` and always has been — `course-catalog.csv` lists sections, and a degree
-requirement has never been in it ([#32](../../issues/32)).
+`agent/tools/requirements.py` is the third tool, and the one whose answer depends most on what is
+in the data. "What Gen Eds do I still need?" and "am I on track for my CS degree?" are questions
+about a rule set rather than about a course, and `data/requirements.json` carries both rule sets:
+`genEd` holds the 13 campus categories as declarative rules, and `majors` holds two degree programs
+— Computer Science, BS and Statistics, BSLAS — transcribed by hand in [#32](../../issues/32) from
+the catalog program pages into `ingest/majors.json`, because `course-catalog.csv` lists sections and
+a degree requirement has never been in it.
 
 ```python
 from agent.tools.requirements import check_requirement
@@ -602,18 +606,39 @@ status = check_requirement("gened", ["RHET 105", "MATH 221"])
 status.unknown_courses                             # -> ['MATH 221']   (not offered in 2026-sp)
 [c.id for c in status.unsatisfied]                 # -> the other 12
 
-check_requirement("Computer Science, BS", [...]).supported   # -> False, with both lists empty
+cs = check_requirement("Computer Science, BS", ["CS 124", "CS 128", "CS 173", "MATH 221"])
+cs.catalog_year, cs.source                         # -> '2025-2026', the program page it was read off
+[c.id for c in cs.satisfied]                       # -> ['calculus-i']   (MATH 221, not in this term)
+next(c for c in cs.unsatisfied if c.id == "cs-core").options
+                                                   # -> ['CS 222', 'CS 225', 'CS 233', …]
+[c.id for c in cs.not_checked]                     # -> the 8 an advisor decides, with their text
+
+check_requirement("Aerospace Engineering, BS", [...]).supported   # -> False, every list empty
 ```
 
-**The unsupported half is a typed refusal, not an empty result.** Anything that is not Gen Ed comes
-back `supported=False` with `satisfied` and `unsatisfied` both empty and a message naming what is
-missing (a source of degree requirements) and what is available (Gen Ed). A degree audit improvised
-from an LLM's parametric memory is the most harmful thing this agent could emit — fluent, specific,
-checkable only by the advisor the student was trying not to bother — so the refusal leaves nothing
-for the answer node to paraphrase, and [#39](../../issues/39) asserts the query leaves by the
-hand-off exit. The refusal is decided before any file is read, so it cannot fail with a missing
-corpus either. If `majors` is ever non-empty, `load_requirements()` raises rather than keep
-declining a program the data now holds.
+**A program with no entry in the file is a typed refusal, not an empty result.** It comes back
+`supported=False` with every list empty and a message naming the programs that *are* available. A
+degree audit improvised from an LLM's parametric memory is the most harmful thing this agent could
+emit — fluent, specific, checkable only by the advisor the student was trying not to bother — so
+the refusal leaves nothing for the answer node to paraphrase, and [#39](../../issues/39) asserts the
+query leaves by the hand-off exit. Two of roughly 250 programs are encoded: this makes the
+`degree_requirement` intent real, it does not make the agent a degree auditor.
+
+**A degree is audited by course code; Gen Ed is audited by catalog record.** A Gen Ed category is a
+rule about a course's `Degree Attributes`, so it can only be decided for a course this export holds.
+A degree requirement is a list of codes, and the codes outlive the term: `MATH 221` is required by
+both programs and is not offered in `2026-sp`. Resolving a degree through the catalog index would
+tell a student who has taken Calculus I to take it again — wrong in the one direction they cannot
+check — so requirements are matched against the normalized codes, and the catalog is used only to
+report the gap (`notOffered`, measured at export time and repeated in `message`).
+
+**What a course list cannot decide is reported, not guessed.** 128 hours, a 2.0 technical GPA, 40
+hours of upper-division work, a language placement, an approved science-elective list that is not in
+this export: those requirement groups carry `{"kind": "advising"}` in `ingest/majors.json` and come
+back in `not_checked` with the catalog's own sentence and the page it is on — 8 of the CS degree's
+17 groups. An audit that dropped them would read as "you are done" to a student who is not, and one
+that marked them satisfied would be a fabrication. Every group, checked or not, carries the program
+page and catalog year it was read off, so an answer can cite the line it is reporting.
 
 **The rules are evaluated from the file, by the exporter's own evaluator** (`matches_attrs`), not
 re-transcribed here. They stopped being code in [#3](../../issues/3) so there would be one copy:

@@ -14,7 +14,7 @@ files and the indexes built from them always belong to the same CSV. After repla
 |---|---|---|
 | `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 2.9 MB, term `2026-sp` |
 | `prereqs.json` | Same source; `prereqCodes` / `coreqCodes` filtered to courses in the catalog | done — 2,086 prerequisite + 34 corequisite edges |
-| `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; major requirements are not in the CSV, source TBD | done — 13 Gen Ed categories, `majors: []` |
+| `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; degree requirements hand-transcribed into `ingest/majors.json` from the 2025-2026 catalog program pages | done — 13 Gen Ed categories, 2 degree programs |
 | `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.1 MB, **not committed** (rebuildable, see below) |
 
 Note: `almabot-web/public/courses.json` truncates `desc` to 240 chars and `attrs` to 160, and has no
@@ -86,15 +86,66 @@ The 13 campus Gen Ed categories as declarative rules: a course matches when its 
 **any** of `match.any` and **none** of `match.none`. `courseCount` is how many courses in this
 export match, derived in the same run.
 
-`majors` is an empty placeholder: major and degree requirements are not in `course-catalog.csv`,
-which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
-pages, or a department plan). `agent/tools/requirements.py` refuses every program except Gen Ed on
-those grounds, and raises if this list ever stops being empty without that tool learning to read it.
-
 572 courses carry a `Degree Attributes` string but only **570 satisfy a category**: `ACE 436` and
 `CMN 361` are labelled `Global Classroom course.`, which is a designation and not a Gen Ed. 299 of
 the 570 satisfy more than one category (244 once #14 lands), because a course can carry a Gen Ed
 area and a Cultural Studies designation at the same time.
+
+### majors — the degree requirements, and where they come from
+
+`course-catalog.csv` has 27 columns of section data and not one of them is a degree requirement, so
+`majors` cannot be derived from it. It is written by hand in **`ingest/majors.json`**, transcribed
+from the catalog program pages one row per row of the catalog's own course lists, and the exporter
+copies it into `requirements.json` after checking and measuring it (`ingest/majors.py`).
+
+| | Computer Science, BS | Statistics, BSLAS |
+|---|---|---|
+| College | Grainger Engineering | Liberal Arts & Sciences |
+| Requirement groups | 17 | 12 |
+| Checked against a course list | 9 | 6 |
+| Reported as needing an advisor | 8 | 6 |
+| Source | [program page](https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/engineering/computer-science-bs/) | [program page](https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/las/statistics-bslas/) |
+
+Two programs out of roughly 250, chosen because the demo queries touch them: this makes the
+`degree_requirement` intent real, it does not make the agent a degree auditor. The **catalog year is
+2025-2026**, not the newest edition (2026-2027), because that is the year in force for the `2026-sp`
+courses this corpus holds — a student is audited against the year they are under. Every group
+carries its `source` and `catalogYear`, so an answer can cite the line it reports.
+
+Four rule kinds, and the fourth is the one that keeps this honest:
+
+| `rule.kind` | Means | Example |
+|---|---|---|
+| `all_of` | every course in the list | the 11-course CS technical core |
+| `n_of` | any `n` of the list | `MATH 257` \| `MATH 415` \| `MATH 416` |
+| `n_of_matching` | any `n` courses matching a code pattern (`subjects`, `numberMin`/`numberMax`, `include`, `exclude`) | six CS 400-level technical electives |
+| `advising` | **not evaluated at all** — reported with the catalog's own text | 128 hours, a 2.0 technical GPA, the language requirement |
+
+A degree is more than its course lists: hours, GPA, placement, an approved science-elective list
+nobody exported. Those rows are `advising`, come back in `check_requirement()`'s `not_checked`, and
+are never counted as satisfied — an audit that dropped them would read as "you are done" to a
+student who is not.
+
+**Requirements are matched by course code, not against this catalog.** The corpus is one term and
+degree requirements are not: 8 of the codes these two programs name are not offered in `2026-sp` —
+`CS 428`, `CS 429`, `CS 465`, `CS 467` (team-project electives), `ENG 300` (the transfer orientation
+seminar), `MATH 221`, `STAT 424`, `STAT 480`. A student who took `MATH 221` is credited for Calculus
+I; resolving requirements through `courses.json` would instead tell them to take it again. Each
+group records the codes it names that this term lacks in `notOffered`, and the audit repeats them in
+its `message`.
+
+What **does** raise is a group this catalog has no course for *at all* (`ingest.majors.
+check_coverage`, run by the exporter): that is the shape a renumbered program takes — `CS 125`
+became `CS 124` and `CS 128` in 2021 and no field in the data announced it — and it is the failure
+this encoding is most likely to have. Per-code absence is recorded, per-group absence stops the
+export. `check_majors()` is stricter still and runs on both the source and the exported copy: an
+unknown rule kind, an `n` no transcript can satisfy, a code spelled outside the catalog's own form
+(`CS374`), an `advising` row with nothing to say, two programs answering to one name.
+
+To add a program: copy a block in `ingest/majors.json`, transcribe the program page row by row,
+`uv run python -m ingest.export_almabot`, and add its shape to `tests/test_majors.py`. Scraping the
+catalog instead (#32's option 2) is a different piece of work: 250 prose pages, a parser to test,
+and a new source to pin.
 
 ## chunks.jsonl
 
