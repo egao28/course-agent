@@ -33,8 +33,8 @@ course-agent/
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
 ├── data/          # courses.json, prereqs.json, requirements.json (committed), chunks.jsonl (rebuilt)
-├── ingest/        # export_almabot.py → chunk.py → build_dense.py (+ build_bm25.py)
-├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, retrieve(query, mode)
+├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py
+├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # graph.py, tools/          (Day 2+)
 ├── eval/          # datasets/, scripts/       (Day 1: smoke set only)
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
@@ -56,24 +56,36 @@ cannot drift between two calls inside one build. For an ablation, copy and rebui
 from config import load_config, collection_name, bm25_path, report_path, rel_to_repo, source_path
 
 cfg = load_config()              # read-only; cfg["fusion"]["rrf_k"] works like a dict
-cfg.hash                         # "a1b2c3d4", frozen at load
-collection_name(cfg, chunk_key)  # "courses_094143d8"                   Chroma collection, see below
-bm25_path(cfg)                   # <repo>/indexes/bm25_a1b2c3d4.pkl     absolute, dir created on demand
-report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_a1b2c3d4.md absolute, dir created on demand
-rel_to_repo(bm25_path(cfg))      # "indexes/bm25_a1b2c3d4.pkl"          for reports/logs, never str(path)
+cfg.hash                         # "7045a614", frozen at load
+collection_name(cfg, chunk_key)  # "courses_094143d8"                  Chroma collection, see below
+bm25_path(cfg, chunk_key)        # <repo>/indexes/bm25_877a6610.pkl    absolute, names only
+report_path("day1_smoke", cfg)   # <repo>/report/day1_smoke_7045a614.md  dir created on demand
+rel_to_repo(bm25_path(cfg, ck))  # "indexes/bm25_877a6610.pkl"         for reports/logs, never str(path)
 source_path(cfg)                 # data.source with ~ expanded; cfg itself is untouched
 ```
 
 The naming helpers return **absolute** paths so a build works from any cwd; print them through
 `rel_to_repo()` so a local home directory never lands in a git-tracked report.
 
-The Chroma collection is the one artifact *not* named after the full hash. It is keyed on
-`dense_key()` — `chunk_key` plus `embedding.provider` and `embedding.model`, i.e. everything that
-can change a vector. A Day 4 ablation over `fusion.rrf_k`, `bm25.k1` or `seed` moves `cfg.hash`
-without moving a single number in the index, so naming the collection after it would orphan the
-index and re-embed (and re-pay for) a byte-identical corpus. `chroma_path()` is also the one path
-helper that does **not** create its directory: opening a persistent Chroma client is what writes a
-store, so a dry run, a failed query or an error message quoting the path leaves nothing behind.
+Only the reports are named after the full hash. **An index is named after its own key** — the
+settings that can actually change what is in it:
+
+| artifact | key | moves when |
+| --- | --- | --- |
+| Chroma collection `courses_{dense_key}` | `chunk_key` + `embedding.provider` + `embedding.model` | the chunk text or the encoder changes |
+| BM25 pickle `bm25_{bm25_key}.pkl` | `chunk_key` + the whole `bm25` section | the chunk text, the tokenizer or `k1`/`b`/`code_boost` changes |
+
+A Day 4 ablation over `fusion.rrf_k` or `seed` moves `cfg.hash` without moving a single number in
+either index, so naming them after it would orphan both — re-embedding (and re-paying for) a
+byte-identical corpus, and re-tokenizing one that nothing about tokenization touched. Tuning
+`bm25.k1` renames the BM25 index and leaves the dense one alone, which is the point of keying them
+separately. `bm25_key` hashes the `bm25` section whole rather than field by field, so the next knob
+added to it cannot be quietly left out of the name of the index it changes.
+
+Neither index helper creates a directory — `chroma_path()` because opening a persistent Chroma
+client is what writes a store, `bm25_path()` for the same reason in reverse: both are asked for by
+*readers* looking for an index, and a read that creates what it could not find leaves an empty
+store behind every time a query fails. The build that writes an index creates its directory.
 
 `data.source_sha256` pins the *content* of the input CSV, not just its path. The exporter calls
 `verify_source(cfg)`, which refuses a file that does not match, so re-exporting from new data
@@ -188,7 +200,7 @@ uv run --env-file .env python -m ingest.build_dense --rebuild  # drop the collec
 ```
 
 ```
-config hash 1edbaf46  (chunk key 05d00726)
+config hash 7045a614  (chunk key 05d00726)
 collection             courses_094143d8  (does not exist yet)
 would embed            4502 chunks via openai in batches of 256
 tokens billed          522658  (text-embedding-3-small)
@@ -248,6 +260,225 @@ picks the route:
 
 Both are part of `dense_key`, so switching providers names a new collection instead of mixing two
 vector spaces in one.
+
+## BM25 index
+
+`ingest/build_bm25.py` tokenizes every chunk and pickles an Okapi BM25 index to
+`indexes/bm25_{bm25_key}.pkl` (gitignored: rebuildable, and never committed).
+
+```bash
+uv run python -m ingest.build_bm25
+```
+
+```
+config hash 7045a614  (bm25 key 877a6610)
+documents indexed      4502
+vocabulary             21500 terms
+terms emitted          298000  (mean 66.2 per chunk)
+k1 / b                 1.5 / 0.75
+elapsed                0.1s
+wrote                  indexes/bm25_877a6610.pkl  (6063 KB)
+```
+
+No API key, no network, no cost — which is the one design difference from the dense build. There is
+no `--dry-run` to price a run that is free and no idempotency check to skip one that is cheaper
+than deciding whether to skip it: every run rebuilds, and the write is atomic, so an interrupted
+one leaves the previous index rather than a truncated file under the name the next query opens.
+What it does keep is the dense side's freshness check on the corpus, through the same
+`ingest.chunk.check_chunks` — an index built from a stale `chunks.jsonl` is wrong the same way
+whichever retriever reads it. The index stores the `doc_id`, text and metadata of every chunk
+alongside the postings, so a query returns whole hits without opening `chunks.jsonl`.
+
+It is a **pickle**, so it is local-only: unpickling executes whatever the file says. This one is
+written by the command above, ignored by git and never fetched from anywhere — do not load one you
+did not build. The rank_bm25 version that wrote it is in the header, and a file that will not load
+is answered with the command that rewrites it.
+
+### Tokenizing
+
+`ingest/tokenize.py` is the one place text becomes terms — build side and query side both go
+through it, so a query can never be tokenized differently from the corpus. `bm25.tokenizer` picks
+the function and is hashed into the index name.
+
+`simple_v1` lowercases, splits on `\w+`, drops a small stopword list, and does two things that
+matter for a course catalog:
+
+**Course codes become three terms.** `CS 374` → `cs`, `374`, `cs374`, and so do `CS374` and
+`cs 374` — the code is matched as a unit before the text is split into words, so all three
+spellings produce the same terms and score identically. Without the glued term, `CS374` (one word)
+and `CS 374` (two) would share no term at all. `IS` is both a real subject and a stopword; because
+codes are matched first, `IS 407` keeps its `is`.
+
+**A course's own code is a different term from a code it cites.** Every chunk is indexed under a
+reserved term for its own code (`code:cs374`, from `metadata.code`), repeated `bm25.code_boost`
+times, and a query naming a code asks for it. The corpus is why: `ECE 374`'s entire description is
+"Same as CS 374. See CS 374." — one of 497 cross-reference-only descriptions ([#15](../../issues/15))
+— so for the query `CS 374` it is a 20-term document matching `cs374` twice while CS 374's own
+110-term chunk matches it once. BM25 is right on its own terms and ranks the stub first; it has no
+way to know that one of those documents *is* CS 374 and the other points at it. Measured on the
+live corpus, `CS 374` ranks the course itself 11th at `code_boost: 0`, 2nd at `1`, and 1st at `2`.
+The `:` in the prefix is a character `\w+` cannot produce, so the reserved namespace cannot collide
+with a term from the corpus.
+
+### Querying it
+
+```bash
+uv run python -m retrieval.bm25 "CS 374" -k 5
+uv run python -m retrieval.bm25 "CS 374" --terms     # also print the query's terms
+```
+
+```
+'CS 374'  ->  5 hits from bm25_877a6610
+  1. 29.034  CS 374 — Introduction to Algorithms & Models of Computation
+  2. 26.514  ECE 374 — Introduction to Algorithms & Models of Computation
+  3. 24.680  CS 477 — Formal Software Development Methods
+  4. 23.583  CS 476 — Program Verification
+  5. 21.471  CS 473 — Algorithms
+```
+
+```python
+from config import load_config
+from retrieval.bm25 import BM25Retriever
+
+BM25Retriever(load_config()).search("CS 374", 5)
+```
+
+`search` returns the same `Hit(doc_id, score, rank, text, metadata)` the dense side returns, with
+the metadata lists still lists. `score` is the raw BM25 sum: higher is better, unbounded above, and
+comparable only *within* one list — a 29 here says nothing about a cosine 0.9, which is why fusion
+works on `rank`. Documents that no query term touched score exactly 0 and are dropped rather than
+padded out to `k`: fusion ranks every list it is handed, and an untouched document has not been
+retrieved. Ties are broken by corpus order, so a ranking is the same on every run and machine.
+
+This is the half of the hybrid that can find a course by name. Embeddings put `CS 374` near
+"algorithms" and "theory of computation"; only the lexical side knows the string is a course code.
+
+## Fusion
+
+`retrieval/fusion.py` combines the two rankings into one, on **rank alone**:
+
+```
+score(d) = Σ_i 1 / (k + rank_i(d))        k = fusion.rrf_k (60), ranks 1-based
+```
+
+```python
+from config import load_config
+from retrieval.fusion import fuse, rrf
+
+rankings = {"dense": dense_hits, "bm25": bm25_hits}
+
+rrf(rankings)                     # the whole fused ranking, k = 60
+fuse(rankings, load_config())     # ... with the config's k, cut to top_k_final
+```
+
+No score crosses the boundary, and none can: a cosine similarity of 0.42 and a BM25 score of 11.3
+are not on one scale, and both distributions move with the query, so an `α·dense + (1-α)·bm25`
+tunes a constant against a moving target. Rank is the one thing both retrievers report in the same
+unit. What the formula buys is **agreement**: a document one retriever put first scores `1/61 =
+0.0164`, while one *both* put tenth scores `2/70 = 0.0286` and wins. `k` is the knob on that trade
+— it damps the head of each list, so the gap between rank 1 and rank 2 (0.0164 vs 0.0161) stays
+small beside the gain from being found twice. At `k = 0` it degenerates to plain reciprocal rank,
+where one first place merely ties two second places and the fusion becomes "whoever was most
+confident". 60 is Cormack et al.'s constant, and a config value, so Day 4 can ablate it.
+
+Each fused hit reports where it came from, in `sources` — the rank each retriever gave it, `None`
+where that retriever did not return it at all. The ranks are what explain the order:
+
+```
+Hit(doc_id="2026-sp:CS-374", score=0.02857, rank=1, …, sources={"dense": 10, "bm25": 10})
+Hit(doc_id="2026-sp:CS-357", score=0.01639, rank=2, …, sources={"dense": 1, "bm25": None})
+```
+
+(`2/70` against `1/61`: agreement at rank ten, against a first place only one half of the hybrid
+found. Real top-5s for the Day 1 queries are in the smoke report, once the dense index is built.)
+
+So the Day 4 ablation can say which half of the hybrid produced a result, and a result only one
+half ever finds is visible rather than inferred. Ties — two documents found by the same retrievers
+at the same ranks, which happens on nearly every query at 20 hits each — are broken by `doc_id`,
+not by which retriever the mapping happened to list first; otherwise an ablation would measure
+that ordering instead of the change it made.
+
+The module is **pure**: no index, no API key, no config in `rrf` itself. That is why it is not
+part of either retriever — the arithmetic that decides the final order is tested against numbers
+written out by hand, on rankings built in the test file. `fuse` is the one function that reads the
+`fusion` section (`method`, `rrf_k`, `top_k_final`), for `retrieve(query, "hybrid")`.
+
+## retrieve(query, mode)
+
+`retrieval/__init__.py` is the one entry point, and the one the Day 4 ablation calls — so the
+signature is frozen now and a mode is a *parameter*, never a different function with a different
+return shape:
+
+```python
+from retrieval import retrieve
+
+retrieve("machine learning")                   # mode="hybrid", k=fusion.top_k_final (5)
+retrieve("CS 374", "bm25", k=10)               # mode ∈ {dense, bm25, hybrid}
+retrieve("machine learning", "dense", cfg=my_cfg)
+```
+
+```bash
+uv run python -m retrieval "CS 374" --mode bm25
+uv run --env-file .env python -m retrieval "machine learning" --mode hybrid -k 10
+```
+
+```
+'CS 374'  ->  5 hits, mode bm25, config 7045a614, 1.9 ms
+
+#  doc_id             score  name                                            sources
+1  2026-sp:CS-374   29.0337  Introduction to Algorithms & Models of Comput…  bm25 1
+2  2026-sp:ECE-374  26.5137  Introduction to Algorithms & Models of Comput…  bm25 2
+3  2026-sp:CS-477   24.6805  Formal Software Development Methods             bm25 3
+4  2026-sp:CS-476   23.5827  Program Verification                            bm25 4
+5  2026-sp:CS-473   21.4707  Algorithms                                      bm25 5
+
+(plus 79 ms opening the bm25 index, once per process -- not counted in the query time above)
+```
+
+| mode | what runs | needs |
+| --- | --- | --- |
+| `dense` | `DenseRetriever.search(query, k)` | `OPENAI_API_KEY` + the Chroma collection |
+| `bm25` | `BM25Retriever.search(query, k)` | the BM25 pickle |
+| `hybrid` | both, at `fusion.top_k_each` (20) → `fuse()` → `k` | both of the above |
+
+`k` defaults to `fusion.top_k_final` (5) in **every** mode, so switching modes cannot quietly
+change the length of the list a report is comparing. In `hybrid` it cuts the fused ranking, not
+either input: each retriever is still asked for the tuned `top_k_each`. Asking for more than that
+depth (`k=50`) deepens the recall instead of returning the ≤40 documents two 20-deep lists can hold
+between them.
+
+The result carries what a report has to quote next to the hits:
+
+```python
+RetrievalResult(query=…, mode="hybrid", config_hash="7045a614", hits=[Hit, …], latency_ms=128.4)
+```
+
+`config_hash` is the **full** hash, not either index key: a ranking is the product of the whole
+configuration, including the fusion parameters, which name no index. `hits` are the same `Hit`
+whichever mode produced them — in `hybrid` each one's `sources` says which retrievers found it and
+where, and in the other two it is `None`, the mode already being the answer. The CLI fills the
+`sources` column in from the mode, so all three tables read the same way down the page.
+
+Retrievers are built on first use and cached in-process, keyed by the config hash: opening Chroma
+and unpickling 6 MB costs about a second each, and a smoke report or an ablation pays it once
+rather than per query. Keying on the full hash is stricter than it needs to be — an `rrf_k`
+ablation reopens two indexes whose contents did not change — but a cached retriever can then never
+outlive a setting the caller has since changed, which would not raise, it would answer. Nothing is
+loaded until a mode asks for it, so `retrieve(q, "bm25")` never opens Chroma, never imports
+`chromadb` or `openai`, and runs in a checkout with no API key and no dense index. `clear_cache()`
+drops the lot, for a process that rebuilt an index after querying it.
+
+`latency_ms` times the **query**, not the process warm-up: the retrievers are built before the
+clock starts, since a number that included a one-off index load on the first query and not on the
+next four would not be the latency of anything. The CLI prints the load on its own line when it
+happened.
+
+A fourth mode — `keyword`, the `searchCourses()` baseline from AlmaBot's `planner.ts`, which Day 4
+may want to compare against — is a builder in `BUILDERS` and an entry in `MODE_SOURCES`, and
+nothing else. That room is deliberate; the implementation is out of scope for Day 1.
+
+Real top-5s for the Day 1 queries, in all three modes, are [#9](../../issues/9)'s smoke report,
+once the dense index is built.
 
 ## Day 1 goal
 

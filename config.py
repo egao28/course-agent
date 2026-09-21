@@ -15,22 +15,29 @@ calls inside one build; to derive a variant (an ablation), copy and rebuild::
 
     variant = Config({**cfg.to_dict(), "seed": 43})
 
-Artifacts are named with the hash so results from different settings never mix::
+Artifacts are named with a hash so results from different settings never mix::
 
-    Chroma collection   courses_{dense_key}               collection_name(cfg, chunk_key)
-    BM25 index          <repo>/indexes/bm25_{hash}.pkl    bm25_path(cfg)
-    reports             <repo>/report/{stem}_{hash}.md    report_path(stem, cfg)
+    Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
+    BM25 index          <repo>/indexes/bm25_{bm25_key}.pkl    bm25_path(cfg, chunk_key)
+    reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
-The Chroma collection is the one artifact *not* named after the full hash. It holds embeddings,
-which move only when the chunk text or the encoder moves, so it is named after ``dense_key()``: an
-ablation over ``fusion.rrf_k``, ``bm25.k1`` or ``seed`` then queries the vectors it already paid
-for instead of re-embedding a byte-identical corpus into a second collection. The store *directory*
-(``chroma_path()``) carries no key at all -- it holds one collection per config, so the key belongs
-on the collection inside it -- and it is the one path helper that does not create its directory.
+The two indexes are *not* named after the full hash; only the reports are. An index is a function
+of the corpus and of the settings that build it, and both hold far fewer of those than the config
+does -- so each is named after its own key, :func:`dense_key` and :func:`bm25_key`. A Day 4
+ablation over ``fusion.rrf_k`` or ``seed`` moves ``cfg.hash`` without changing a single number in
+either index; naming them after it would orphan both, re-embed a byte-identical corpus (and pay
+for it again) and re-tokenize one that nothing about tokenization changed. Tuning ``bm25.k1``
+moves the BM25 name and leaves the dense one alone, which is the point of keying them separately.
 
-Those paths are absolute (anchored at this module, not the cwd) and their directory is created on
-demand. Write them into reports and logs via ``rel_to_repo(path)`` so no local home directory
-leaks into tracked files.
+The Chroma store *directory* (``chroma_path()``) carries no key at all -- it holds one collection
+per config, so the key belongs on the collection inside it -- and it is the one path helper that
+does not create its directory.
+
+Those paths are absolute (anchored at this module, not the cwd). ``report_path`` creates its
+directory; the index helpers only name, because the caller that asks for an index name most often
+is a *reader* looking for one -- and a read that creates something is how a failed query leaves an
+empty store behind. Whoever writes an index creates its directory. Write these paths into reports
+and logs via ``rel_to_repo(path)`` so no local home directory leaks into tracked files.
 
 CLI: ``python config.py [path] [--canonical] [--source-digest]``.
 """
@@ -223,6 +230,29 @@ def collection_name(cfg: Mapping[str, Any], chunk_key: str) -> str:
     return f"courses_{dense_key(cfg, chunk_key)}"
 
 
+def bm25_key(cfg: Mapping[str, Any], chunk_key: str) -> str:
+    """Short hash of everything that decides a BM25 score: the chunk text, and the ``bm25`` section.
+
+    :func:`dense_key`'s counterpart, and for the same reason: a Day 4 ablation over ``fusion`` or
+    ``seed`` cannot change a posting list, so an index named after the full config hash would be
+    orphaned by a setting it does not depend on. The two keys are separate because the sections
+    are: tuning ``bm25.k1`` must rebuild the BM25 index and must *not* touch the dense one.
+
+    Every value under ``bm25`` goes in, whatever it is called -- the section is small and entirely
+    about this index, so a key listing its members by name would quietly ignore the next one
+    added. ``chunk_key`` is passed in for the same reason it is in :func:`dense_key`:
+    ``ingest.chunk`` imports this module, so the dependency runs one way only.
+    """
+    section = cfg.get("bm25")
+    if not section:
+        raise ValueError(
+            "config has no `bm25` section; it must set tokenizer, k1, b and code_boost "
+            "(see config.yaml) -- all of them are hashed into the BM25 index name"
+        )
+    content = {"chunk_key": chunk_key, "bm25": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
 def chroma_path() -> Path:
     """Chroma persistence directory, ``<repo>/indexes/chroma``. **Not** created if missing.
 
@@ -240,10 +270,14 @@ def chroma_path() -> Path:
     return INDEXES_DIR / "chroma"
 
 
-def bm25_path(cfg: Mapping[str, Any]) -> Path:
-    """BM25 pickle path, ``<repo>/indexes/bm25_{hash}.pkl``; directory created if missing."""
-    INDEXES_DIR.mkdir(parents=True, exist_ok=True)
-    return INDEXES_DIR / f"bm25_{config_hash(cfg)}.pkl"
+def bm25_path(cfg: Mapping[str, Any], chunk_key: str) -> Path:
+    """BM25 pickle path, ``<repo>/indexes/bm25_{bm25_key}.pkl``. **Not** created if missing.
+
+    Naming only, like :func:`chroma_path`: ``retrieval.bm25`` asks for this path to find out
+    whether an index exists, and ``ingest.build_bm25.write_index`` creates the directory it
+    actually writes into.
+    """
+    return INDEXES_DIR / f"bm25_{bm25_key(cfg, chunk_key)}.pkl"
 
 
 def report_path(stem: str, cfg: Mapping[str, Any]) -> Path:
