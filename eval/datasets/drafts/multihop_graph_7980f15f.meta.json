@@ -1,0 +1,195 @@
+{
+  "bucket": "multihop",
+  "config_hash": "7980f15f",
+  "cyclic_rows": [
+    "v1-1008",
+    "v1-1009",
+    "v1-1013",
+    "v1-1014",
+    "v1-1015",
+    "v1-1016"
+  ],
+  "depth": {
+    "at_least_5": 15,
+    "histogram": {
+      "10": 1,
+      "11": 5,
+      "12": 1,
+      "13": 1,
+      "2": 4,
+      "3": 5,
+      "4": 1,
+      "6": 1,
+      "7": 1,
+      "8": 2,
+      "9": 3
+    },
+    "max": 13,
+    "measure": "longest chain, cycle-safe",
+    "min": 2
+  },
+  "disagreements": {
+    "v1-1003": [
+      {
+        "added": [],
+        "course": "ATMS 202",
+        "dropped_absent": [
+          "MATH 221"
+        ],
+        "dropped_offered": []
+      },
+      {
+        "added": [],
+        "course": "MATH 220",
+        "dropped_absent": [
+          "MATH 221"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1006": [
+      {
+        "added": [],
+        "course": "ANSC 306",
+        "dropped_absent": [
+          "ANSC 222"
+        ],
+        "dropped_offered": []
+      },
+      {
+        "added": [],
+        "course": "ANSC 224",
+        "dropped_absent": [
+          "ANSC 221"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1009": [
+      {
+        "added": [],
+        "course": "MATH 412",
+        "dropped_absent": [
+          "MATH 347"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1010": [
+      {
+        "added": [],
+        "course": "AE 312",
+        "dropped_absent": [],
+        "dropped_offered": [
+          "ME 200"
+        ]
+      }
+    ],
+    "v1-1012": [
+      {
+        "added": [],
+        "course": "MSE 501",
+        "dropped_absent": [
+          "MSE 500"
+        ],
+        "dropped_offered": []
+      },
+      {
+        "added": [],
+        "course": "PHYS 560",
+        "dropped_absent": [
+          "PHYS 580"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1015": [
+      {
+        "added": [],
+        "course": "MATH 412",
+        "dropped_absent": [
+          "MATH 347"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1017": [
+      {
+        "added": [],
+        "course": "ASTR 405",
+        "dropped_absent": [],
+        "dropped_offered": [
+          "PHYS 213",
+          "PHYS 214"
+        ]
+      }
+    ],
+    "v1-1018": [
+      {
+        "added": [],
+        "course": "ASTR 405",
+        "dropped_absent": [],
+        "dropped_offered": [
+          "PHYS 213",
+          "PHYS 214"
+        ]
+      },
+      {
+        "added": [],
+        "course": "ASTR 406",
+        "dropped_absent": [],
+        "dropped_offered": [
+          "PHYS 213",
+          "PHYS 214"
+        ]
+      },
+      {
+        "added": [],
+        "course": "ASTR 414",
+        "dropped_absent": [],
+        "dropped_offered": [
+          "PHYS 213",
+          "PHYS 214"
+        ]
+      }
+    ],
+    "v1-1019": [
+      {
+        "added": [],
+        "course": "CEE 562",
+        "dropped_absent": [
+          "CEE 472"
+        ],
+        "dropped_offered": []
+      }
+    ],
+    "v1-1023": [
+      {
+        "added": [],
+        "course": "JOUR 340",
+        "dropped_absent": [
+          "JOUR 317",
+          "JOUR 217"
+        ],
+        "dropped_offered": []
+      }
+    ]
+  },
+  "graph": {
+    "courses_in_cycles": 19,
+    "courses_with_prerequisites": 1135,
+    "deepest_by_levels": 9,
+    "deepest_longest_chain": 13,
+    "depth_2_or_more_by_levels": 718,
+    "depth_2_or_more_by_longest_chain": 738
+  },
+  "rows": 25,
+  "shapes": {
+    "chain": 6,
+    "distance": 4,
+    "eligibility": 5,
+    "reachable": 6,
+    "unlocks": 4
+  },
+  "source": "prereq-graph"
+}
