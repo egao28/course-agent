@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1836,6 +1836,77 @@ read the rows. Two of the four buckets are also still undrafted: #57 and #58 com
 and the 50 `fact` and 20 `ambiguous` rows come from #56's harness, which needs a model run.
 `tests/test_review.py` holds both artifacts the moment they land, including the invariant that
 `v1.jsonl` is exactly the drafts replayed through the log.
+
+## Second annotator
+
+Fifteen rows, one other person, the same `eval/GUIDELINES.md` and no conversation
+([#60](../../issues/60)). This is what separates "I wrote an eval set" from "I built a
+human-annotated eval set": a single-annotator dataset has no measurable reliability, and the first
+reviewer who asks *"how do you know your labels are any good?"* has no answer without it.
+
+```bash
+uv run python -m eval.scripts.agreement           # draw the sample, write the packet
+uv run python -m eval.scripts.agreement --score   # the returned sheet -> report/day3_agreement_{hash}.md
+```
+
+The export writes a handoff packet beside the dataset: `agreement_sample.jsonl` (the fifteen rows
+with the first annotator's labels — the answer key), `agreement_sample.meta.json` (the seed, the
+allocation and what was drawn), `agreement_sheet.tsv` (blind), `agreement_citations.md` (pass two),
+`agreement_instructions.md`, and `agreement_questions.md`.
+
+**Stratified 6 / 3 / 3 / 3, seeded per bucket.** Fifteen rows drawn uniformly from 120 miss
+`ambiguous` entirely 5.4% of the time and bring back fewer than three of it 52.6% of the time, and
+`ambiguous` is the bucket whose boundary is a judgement call (**A2** against **U1**) rather than a
+lookup. Each bucket draws from its own stream over its sorted ids, so deleting a `fact` row during
+verification does not re-draw the other three buckets; the fifteen are then shuffled once, because
+a sheet whose first six rows are all `fact` hands over the stratification.
+
+**Blind, and two labels leak anyway.** `bucket` and `should_abstain` are stripped — showing them
+turns the exercise into a review of the first annotator's work and pushes agreement toward 100% —
+but the sheet has to show the candidate answer, and two things follow that no column-stripping
+fixes. A refusal is visibly a refusal, so the abstain/non-abstain split is given away and what the
+bucket field measures is the two *within-pair* calls, `fact` against `multihop` and `unanswerable`
+against `ambiguous`, which are the two the guidelines spend their boundary cases on. And the
+citation count nearly determines the bucket — `unanswerable` carries exactly zero gold ids,
+`multihop` at least two — so the cited records are held back for **pass two**, opened only after
+`bucket` and `answer_correct` are filled in and saved. The report says both, next to the numbers.
+
+**Percent agreement *and* Cohen's κ, per field.** With 50 of 120 rows in `fact`, two annotators who
+both guessed `fact` every time would agree about 42% of the time having done nothing, so raw
+percent agreement on four skewed buckets is inflated by chance and the gap between the two numbers
+is the informative part. Reported honestly at n=15: the interval is a Wilson score interval from
+the counts, not a flat ±25 points — 14 of 15 is 93.3% with an interval of **[70%, 99%]**, 23 points
+of room below the estimate. κ gets no interval, because its asymptotic standard error is not
+trustworthy at fifteen items.
+
+**Two of the three fields break κ, in different ways, and the report names which.** `v1.jsonl`
+holds only rows the first annotator accepted or edited, so the fields being scored are the fields
+the set was filtered on. Their `answer_correct` is a constant `yes`, which forces `p_e = p_o` and
+so κ **exactly** 0 however well the two agree. Their `citations_support` is not constant but it is
+mechanical — `n/a` exactly where the row cites nothing, which the second annotator reads off the
+same empty list — so those rows agree by construction and carry the field-level number up with
+them; the table therefore also prints `citations_support` over the cited rows only, and on that
+subset annotator 1 is a constant `yes` again. What percent agreement estimates on both fields is
+**residual label error in the frozen set** — how often a second reader would reject a row Day 4 is
+about to score — not inter-annotator reliability. A reliability κ there needs the sample drawn from
+`datasets/drafts/` before promotion, where the first annotator's verdicts vary.
+
+**Disagreements are the useful output.** Each one is itemised with both labels, the guideline rule
+the second annotator says they applied (the sheet has a `rule` column for exactly this) and their
+note; a disagreement with no rule attributed is marked as outstanding rather than passed over,
+since one that cannot be traced to a rule cannot be fixed by editing the guidelines. Questions
+asked during annotation go in `agreement_questions.md` — written once and never overwritten — and
+are answered by amending `GUIDELINES.md` *afterwards*, with [#62](../../issues/62) recording that
+the amendment came after the measurement.
+
+**Status: the tool, not the measurement.** The sample cannot be drawn yet — `eval/datasets/v1.jsonl`
+is #59's `--promote` output and does not exist, because two of the four buckets are still undrafted
+and no row has been verified — so this branch commits no sample, no sheet and no report, and the
+export says which work has to happen first rather than writing an empty packet. Nothing here
+fabricates a second annotator's judgements or a number computed from them.
+`tests/test_agreement.py` drives both commands end to end over synthetic datasets in `tmp_path`,
+asserts the arithmetic (Wilson's bounds, κ's two degeneracies, the confusion matrix) against
+hand-checkable counts, and holds the real packet the moment the dataset lands.
 
 ## Day 1 goal
 
