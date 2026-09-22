@@ -1536,6 +1536,35 @@ a question is one this family finds easy. `--model` drafts with a different mode
 available **without touching `config.yaml`**, every row records who wrote it, and the rest is a
 limitation for #62 to report.
 
+**The run that drafted them** (2026-09-23, once the account had credits). Both buckets were
+drafted in two halves under two models, which is the mitigation above taken rather than noted:
+
+| bucket | `gpt-4o-mini` | `gpt-4.1-mini` | total | batches | dropped |
+| --- | --- | --- | --- | --- | --- |
+| `fact` | 30 | 24 | 54 | 18 | 0 |
+| `ambiguous` | 17 | 31 | 48 | 40 | 166 |
+
+Two things came out of it that the plan did not predict. **`ambiguous` is expensive to draft and
+the two models are not close.** The bucket needs a question ambiguous between *two* records, and
+a batch is ten courses drawn at random, so most batches contain no ambiguous pair at all: 30
+batches under `gpt-4o-mini` at six questions each kept 17 rows, a 9% keep rate, every drop for
+the same reason — one cited record, which is a `fact` question. Ten batches under `gpt-4.1-mini`
+kept 31, a **52%** keep rate on the identical prompt and the same kind of batch. That is a
+five-fold difference in following one instruction, and it is the clearest evidence in this repo
+for why the drafting model belongs in provenance.
+
+**So `ambiguous` is over-drafted: 48 candidates for 20 slots.** They are kept rather than
+trimmed. A draft is a candidate and the verification pass is where rows are chosen; 2.4
+candidates per slot in the bucket whose boundary is a judgement call (**A2** against **U1**) is a
+better set than 20 rows with no alternative, and the cost is the reviewer's, who deletes the
+surplus with a reason like any other row. `fact` is 54 for 50 for the same reason.
+
+**The `fact` bucket skews to credit questions.** 23 of 54 rows ask how many credits a course is
+— the failure mode `DEFAULT_PER_BATCH` exists to limit, still visible at three questions per
+batch. Every one is flagged (`provenance.credit_question`), `GUIDELINES.md` rule 2 deletes the
+ones about a variable-credit course, and thinning the rest is a judgement for the pass: a `fact`
+bucket that is half one question shape measures one lookup and calls it a bucket.
+
 `--fake-model` runs the whole harness with `StandInDrafter` and no network: real sampling, real
 parse, real checks, canned questions. Those rows go to a separate `.standin.jsonl` file that
 nothing downstream reads — a canned row in `fact_{hash}.jsonl` would be indistinguishable from a
@@ -1836,8 +1865,8 @@ late-session cluster of accepts looks like.
 
 **Status: the tool, not the pass.** The pass itself is a person's to run, and nothing in this
 repository fabricates one — there is no `review_log.jsonl` and no `v1.jsonl` until somebody has
-read the rows. Two of the four buckets are also still undrafted: #57 and #58 committed 50 rows,
-and the 50 `fact` and 20 `ambiguous` rows come from #56's harness, which needs a model run.
+read the rows. All four buckets are now drafted — 152 candidate rows — so the pass is runnable
+end to end; what it needs is a person, and nothing here writes a verdict on their behalf.
 `tests/test_review.py` holds both artifacts the moment they land, including the invariant that
 `v1.jsonl` is exactly the drafts replayed through the log.
 
@@ -1904,8 +1933,7 @@ are answered by amending `GUIDELINES.md` *afterwards*, with [#62](../../issues/6
 the amendment came after the measurement.
 
 **Status: the tool, not the measurement.** The sample cannot be drawn yet — `eval/datasets/v1.jsonl`
-is #59's `--promote` output and does not exist, because two of the four buckets are still undrafted
-and no row has been verified — so this branch commits no sample, no sheet and no report, and the
+is #59's `--promote` output and does not exist, because no row has been verified yet — so this branch commits no sample, no sheet and no report, and the
 export says which work has to happen first rather than writing an empty packet. Nothing here
 fabricates a second annotator's judgements or a number computed from them.
 `tests/test_agreement.py` drives both commands end to end over synthetic datasets in `tmp_path`,
@@ -1981,7 +2009,7 @@ new hash (byte-identical apart from the `config_hash` they stamp); `report/day2_
 keeps its name, because it is named after the config that produced it.
 
 **Status: the tool, not the split.** `eval/datasets/v1.jsonl` is #59's `--promote` output and does
-not exist — two of the four buckets are undrafted and no row has been verified — so nothing is
+not exist — the 152 drafted rows have not been verified — so nothing is
 frozen here and no dataset or sidecar is committed. The checks over the committed file are written
 and skip until it lands; the table above is a run over a synthetic 120-row set with the target
 counts, which is also what `tests/test_split.py` drives.
@@ -2055,8 +2083,8 @@ report report/day3_evalset_c73b197d.md  config c73b197d
 ```
 
 **Status: the tool, not the report.** No `report/day3_evalset_*.md` is committed, because the
-dataset it reports on does not exist — 70 of the 120 rows are undrafted, no row has been
-verified, there is no second annotator and nothing has been split. Writing the file anyway would
+dataset it reports on does not exist — the 152 drafted rows have not been verified, there is
+no second annotator and nothing has been split. Writing the file anyway would
 mean inventing every number in it, which is the one thing a report about how an eval set was
 built cannot do. `tests/test_day3_report.py` builds the whole of Day 3 in `tmp_path` — four draft
 files, a review log with an accept, an edit and a delete in it, the promoted dataset, the freeze

@@ -854,10 +854,14 @@ def test_the_packet_over_real_rows_and_the_real_corpus(
 ):
     """One run over the committed drafts, whose prose and chunk text are real.
 
-    #57's and #58's 50 rows, with their ``provenance`` stripped so they parse as dataset rows.
-    Two buckets only, so the draw is short and the export has to be told so -- and the citations
-    come out of ``data/courses.json`` through the same fallback :mod:`eval.scripts.review` uses,
-    which is the path a machine that has not built the corpus takes.
+    All four buckets are drafted now, so this is a **full** fifteen-row draw over real questions
+    rather than the short one this test made while #56's two buckets were missing: the allocation
+    is met from real rows, and the citations come out of ``data/courses.json`` through the same
+    fallback :mod:`eval.scripts.review` uses, which is the path a machine that has not built the
+    corpus takes.
+
+    The drafts are not the promoted set -- no row here has been verified, and the ids the draw
+    returns will move when they are -- so what this asserts is the export, not a measurement.
     """
     rows = []
     for path in sorted((review.DRAFTS_DIR).glob("*.jsonl")):
@@ -865,12 +869,13 @@ def test_the_packet_over_real_rows_and_the_real_corpus(
             raw = json.loads(line)
             raw.pop("provenance", None)
             rows.append(EvalItem.model_validate(raw))
-    assert len(rows) == 50
+    drafted = {bucket: sum(1 for row in rows if row.bucket == bucket) for bucket in BUCKETS}
+    assert all(drafted[bucket] >= agreement.ALLOCATION[bucket] for bucket in BUCKETS), drafted
     dataset = write_dataset(tmp_path / "drafts.jsonl", rows)
     out = StringIO()
-    assert agreement.export(cfg, dataset, 42, pack, allow_short=True, out=out) == 0
-    assert "fact wanted 6 rows and the dataset has 0" in out.getvalue()
-    assert len(sheet_rows(pack.sheet)) == 6
+    assert agreement.export(cfg, dataset, 42, pack, out=out) == 0
+    assert "warning:" not in out.getvalue()
+    assert len(sheet_rows(pack.sheet)) == agreement.SAMPLE_N
     body = pack.citations.read_text(encoding="utf-8")
     cited = [doc_id for row in rows if row.gold_doc_ids for doc_id in row.gold_doc_ids]
     assert any(f"### `{doc_id}`" in body for doc_id in cited)
