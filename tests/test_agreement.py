@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 from config import load_config, rel_to_repo
-from eval.schema import BUCKETS, RULES, EvalItem, item_id
+from eval.schema import BUCKETS, RULES, EvalItem, item_id, row_json
 from eval.scripts import agreement, review
 
 # --- a dataset ------------------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def make_rows(counts: dict[str, int] | None = None) -> list[EvalItem]:
 def write_dataset(path: Path, rows: Sequence[EvalItem]) -> Path:
     """The rows as a JSONL file -- what :func:`agreement.load_dataset` reads."""
     path.write_text(
-        "".join(json.dumps(row.model_dump(), ensure_ascii=False) + "\n" for row in rows),
+        "".join(json.dumps(row_json(row), ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
     return path

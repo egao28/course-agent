@@ -11,6 +11,17 @@ field fails loudly instead of writing a column nothing reads. The field descript
 decoration either: #56 hands this model to the drafting model as a JSON schema, so they are the
 only instruction it gets about what belongs in each one.
 
+**Six annotated fields and one assigned one.** :attr:`EvalItem.split` is the seventh, and it is
+not a seventh thing anyone judges: no annotator fills it, no drafting model sees it (#56 hands
+the model the six through a schema that predates it), and it is ``None`` everywhere until #61
+freezes the dataset. It is on the row rather than in a sidecar because ``v1.jsonl`` is the
+artifact Day 4 and Day 5 read, and an id-keyed file beside it is a second thing to keep in step
+-- a row deleted from one leaves a line in the other, and nothing would say so. Being a field
+means :func:`eval.validate.validate_file` sees it, :func:`eval.validate.parse_items` round-trips
+it, and a misspelt ``spilt`` is still the extra-field error it always was. Use :func:`row_json`
+rather than ``model_dump()`` when writing rows to a file: it drops ``split`` while it is unset,
+so a draft file and a promoted-but-unfrozen dataset keep the six columns they have always had.
+
 **``id`` is minted here, never chosen by a model.** :func:`item_id` assigns ``v1-NNNN`` in
 pipeline order. Ids are how #60's agreement sample and #61's frozen split refer to rows, so a
 re-numbering after either of those lands is a silent corruption -- the split would still load, and
@@ -48,7 +59,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
@@ -62,6 +73,28 @@ Bucket = Literal["fact", "multihop", "unanswerable", "ambiguous"]
 
 #: The same four, as data -- for the validator's messages and #62's per-bucket table.
 BUCKETS: tuple[Bucket, ...] = ("fact", "multihop", "unanswerable", "ambiguous")
+
+#: Which half of the frozen dataset a row is in (#61). ``calib`` is what Day 5's conformal
+#: prediction calibrates on; ``test`` is what every final number is reported on, and it is read
+#: once per milestone rather than once per experiment. A ``Literal`` for the same reason
+#: :data:`Bucket` is one: ``"cal"`` should be a validation error, not a third half.
+Split = Literal["calib", "test"]
+
+#: The two, as data. Order is ``calib`` then ``test`` wherever both are printed.
+SPLITS: tuple[Split, ...] = ("calib", "test")
+
+#: The six fields a person fills in, in the order the issue writes them -- and exactly the keys
+#: :func:`row_json` writes for a row that has not been frozen. ``split`` is deliberately not one
+#: of them: it is assigned, not annotated, and the tests that pin a file's columns are about what
+#: was written by hand. Named here so those tests and #61's writers share one list.
+ANNOTATED_FIELDS: tuple[str, ...] = (
+    "id",
+    "bucket",
+    "question",
+    "gold_answer",
+    "gold_doc_ids",
+    "should_abstain",
+)
 
 #: The dataset version these ids belong to. Bumping it means a new file, not a renumbered one.
 VERSION = "v1"
@@ -210,6 +243,11 @@ class EvalItem(BaseModel):
         description="True when no confident answer may be given: every unanswerable and "
         "ambiguous row, and no other.",
     )
+    split: Split | None = Field(
+        default=None,
+        description="Assigned by the freeze (#61), never by you: 'calib' or 'test'. None on a "
+        "draft and on a promoted set that has not been split yet.",
+    )
 
     @field_validator("question", "gold_answer")
     @classmethod
@@ -219,3 +257,16 @@ class EvalItem(BaseModel):
         if not stripped:
             raise ValueError("must not be empty")
         return stripped
+
+
+def row_json(item: EvalItem) -> dict[str, Any]:
+    """The row as it is written to a file: the six fields, and ``split`` once it has one.
+
+    Everything that writes a row goes through this rather than ``model_dump()``. A drafted row
+    has no half yet, and ``"split": null`` in a draft file would be a column that means "not
+    frozen" sitting in files that can never be frozen -- three builders' output, the review
+    pass's promoted set, #60's sample -- where it would read as a missing value instead of an
+    inapplicable one. Dropping it also keeps every file already in the tree byte-identical to
+    what a re-run produces, which is the property that makes a regenerated artifact reviewable.
+    """
+    return item.model_dump(exclude_none=True)

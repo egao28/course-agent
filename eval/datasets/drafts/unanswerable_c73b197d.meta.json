@@ -19,7 +19,7 @@
     "v1-2024"
   ],
   "bucket": "unanswerable",
-  "config_hash": "7980f15f",
+  "config_hash": "c73b197d",
   "gate": 15.0,
   "retrieval_mode": "bm25",
   "rows": 25,

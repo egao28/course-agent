@@ -22,7 +22,7 @@ import pytest
 
 from agent.tools.courses import CourseDetail
 from config import bm25_path, load_config, rel_to_repo
-from eval.schema import RULES, EvalItem, normalize_question
+from eval.schema import ANNOTATED_FIELDS, RULES, normalize_question
 from eval.scripts import build_unanswerable as bu
 from eval.scripts.draft_items import PROVENANCE_KEYS as DRAFTED_KEYS
 from eval.scripts.draft_items import check_drafts, parse_drafts
@@ -472,7 +472,7 @@ def test_a_score_does_not_change_a_row(monkeypatch):
     monkeypatch.setattr(bu, "score_query", lambda q, mode, cfg: bu.Score(99.0, "2026-sp:CS-374"))
     scored = bu.build_rows(bu.ITEMS, CFG)
     plain = bu.build_rows(bu.ITEMS, CFG, scored=False)
-    fields = set(EvalItem.model_fields)
+    fields = set(ANNOTATED_FIELDS)
     assert [{k: r[k] for k in fields} for r in scored] == [{k: r[k] for k in fields} for r in plain]
 
 
@@ -583,7 +583,7 @@ def test_the_committed_file_is_in_the_tree():
 def test_the_committed_file_is_what_the_table_says(rows):
     """An edit to ITEMS without a re-run fails here, which is the point of committing the file."""
     committed = [json.loads(line) for line in COMMITTED.read_text().splitlines()]
-    fields = set(EvalItem.model_fields)
+    fields = set(ANNOTATED_FIELDS)
     assert [{k: r[k] for k in fields} for r in committed] == [
         {k: r[k] for k in fields} for r in rows
     ]

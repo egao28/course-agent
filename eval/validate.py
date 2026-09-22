@@ -25,6 +25,14 @@ find the dash themselves.
 the totals are checked against it, but a short bucket exits 0: deleting a bad item during
 verification is what verification is for, and a check that fails on 49 facts is a check that
 argues for keeping a bad row.
+
+**The split is checked for shape here and for correctness in #61.** A file is either frozen or it
+is not (:func:`check_split`), and a half-frozen one is an error: a loader asking for the ``test``
+half of a file where sixty rows carry no half would hand Day 4 whatever happened to be labelled
+and call it the test set. Whether the *right* rows are in each half is not decidable here -- it
+takes the seed -- and ``python -m eval.scripts.split --verify`` is the check that re-derives it.
+What this file adds is the one stratification property that needs no seed: within a bucket the
+two halves differ by at most one row, a warning like every other count.
 """
 
 from __future__ import annotations
@@ -39,7 +47,7 @@ from typing import Literal, NamedTuple
 from pydantic import ValidationError
 
 from config import rel_to_repo
-from eval.schema import BUCKETS, RULES, TARGET_TOTAL, EvalItem, normalize_question, rule
+from eval.schema import BUCKETS, RULES, SPLITS, TARGET_TOTAL, EvalItem, normalize_question, rule
 from ingest.chunk import CHUNKS_PATH, doc_id, load_chunks, load_courses
 from ingest.export_almabot import COURSES_PATH
 
@@ -195,7 +203,7 @@ def pydantic_violations(
         field = ".".join(str(part) for part in error["loc"]) or None
         message = error["msg"]
         if error["type"] == "extra_forbidden":
-            message = f"{message}; the row has exactly six fields"
+            message = f"{message}; the row has six fields, and `split` once #61 freezes it"
         yield Violation(line, item_id, field, message)
 
 
@@ -288,6 +296,56 @@ def check_across_rows(rows: Sequence[Row]) -> Iterator[Violation]:
             questions[key] = row
 
 
+def check_split(rows: Sequence[Row]) -> Iterator[Violation]:
+    """One error if the file is frozen for some rows and not others. Nothing otherwise.
+
+    The value itself is :data:`eval.schema.Split`, so ``"cal"`` never reaches here -- pydantic
+    has already rejected the row. What is left is the state no single row can be wrong about:
+    a file where the freeze half ran. It is reported once, with the ids, because the fix is to
+    re-run ``python -m eval.scripts.split`` over the whole file and not to edit sixty lines.
+    """
+    missing = [row for row in rows if row.item.split is None]
+    if not missing or len(missing) == len(rows):
+        return
+    shown = ", ".join(row.item.id for row in missing[:5])
+    rest = len(missing) - 5
+    more = "" if rest <= 0 else f", and {rest} more"
+    yield Violation(
+        None,
+        None,
+        "split",
+        f"{plural(len(rows) - len(missing), 'row')} carry a split and "
+        f"{len(missing)} do not ({shown}{more}); a dataset is frozen or it is not -- "
+        "re-run `python -m eval.scripts.split`",
+    )
+
+
+def check_split_counts(rows: Sequence[Row]) -> Iterator[Violation]:
+    """Per bucket, the two halves within one row of each other -- when the file is frozen at all.
+
+    The half of #61's stratification that is decidable without the seed. A bucket split 17/8 is
+    reproducible and seeded and still not stratified, and at these sizes that is the difference
+    between calibrating on ten ambiguous rows and calibrating on three.
+    """
+    frozen = [row for row in rows if row.item.split is not None]
+    if not frozen or len(frozen) != len(rows):
+        return
+    for bucket in BUCKETS:
+        halves = {
+            half: sum(1 for r in frozen if r.item.bucket == bucket and r.item.split == half)
+            for half in SPLITS
+        }
+        if abs(halves["calib"] - halves["test"]) > 1:
+            yield Violation(
+                None,
+                None,
+                bucket,
+                f"{halves['calib']} calib / {halves['test']} test; a stratified half-and-half "
+                "split leaves at most one row between them",
+                "warning",
+            )
+
+
 def check_counts(rows: Sequence[Row]) -> Iterator[Violation]:
     """The per-bucket targets, as warnings. A short bucket is a decision, not a corruption."""
     counts = {bucket: 0 for bucket in BUCKETS}
@@ -326,8 +384,10 @@ def validate_rows(
     violations = list(unparsed)
     violations.extend(v for row in rows for v in check_row(row, known))
     violations.extend(check_across_rows(rows))
+    violations.extend(check_split(rows))
     violations.sort(key=lambda v: (v.line or 0, v.field or ""))
     violations.extend(check_counts(rows))
+    violations.extend(check_split_counts(rows))
     return violations
 
 

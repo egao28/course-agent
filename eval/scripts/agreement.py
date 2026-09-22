@@ -108,7 +108,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, TextIO
 
 from config import REPO_ROOT, Config, file_sha256, load_config, rel_to_repo, report_path
-from eval.schema import BUCKETS, RULES, Bucket, EvalItem
+from eval.schema import BUCKETS, RULES, Bucket, EvalItem, row_json
 from eval.scripts.draft_items import write_json
 from eval.scripts.review import DATASET_PATH, corpus_text
 from eval.validate import parse_items, plural
@@ -284,7 +284,7 @@ def write_sample(path: Path, rows: Sequence[EvalItem]) -> Path:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(json.dumps(row.model_dump(), ensure_ascii=False) + "\n" for row in rows)
+    body = "".join(json.dumps(row_json(row), ensure_ascii=False) + "\n" for row in rows)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(body, encoding="utf-8")
     os.replace(tmp, path)

@@ -75,7 +75,7 @@ from typing import Any, NamedTuple
 from agent.tools.courses import course_index
 from agent.tools.prereqs import load_graph, walk_chain
 from config import Config, load_config, rel_to_repo
-from eval.schema import RULES, EvalItem, item_id
+from eval.schema import RULES, EvalItem, item_id, row_json
 from eval.scripts.draft_items import (
     ID_BLOCKS,
     check_drafts,
@@ -1275,7 +1275,7 @@ def build_rows(items: Sequence[Item], graph: Graph, cfg: Config) -> list[dict[st
         )
         rows.append(
             {
-                **row.model_dump(),
+                **row_json(row),
                 "provenance": {
                     "shape": item.shape,
                     "source": SOURCE,

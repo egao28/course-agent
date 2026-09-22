@@ -78,7 +78,7 @@ from typing import Any, NamedTuple
 from pydantic import ValidationError
 
 from config import REPO_ROOT, Config, config_hash, load_config, rel_to_repo
-from eval.schema import RULES, Bucket, EvalItem, item_id, normalize_question
+from eval.schema import RULES, Bucket, EvalItem, item_id, normalize_question, row_json
 from eval.validate import Row, Violation, check_across_rows, check_row, pydantic_violations
 from ingest.chunk import CHUNKS_PATH, chunk_key, load_chunks
 from ingest.tokenize import get_tokenizer
@@ -687,7 +687,7 @@ class Kept(NamedTuple):
 
     def to_json(self) -> dict[str, Any]:
         """The row as it is written: the six dataset fields, then ``provenance``."""
-        return {**self.item.model_dump(), "provenance": self.provenance}
+        return {**row_json(self.item), "provenance": self.provenance}
 
 
 class Dropped(NamedTuple):
@@ -860,7 +860,7 @@ class Draft(NamedTuple):
     provenance: dict[str, Any]
 
     def to_json(self) -> dict[str, Any]:
-        return {**self.item.model_dump(), "provenance": self.provenance}
+        return {**row_json(self.item), "provenance": self.provenance}
 
 
 def parse_drafts(
