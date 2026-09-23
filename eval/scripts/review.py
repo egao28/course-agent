@@ -526,8 +526,16 @@ def render_row(
     position: int,
     total: int,
     verdict: Verdict | None = None,
+    suggestion: str | None = None,
 ) -> str:
-    """One row, whole, on one screen: the question, the answer, the flags, every cited chunk."""
+    """One row, whole, on one screen: the question, the answer, the flags, every cited chunk.
+
+    ``suggestion`` is :mod:`eval.scripts.triage`'s advisory line for this row, shown only when
+    the pass was started with ``--triage``. It is **last** on the screen, after the three checks
+    and after every cited record, so that the reading happens before the opinion arrives -- and
+    it is a string here rather than a triage object, because this module must not import that
+    one: it imports this one. A reviewer who wants no opinion runs the pass without the flag.
+    """
     spec = RULES[item.bucket]
     lines = [
         RULE,
@@ -569,6 +577,8 @@ def render_row(
             code + (" (in no cited chunk)" if code in missing else "") for code in named
         )
         lines += ["", f"   the answer names {shown}"]
+    if suggestion:
+        lines += ["", "machine triage -- advisory, and not a verdict", f" ?  {suggestion}"]
     return "\n".join(lines)
 
 
@@ -758,6 +768,7 @@ def run(
     out: TextIO,
     ask: Ask,
     limit: int | None = None,
+    suggestions: Mapping[str, str] | None = None,
 ) -> Counter[str]:
     """Walk the queue, one row and one verdict at a time, writing each one before the next screen.
 
@@ -770,7 +781,10 @@ def run(
         seen = judged.get(candidate.id)
         item = current(candidate, seen)
         marks = flags(candidate, item, known, ranges, tokenizer)
-        out.write(render_row(candidate, item, texts, marks, position, total, seen) + "\n\n")
+        advice = (suggestions or {}).get(candidate.id)
+        out.write(
+            render_row(candidate, item, texts, marks, position, total, seen, advice) + "\n\n"
+        )
         verdict = judge(candidate, item, known, out, ask)
         if verdict is None:
             break
@@ -996,6 +1010,32 @@ def promotion_report(promotion: Promotion, path: Path) -> str:
 # --- the command ----------------------------------------------------------------------------------
 
 
+def suggestions(where: str | None, candidates: Sequence[Candidate]) -> dict[str, str]:
+    """``--triage``'s advisory lines by id, or nothing at all when the flag was not passed.
+
+    :mod:`eval.scripts.triage` imports this module, so it is imported here inside the one
+    function that needs it rather than at the top: the dependency runs one way at import time,
+    the way ``ingest.chunk`` and :mod:`config` do. A missing or unreadable file raises rather
+    than returning nothing -- a reviewer who asked to see the suggestions and is shown none on
+    every row would read that as "no objection", which is the one thing it must not mean.
+
+    The line compares the machine's bucket against the **drafted** one, since that is what the
+    triage read; a row whose bucket a reviewer has already edited is only reachable through
+    ``--redo``, and there the log line above it says what was changed.
+    """
+    if where is None:
+        return {}
+    from eval.scripts.triage import read_triage
+
+    buckets = {candidate.id: candidate.item.bucket for candidate in candidates}
+    rows = read_triage(Path(where) if where else None)
+    return {
+        item_id: row.line(buckets.get(item_id, ""))
+        for item_id, row in rows.items()
+        if item_id in buckets
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.review",
@@ -1042,6 +1082,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="allow --promote to overwrite a dataset that #61 has already split, dropping every "
         "row's half; re-run `python -m eval.scripts.split` afterwards",
+    )
+    parser.add_argument(
+        "--triage",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATH",
+        help="show eval/datasets/triage.jsonl's machine suggestion under each row (a path "
+        "overrides where it is read from). Advisory only: the verdict is still typed, the "
+        "suggestion is printed after the chunk text, and #62's report says the pass was "
+        "model-assisted whenever that file exists",
     )
     parser.add_argument(
         "--chunks", default=None, help=f"the corpus (default: {rel_to_repo(CHUNKS_PATH)})"
@@ -1122,7 +1173,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     tokenizer = get_tokenizer(load_config())
     ask = reader(sys.stdout, lambda prompt: input(prompt))
     made = run(
-        queue, known, texts, ranges, tokenizer, log_path, judged, sys.stdout, ask, args.limit
+        queue,
+        known,
+        texts,
+        ranges,
+        tokenizer,
+        log_path,
+        judged,
+        sys.stdout,
+        ask,
+        args.limit,
+        suggestions(args.triage, candidates),
     )
     left = sum(1 for c in candidates if c.id not in judged)
     print(

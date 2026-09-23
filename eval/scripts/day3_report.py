@@ -53,7 +53,7 @@ from typing import Any, NamedTuple, TextIO
 
 from config import Config, load_config, rel_to_repo, report_path
 from eval.schema import BUCKETS, RULES, SPLITS, TARGET_TOTAL, EvalItem
-from eval.scripts import agreement, build_unanswerable, draft_items, review, split
+from eval.scripts import agreement, build_unanswerable, draft_items, review, split, triage
 from eval.scripts.agreement import md_table
 from eval.scripts.draft_items import quantile
 from eval.validate import corpus_doc_ids, plural
@@ -84,6 +84,10 @@ class Sources(NamedTuple):
     drafts: Path
     log: Path
     packet: agreement.Packet
+    #: #59's pass, model-assisted or not. Optional, and read only so that the report can *say*
+    #: the pass was assisted -- see :func:`limitation_bullets`. A report that quietly left this
+    #: out would be describing a different methodology from the one that ran.
+    triage: Path = triage.TRIAGE_PATH
 
     @property
     def sidecar(self) -> Path:
@@ -96,6 +100,7 @@ def sources(
     drafts: Path | None = None,
     log: Path | None = None,
     packet: agreement.Packet | None = None,
+    advisory: Path | None = None,
 ) -> Sources:
     """The committed locations, unless told otherwise."""
     return Sources(
@@ -103,6 +108,7 @@ def sources(
         drafts=draft_items.DRAFTS_DIR if drafts is None else Path(drafts),
         log=review.REVIEW_LOG_PATH if log is None else Path(log),
         packet=agreement.packet() if packet is None else packet,
+        triage=triage.TRIAGE_PATH if advisory is None else Path(advisory),
     )
 
 
@@ -145,6 +151,12 @@ def inputs(src: Sources) -> list[Input]:
             "annotator's questions",
             src.packet.questions,
             "uv run python -m eval.scripts.agreement",
+            required=False,
+        ),
+        Input(
+            "machine triage",
+            src.triage,
+            "uv run --env-file .env python -m eval.scripts.triage",
             required=False,
         ),
     ]
@@ -251,6 +263,8 @@ class Facts(NamedTuple):
     sample: Mapping[str, EvalItem]
     sample_meta: Mapping[str, Any]
     judged: Sequence[agreement.Filled]
+    #: What a model suggested per row, or empty when the pass was not assisted.
+    advisory: Mapping[str, triage.Triage]
 
     def of(self, bucket: str) -> list[EvalItem]:
         return [row for row in self.rows if row.bucket == bucket]
@@ -302,6 +316,7 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
         sample=sample,
         sample_meta=read_json(src.packet.meta),
         judged=judged,
+        advisory=triage.read_triage(src.triage),
     )
 
 
@@ -744,7 +759,64 @@ def render_verification(facts: Facts) -> str:
                 "so a re-run rewrites this file byte for byte."
             ),
         ]
+    assisted = render_assistance(facts)
+    if assisted:
+        parts += ["", assisted]
     return "\n".join(parts)
+
+
+def render_assistance(facts: Facts) -> str:
+    """How often the reviewer agreed with the machine, when the pass was model-assisted.
+
+    The number the anchoring caveat in :func:`limitation_bullets` needs, and the reason this
+    report can disclose the assistance with something better than a disclaimer: a reviewer who
+    accepted every suggestion produced a pass worth exactly what the model is worth, and one who
+    overrode a third of them did not. The direction of the bias is not measurable here -- what an
+    unassisted pass over these rows would have decided is not knowable after the fact -- so the
+    agreement rate is an upper bound on the assistance's influence and is labelled as one.
+    """
+    if not facts.advisory:
+        return ""
+    pairs = [
+        (facts.advisory[item_id].suggested, verdict.verdict)
+        for item_id, verdict in facts.verdicts.items()
+        if item_id in facts.advisory
+    ]
+    if not pairs:
+        return ""
+    agreed = sum(1 for suggested, verdict in pairs if suggested == verdict)
+    rows = [
+        [
+            f"**{suggested}**",
+            *(
+                str(sum(1 for a, b in pairs if a == suggested and b == verdict))
+                for verdict in review.VERDICT_NAMES
+            ),
+        ]
+        for suggested in review.VERDICT_NAMES
+    ]
+    models = sorted({one.model for one in facts.advisory.values()})
+    return "\n".join(
+        [
+            (
+                f"**The pass was model-assisted.** {joined(models)} read "
+                f"{plural(len(facts.advisory), 'row')} against `eval/GUIDELINES.md` first "
+                f"(`{rel_to_repo(facts.src.triage)}`), and the reviewer saw its suggestion under "
+                "each row's chunk text before typing a verdict. They agreed on "
+                f"{agreed} of {len(pairs)} rows ({agreed / len(pairs):.0%})."
+            ),
+            "",
+            md_table(["suggested ↓ / judged →", *review.VERDICT_NAMES], rows),
+            "",
+            (
+                "Read the agreement rate as an **upper bound** on how much the suggestions "
+                "moved the pass, not as a measurement of it: what an unassisted reader would "
+                "have decided about these rows is not recoverable afterwards. The off-diagonal "
+                "cells are the rows where a person overrode a machine, which is the only direct "
+                "evidence here that the reading happened."
+            ),
+        ]
+    )
 
 
 # --- agreement ------------------------------------------------------------------------------------
@@ -958,6 +1030,37 @@ def limitation_bullets(facts: Facts) -> list[str]:
             "in its `gold_answer`; an `unanswerable` row should come back with a refusal and no "
             "question at all. The bit cannot tell those apart, so Day 4's abstention metrics "
             "must condition on `bucket` (#54)."
+        ),
+        *assistance_bullet(facts),
+    ]
+
+
+def assistance_bullet(facts: Facts) -> list[str]:
+    """The seventh limitation, and only when there is one: the pass was model-assisted.
+
+    A list rather than a string so that an unassisted pass produces no bullet at all -- a
+    limitations section carrying "this was not model-assisted" would be a section answering a
+    question nobody asked, and the bullet has to be absent exactly when the caveat does not
+    apply.
+    """
+    if not facts.advisory:
+        return []
+    models = sorted({one.model for one in facts.advisory.values()})
+    digests = sorted({one.guidelines_sha256[:16] for one in facts.advisory.values() if
+                      one.guidelines_sha256})
+    against = f", against guidelines `{digests[0]}…`" if len(digests) == 1 else ""
+    return [
+        (
+            "- **The verification pass was model-assisted, and a suggestion anchors a "
+            f"reviewer.** {joined(models)} read {plural(len(facts.advisory), 'row')} first and "
+            "the reviewer saw its accept / edit / delete and its one-sentence reason under each "
+            f"row before judging it{against}. A person shown a suggestion agrees with it more "
+            "often than one shown nothing, so the accept rate in the Verification section is "
+            "not the accept rate of an unassisted pass, and the agreement rate reported there "
+            "bounds the effect rather than measuring it. Every row was still read and decided "
+            "by a person, and no suggestion reached the review log: they are a separate "
+            f"append-only file (`{rel_to_repo(facts.src.triage)}`) whose rows carry neither a "
+            "`verdict` nor a `ts`, which is what makes the two unmistakable for each other."
         ),
     ]
 
