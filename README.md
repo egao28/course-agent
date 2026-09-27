@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1536,6 +1536,99 @@ limitation for #62 to report.
 parse, real checks, canned questions. Those rows go to a separate `.standin.jsonl` file that
 nothing downstream reads — a canned row in `fact_{hash}.jsonl` would be indistinguishable from a
 drafted one by the time anybody looked.
+
+## Unanswerable bucket
+
+The other three buckets are drafted from documents; this one cannot be
+([#57](../../issues/57)). A model shown ten course records writes questions those records answer,
+which is the opposite of the requirement, so the 25 rows are a **table in
+`eval/scripts/build_unanswerable.py`** and the script's job is to check that table against the
+corpus, score every row, and write it out in the same draft shape #56 produces.
+
+```bash
+uv run python -m eval.scripts.build_unanswerable
+uv run python -m eval.scripts.build_unanswerable --no-retrieval   # no BM25 index needed
+```
+
+**Four failure shapes, and a different falsifiable claim for each.** A row that does not support
+its shape's claim stops the run — nothing is written, since the table is in the repository either
+way.
+
+| shape | rows | what every row's codes must be |
+|---|---|---|
+| `invented` | 6 | absent from the export **and named by no description in it** — a code the catalog talks about is a real course. May name no code at all (an invented *subject*), and then its question may name none either |
+| `out_of_term` | 7 | absent, plus `named_by`: a course that **is** offered whose description names it |
+| `field_absent` | 6 | present — and `field` outside both the chunk template and `CourseDetail` |
+| `not_course` | 6 | none |
+
+**`out_of_term` is checkable rather than remembered.** #57 records that every prereq code in
+`data/prereqs.json` resolves inside the catalog, so "a prereq pointing at a missing course" is not
+an available shape — but that is true because the exporter *filters* the flattened list. CS 225's
+raw sentence names MATH 347 and CS 126 and its `prereqs` array lists neither; CS 527, whose
+prerequisites are only absent courses, has no row in `prereqs.json` at all. The raw text keeps
+what the list drops, so scanning descriptions finds **636 codes the 2026-sp catalog names and does
+not offer**, and seven of them are this bucket. The corpus is then its own evidence that the
+missing course is real, and no row depends on what anybody remembers about UIUC.
+
+**Scoring labels nothing.** `eval/GUIDELINES.md` forbids running `retrieve()` to decide a label —
+what the system does with a question is the thing under test and cannot also be the thing that
+labels it — so every shape above is decided by reading the export. The retrieval pass runs
+afterwards, changes no row, and answers a different question: which rows the evidence gate would
+refuse on the score alone.
+
+```
+retrieval            bm25 top-1, gate 15.0 (evidence.thresholds)
+top_score            min 7.4375  max 39.9679  above the gate 17 of 25
+
+Above the gate -- the gate would not refuse these, so a Day 4 refusal here is the model's and not
+the evidence check's:
+  v1-2005  invented      19.4353  2026-sp:PHIL-100   (ZZZ 100 alone 6.5751)
+  v1-2007  out_of_term   29.1631  2026-sp:CS-527     (CS 428 alone 27.1554)
+  v1-2010  out_of_term   31.0221  2026-sp:BADM-205   (GGIS 205 alone 31.0221)
+  v1-2014  field_absent  25.4301  2026-sp:CS-225     (CS 225 alone 25.4301)
+  …
+```
+
+**17 of 25 clear the gate, and `code_scores` says why.** Each declared code is scored *alone*
+beside the question it sits in. Every bare invented code is refused (6.32–14.49, all under 15) and
+three of the five invented rows that name one clear the gate anyway once the code is inside an
+ordinary student sentence (15.03–20.76): the rest of the sentence matches real documents. So a `bm25: 15.0` gate separates
+an invented course from a real one only when the query is the bare code, which no student types.
+Two shapes cannot be gated at all, by construction — a `field_absent` row names a course that **is**
+in the corpus, and a real out-of-term course is one the corpus talks about (`CS 428` alone scores
+27.16 on CS 527, whose prerequisite sentence names it). For those the refusal has to come from the
+answer node's grounding, which is the thing Day 5's abstention machinery has to calibrate.
+
+The sharpest row is `v1-2010`, *"what is GGIS 205 about?"*: BADM 205's whole description is
+*"Same as GGIS 205. See GGIS 205."*, so the retriever returns a document that names the course, is
+about the course, and carries none of its content — the one cross-reference of 497 that does not
+resolve inside the export.
+
+A constructed row records a **different** provenance from a drafted one — a shape, a witness and a
+gate reading where #56's records a batch, a model and a leakage overlap. `parse_drafts` takes the
+key set to hold a file to, so both files go through one reader; #59 sees two shapes, which is the
+honest thing for it to see.
+
+```json
+{
+  "id": "v1-2007", "bucket": "unanswerable",
+  "question": "how many credits is CS 428?",
+  "gold_answer": "This catalog covers 2026 spring only, and CS 428 is not offered in it.",
+  "gold_doc_ids": [], "should_abstain": true,
+  "provenance": {
+    "shape": "out_of_term", "source": "constructed", "codes": ["CS 428"],
+    "named_by": "CS 527", "field": null, "note": "GUIDELINES U1, and PR #51's example. …",
+    "config_hash": "7980f15f", "retrieval_mode": "bm25",
+    "top_score": 29.1631, "top_doc_id": "2026-sp:CS-527",
+    "code_scores": {"CS 428": 27.1554}, "gate": 15.0, "above_gate": true
+  }
+}
+```
+
+Three rows are not new: *"how many credits is CS 428?"* is `eval/GUIDELINES.md`'s boundary case
+**U1**, *"what should I take next semester?"* is its **A2**, and *"is there a course about quantum
+origami?"* is the negative query PR #51 measured at 11.06. A boundary case that is argued in the
+guidelines and absent from the data is a rule nothing tests.
 
 ## Day 1 goal
 
