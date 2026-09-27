@@ -94,3 +94,15 @@ evidence:
     # number is kept so the table stays one entry per retrieval mode, and so Day 5's conformal
     # method — which calibrates rather than thresholds — has somewhere to land.
     hybrid: 0.025
+# The frozen 50/50 split of the eval set (#61). Day 5's conformal prediction calibrates on the
+# `calib` half and every final number is reported on `test`; a conformal guarantee computed on the
+# data the thresholds were tuned on is a description, not a guarantee. Hashed like everything else
+# here -- so the Day 3 report is named after the split that produced it -- and it reaches no index
+# key, so adding this section orphaned nothing (see the three keys in README's config section).
+eval:
+  # The seed the assignment is derived from, over each bucket's SORTED ids. The frozen artifact is
+  # the `split` field committed in eval/datasets/v1.jsonl; this is its provenance, and
+  # `python -m eval.scripts.split --verify` is what holds the two together. 61 is the issue that
+  # froze it: a constant with no tuning story, because a seed re-rolled after Day 4 has seen the
+  # test half is not a split, it is a fit.
+  split_seed: 61

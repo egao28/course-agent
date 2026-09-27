@@ -24,8 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from eval.schema import EvalItem
-from eval.scripts import review
+from config import load_config
+from eval.schema import ANNOTATED_FIELDS, EvalItem
+from eval.scripts import build_multihop, build_unanswerable, review
 from eval.scripts.draft_items import PROVENANCE_KEYS as DRAFTED_KEYS
 from eval.validate import corpus_doc_ids
 
@@ -632,7 +633,9 @@ def test_the_dataset_carries_the_six_fields_sorted_by_id_and_no_trailing_whitesp
     assert [json.loads(line)["id"] for line in lines] == sorted(
         json.loads(line)["id"] for line in lines
     )
-    assert all(list(json.loads(line)) == list(review.EvalItem.model_fields) for line in lines)
+    # The six a reviewer works in, and no `split` column: promotion writes an unfrozen dataset,
+    # and #61's freeze is the only thing that adds the seventh.
+    assert all(list(json.loads(line)) == list(ANNOTATED_FIELDS) for line in lines)
 
 
 def test_promotion_is_a_function_and_so_re_running_it_changes_nothing(session, tmp_path: Path):
@@ -756,9 +759,13 @@ def committed() -> list[review.Candidate]:
 
 
 def test_every_committed_draft_file_is_read_against_its_own_provenance_set(committed):
+    # Named off the live config rather than spelled out. #61 adds `eval:` to config.yaml, which
+    # moves the hash and so the name of every artifact tagged with it; a test holding the old
+    # spelling would pass over a rebuilt file and fail over a missing one for the wrong reason.
+    cfg = load_config()
     assert {path.name for path in COMMITTED} >= {
-        "multihop_graph_7980f15f.jsonl",
-        "unanswerable_7980f15f.jsonl",
+        build_multihop.draft_path(build_multihop.STEM, cfg).name,
+        build_unanswerable.draft_path(build_unanswerable.BUCKET, cfg).name,
     }
     assert len(committed) >= 50
 

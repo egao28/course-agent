@@ -26,7 +26,10 @@ that log: :func:`promote` replays it. Nothing else writes the dataset. The alter
 rows into ``v1.jsonl`` directly and keeping a log beside it -- gives you two files that can
 disagree, and the one that would be wrong is the one that documents the work. Here a log that
 does not reproduce the dataset is a failure the promote step raises, since every edit records the
-value it replaced and :func:`apply_edits` checks it against the draft still on disk.
+value it replaced and :func:`apply_edits` checks it against the draft still on disk. Once #61 has
+frozen the file, though, that function is missing an argument -- the log knows nothing about
+halves -- so ``--promote`` refuses to overwrite a split dataset (:func:`already_frozen`) rather
+than returning every row to no-half and letting the next freeze re-draw them.
 
 **Latest verdict wins, and a re-review starts from what the row currently is.** Resumption is by
 ``id``: a row with a verdict is not shown again unless ``--redo`` asks for it. When it is, the
@@ -70,10 +73,19 @@ from typing import Any, Literal, NamedTuple, TextIO
 from pydantic import ValidationError
 
 from config import REPO_ROOT, load_config, rel_to_repo
-from eval.schema import BUCKETS, RULES, Bucket, EvalItem
+from eval.schema import BUCKETS, RULES, Bucket, EvalItem, row_json
 from eval.scripts import build_multihop, build_unanswerable, draft_items
 from eval.scripts.draft_items import DRAFTS_DIR, credit_question, parse_drafts
-from eval.validate import Row, Violation, check_row, corpus_doc_ids, render, validate_rows
+from eval.validate import (
+    Row,
+    Violation,
+    check_row,
+    corpus_doc_ids,
+    parse_items,
+    plural,
+    render,
+    validate_rows,
+)
 from ingest.chunk import CHUNKS_PATH, load_chunks, load_courses, render_chunk
 from ingest.export_almabot import COURSES_PATH
 from ingest.tokenize import CODE_RE, get_tokenizer
@@ -927,13 +939,28 @@ def write_dataset(path: Path, rows: Sequence[EvalItem]) -> Path:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(
-        json.dumps(item.model_dump(), ensure_ascii=False) + "\n" for item in rows
-    )
+    body = "".join(json.dumps(row_json(item), ensure_ascii=False) + "\n" for item in rows)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(body, encoding="utf-8")
     os.replace(tmp, path)
     return path
+
+
+def already_frozen(path: Path) -> list[str]:
+    """Ids in an existing dataset at ``path`` that already carry a split (#61), sorted.
+
+    Promotion rewrites the whole file from the drafts and the log, and neither of those knows
+    about halves -- so promoting over a frozen dataset silently returns every row to no-half, and
+    the next freeze re-draws the split over whatever the id set is by then. Rows that move between
+    halves after a number has been reported on them invalidate that number quietly, which is the
+    one failure #61 exists to make loud. Unparsable lines are ignored: this is a "has the freeze
+    run?" question, and `eval.validate` is where a broken file gets reported.
+    """
+    path = Path(path)
+    if not path.exists():
+        return []
+    rows, _ = parse_items(path)
+    return sorted(row.item.id for row in rows if row.item.split is not None)
 
 
 def promotion_report(promotion: Promotion, path: Path) -> str:
@@ -1011,6 +1038,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--out", default=None, help=f"where --promote writes (default: {rel_to_repo(DATASET_PATH)})"
     )
     parser.add_argument(
+        "--unfreeze",
+        action="store_true",
+        help="allow --promote to overwrite a dataset that #61 has already split, dropping every "
+        "row's half; re-run `python -m eval.scripts.split` afterwards",
+    )
+    parser.add_argument(
         "--chunks", default=None, help=f"the corpus (default: {rel_to_repo(CHUNKS_PATH)})"
     )
     args = parser.parse_args(argv)
@@ -1055,6 +1088,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             promotion = promote(candidates, judged, known)
         except ValueError as exc:
             print(exc, file=sys.stderr)
+            print(f"{rel_to_repo(out_path)} not written.", file=sys.stderr)
+            return 1
+        split_rows = [] if args.unfreeze else already_frozen(out_path)
+        if split_rows:
+            print(
+                f"{rel_to_repo(out_path)} is frozen: {plural(len(split_rows), 'row')} carry a "
+                "split (#61), and promoting over it would drop every half and re-draw them on "
+                "the next freeze. Pass --unfreeze if the dataset really is being rebuilt, and "
+                "re-run `python -m eval.scripts.split` in the same commit.",
+                file=sys.stderr,
+            )
             print(f"{rel_to_repo(out_path)} not written.", file=sys.stderr)
             return 1
         if promotion.ok:

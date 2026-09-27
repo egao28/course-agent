@@ -86,7 +86,7 @@ from agent.nodes.check_evidence import check_gateable, threshold_for, thresholds
 from agent.nodes.dispatch import check_retrieval_mode
 from agent.tools.courses import CourseDetail
 from config import Config, load_config, rel_to_repo
-from eval.schema import RULES, EvalItem, item_id
+from eval.schema import RULES, EvalItem, item_id, row_json
 from eval.scripts.draft_items import (
     ID_BLOCKS,
     check_drafts,
@@ -908,7 +908,7 @@ def build_rows(
         )
         rows.append(
             {
-                **row.model_dump(),
+                **row_json(row),
                 "provenance": {
                     "shape": item.shape,
                     "source": SOURCE,
