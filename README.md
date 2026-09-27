@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1629,6 +1629,122 @@ Three rows are not new: *"how many credits is CS 428?"* is `eval/GUIDELINES.md`'
 **U1**, *"what should I take next semester?"* is its **A2**, and *"is there a course about quantum
 origami?"* is the negative query PR #51 measured at 11.06. A boundary case that is argued in the
 guidelines and absent from the data is a rule nothing tests.
+
+## Multi-hop bucket
+
+This bucket comes off the prereq graph rather than out of a drafting prompt
+([#58](../../issues/58)): a model shown ten course records writes one-hop questions and labels
+them `multihop`, and a bucket full of those measures nothing. So the 25 rows are a table in
+`eval/scripts/build_multihop.py`, built against `data/prereqs.json`, and the script checks it
+against the committed graph and the catalog's own sentences. [#56](../../issues/56) still
+drafts `multihop` candidates; this writes `multihop_graph_{hash}.jsonl` so the two never share a file.
+
+```bash
+uv run python -m eval.scripts.build_multihop      # no index, no model, no clock
+```
+
+**Five question shapes, so the bucket is not 25 rewordings of "what do I need before X".** Each
+walks the same graph differently, and `unlocks` walks it backwards — the shape a system that only
+implements `get_prereq_chain` has nothing to answer with.
+
+| shape | rows | what a row declares |
+|---|---|---|
+| `chain` | 6 | the bounded chain: what X needs, and what those need |
+| `reachable` | 6 | a `target`: is Y required for X, directly or indirectly |
+| `eligibility` | 5 | `held`: the courses the question grants the student |
+| `unlocks` | 4 | the dependents, which must list the root as a prerequisite |
+| `distance` | 4 | how many courses stand between the student and X |
+
+**Depth is two measures and they disagree.** `get_prereq_chain` layers by *shortest* distance,
+which is what #38's answer node needs; #58's census — 738 courses at depth ≥ 2, deepest chain 13 —
+is *longest* chain. Both are computed and recorded per row, because by levels the same graph has
+**718** at depth ≥ 2 and its deepest is **9**. Every root clears 2 on **both**, so no row's
+multi-hop-ness depends on which measure you picked; the stratification uses the longest-chain
+depth, which is the one #58 sampled from.
+
+```
+depth                2:4  3:5  4:1  6:1  7:1  8:2  9:3  10:1  11:5  12:1  13:1   (longest chain; 15 at 5+)
+cycles               6 rows name a course inside one of the 7
+```
+
+**Four records is the ceiling, and the question is what bounds the chain.** #58 wants
+`gold_doc_ids` to list every course in the chain; `eval/GUIDELINES.md` caps a join at four records
+and deletes an unbounded one outright. Those meet where the question does the bounding — not
+*"everything before SE 495"* (27 courses, and a cycle) but *"is MATH 257 required for SE 495?"*,
+whose answer rests on three records while its root still sits 13 levels deep. Six rows name a
+course inside one of the seven cycles, which is where a walk without a visited set stops
+returning.
+
+**The tool proposes, the raw sentence disposes.** Writing these gold answers out of
+`get_prereq_chain()` would make the set a regression test for the walker: if the walk is wrong the
+gold is wrong the same way and Day 4 scores 100%. So every answer is written from the `prereqRaw`
+sentences of the courses it cites, and the script re-derives where the exported `prereqs` list and
+that sentence disagree. It is a **log, not a gate** — a row that has one must carry a `note`
+saying which kind it is, and the run still writes.
+
+```
+tool vs raw          15 of 25 rows agree
+
+Where the exported prerequisites and the course's own sentence differ -- the gold answers below
+were written from the sentence:
+  v1-1003  ATMS 202   drops MATH 221 (not in this term)
+  v1-1009  MATH 412   drops MATH 347 (not in this term)
+  v1-1010  AE 312     drops ME 200 (offered this term)
+  v1-1018  ASTR 405   drops PHYS 213, PHYS 214 (offered this term)
+  v1-1023  JOUR 340   drops JOUR 317, JOUR 217 (not in this term)
+  …
+```
+
+**Ten of 25 rows sit on a sentence the export does not reproduce, and the four kinds are not the
+same finding.** Across the whole graph, 46 courses drop a code their own sentence names while the
+catalog still offers it, and the bucket carries one row of each kind deliberately:
+
+- **a requirement dropped** — `AE 312` reads *"AE 202 and MATH 285. Credit or concurrent
+  registration in ME 200."* and exports two codes. ME 200 **is** offered this term, so this is not
+  the term filter: a continuation sentence naming a requirement was lost. Filed against
+  `ingest/export_almabot.py`.
+- **a recommendation dropped, correctly** — `ASTR 405` ends *"Recommended: PHYS 213 and PHYS 214"*
+  and exports neither. The scanner cannot tell that from the case above; the row's `note` is where
+  the reviewer says so, which is why the log is not a bug list.
+- **a negation read as a mention** — `JOUR 340` names `JOUR 217` only to say it may **not** be
+  taken concurrently.
+- **the term filter turning a disjunction into a requirement** — `ATMS 202` requires *"MATH 220 or
+  MATH 221."* and exports `["MATH 220"]`, because MATH 221 is not in 2026 spring. This is #58's
+  own `ABE 228` case, and it is the commonest of the four.
+
+One more that no scan finds and a reviewer does: `MATH 220`'s sentence asks for *an adequate ALEKS
+placement score … demonstrating knowledge of topics of MATH 115*, and the export made that an edge
+to MATH 115. The code is named, so the two "agree" — and the requirement is a placement score, not
+a course. `v1-1003` is written against the sentence and says so.
+
+A graph-built row records a **third** provenance shape: where in the graph the root sits, what the
+tool would have said, and whether it agreed with the text. `parse_drafts` takes the key set to hold
+a file to, so #56's, #57's and this one all go through one reader.
+
+```json
+{
+  "id": "v1-1010", "bucket": "multihop",
+  "question": "is MATH 285 required for AE 434, directly or indirectly?",
+  "gold_answer": "Yes. AE 434 requires AE 312, and AE 312 requires AE 202 and MATH 285, plus credit or concurrent registration in ME 200.",
+  "gold_doc_ids": ["2026-sp:AE-434", "2026-sp:AE-312", "2026-sp:MATH-285"],
+  "should_abstain": false,
+  "provenance": {
+    "shape": "reachable", "source": "prereq-graph", "root": "AE 434", "target": "MATH 285",
+    "held": [], "depth": 11, "levels": 7, "closure": 14, "cycle_members": [],
+    "target_in_closure": true, "raw_agrees": false,
+    "disagreements": [{"course": "AE 312", "dropped_offered": ["ME 200"],
+                       "dropped_absent": [], "added": []}],
+    "note": "the yes case, and the row carrying the clearest parser bug in the graph. …",
+    "config_hash": "7980f15f"
+  }
+}
+```
+
+`target_in_closure` is the tool's proposal, recorded and not acted on: `MATH 213` is reachable
+from `CS 374` and the answer is still **no**, because it is one of two alternatives. The same gap
+runs through the other shapes — `MATH 241` is in `MATH 412`'s closure only because something else
+in there requires it, so *"I have taken MATH 241, can I take MATH 412?"* is no as well. Membership
+is not requirement, and that is most of what this bucket tests.
 
 ## Day 1 goal
 

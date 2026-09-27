@@ -97,6 +97,9 @@ BATCH_SIZE = 10
 DEFAULT_PER_BATCH = 3
 
 #: The three buckets drafted from documents. ``unanswerable`` is #57's, constructed and not drawn.
+#: ``multihop`` stays here as a *candidate* generator only -- the bucket itself is built from the
+#: prereq graph by :mod:`eval.scripts.build_multihop`, which writes ``multihop_graph_{hash}.jsonl``
+#: so that the two never share a file.
 DRAFTABLE: tuple[Bucket, ...] = ("fact", "multihop", "ambiguous")
 
 #: Where each bucket's ids start, so three draft files can be written independently and still
