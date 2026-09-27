@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1745,6 +1745,97 @@ from `CS 374` and the answer is still **no**, because it is one of two alternati
 runs through the other shapes — `MATH 241` is in `MATH 412`'s closure only because something else
 in there requires it, so *"I have taken MATH 241, can I take MATH 412?"* is no as well. Membership
 is not requirement, and that is most of what this bucket tests.
+
+## Verification pass
+
+The 3–4 hours that make this a **hand-verified** eval set rather than a pile of model output
+([#59](../../issues/59)). Everything a machine can decide has already run — #54's schema and
+validator, #56's id and overlap checks, #57's and #58's corpus checks — so what is left is the
+three questions no check can answer, and `eval/scripts/review.py` exists to spend the reviewer's
+minute on those and nothing else.
+
+```bash
+uv run python -m eval.scripts.review                 # the pass, resumable, one row at a time
+uv run python -m eval.scripts.review --limit 20      # a sitting
+uv run python -m eval.scripts.review --stats         # per-bucket counts and the top edit reasons
+uv run python -m eval.scripts.review --promote       # accepted + edited -> eval/datasets/v1.jsonl
+```
+
+**The chunk text is on the screen, or check 2 does not happen.** Every cited chunk is printed in
+full beside the question and the drafted answer, out of `data/chunks.jsonl` (or re-rendered from
+the committed `data/courses.json` on a machine that has not built it). A reviewer who has to open
+another window to read a citation approves citations by vibe at item 40, and a row whose answer is
+right and whose citation is wrong is worse than a wrong row: it rewards a system that retrieved
+the wrong document.
+
+```
+------------------------------------------------------------------------------------------------
+v1-1001  multihop -- two or more records must be joined
+eval/datasets/drafts/multihop_graph_7980f15f.jsonl:1   row 1 of 50
+
+Q  what do I need before FR 104, and what do those courses require in turn?
+A  FR 104 requires FR 103, FR 103 requires FR 102, and FR 102 requires FR 101 -- and each of the
+   three sentences also accepts a placement score or the matching year of high school French …
+   should_abstain: false   gold_doc_ids: 4
+
+   1. is the gold_answer right?  against the catalog, not against plausibility
+   2. do the gold_doc_ids support it?  the cited chunk must contain the fact asserted
+   3. is the bucket right?  eval/GUIDELINES.md, and its eight boundary cases
+
+cited chunks
+  [1] 2026-sp:FR-104
+      FR 104 — Intermediate French II
+      Credits: 4
+      …
+      Prerequisites: FR 103 or equivalent, or a placement score showing high school achievement
+      equivalent to FR 103.
+
+   the answer names FR 104, FR 103, FR 102, FR 101
+
+verdict?  [a]ccept  [e]dit  [d]elete  [q]uit >
+```
+
+**The flags are prompts, never verdicts.** A row that trips something in `eval/GUIDELINES.md` is
+marked with the rule and nothing else — a flag that resolved itself would be the machine judging
+the row, which is the thing this pass exists to not do.
+
+| flag | the rule behind it |
+|---|---|
+| a gold id the validator rejects | #54 — shown here while the reviewer can still fix it, rather than at promotion |
+| more than four cited records | "Which bucket": past four it is a list question, so narrow it or drop it |
+| a credit question | rule 2 — 1,415 courses have a credit *range* and a single number in the chunk. This stack's export cannot say which, so the flag names the course and prints the one-liner over `origin/main`; once [#17](../../issues/17) lands it names the course outright |
+| #56's top-decile overlap | the question may be retrievable by its own wording, which inflates Day 4's recall |
+| a code in the answer that no cited chunk carries | check 2, mechanically: a citation about the right topic is still the wrong id |
+
+**`v1.jsonl` is the drafts replayed through the log, not a second copy of them.** Every judgement
+appends to `eval/datasets/review_log.jsonl` — `{id, verdict, reason, field_changed, before, after,
+ts}`, one line per changed field, flushed before the next row is shown — and `--promote` rebuilds
+the dataset from the draft files and that log. Editing rows into `v1.jsonl` directly would give
+two files that can disagree, and the one that would be wrong is the one documenting the work. An
+edit records the draft value it replaced, so a draft that moved after it was reviewed stops the
+promotion instead of quietly promoting text nobody read.
+
+**Nothing reaches the dataset unreviewed.** `--promote` refuses while any drafted row has no
+verdict, refuses on a verdict naming a row no draft holds, and re-validates the promoted rows
+through `eval.validate` — the composition of a draft file and a log is what Day 4 reads, and a row
+is only as checked as the last thing that touched it. A short bucket is a **warning**: deleting a
+bad item is what verification is for, and a check that fails on 49 facts argues for keeping a bad
+row.
+
+**Resumable by id, and interleaved.** A row with a verdict is not shown again unless `--redo` asks
+for it, and then it is shown with its edits applied; the queue deals one row per bucket in turn so
+that fifty `fact` rows in a row cannot be what stops the reviewer reading the chunk text. The log
+is the one artifact here that carries a clock — every other one moves only when the run moved,
+because it is regenerable, and a record of when a person judged what is not. `--stats` prints the
+accept rate over the first half of the judgements against the second, which is what a
+late-session cluster of accepts looks like.
+
+**Status: the tool, not the pass.** The pass itself is a person's to run, and nothing in this
+repository fabricates one — there is no `review_log.jsonl` and no `v1.jsonl` until somebody has
+read the rows. Two of the four buckets are also still undrafted: #57 and #58 committed 50 rows,
+and the 50 `fact` and 20 `ambiguous` rows come from #56's harness, which needs a model run.
+`tests/test_review.py` holds both artifacts the moment they land, including the invariant that
+`v1.jsonl` is exactly the drafts replayed through the log.
 
 ## Day 1 goal
 
