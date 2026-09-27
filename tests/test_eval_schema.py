@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from agent.state import EXITS
 from eval.schema import (
+    ANNOTATED_FIELDS,
     BUCKETS,
     ID_RE,
     MAX_N,
@@ -25,6 +26,7 @@ from eval.schema import (
     EvalItem,
     item_id,
     normalize_question,
+    row_json,
     rule,
 )
 
@@ -47,7 +49,7 @@ def row(**overrides: object) -> dict[str, object]:
 
 
 def test_the_six_fields_in_the_order_the_issue_writes_them():
-    assert tuple(EvalItem.model_fields) == (
+    assert ANNOTATED_FIELDS == (
         "id",
         "bucket",
         "question",
@@ -57,8 +59,21 @@ def test_the_six_fields_in_the_order_the_issue_writes_them():
     )
 
 
+def test_the_model_is_the_six_annotated_fields_and_the_one_assigned_one():
+    """#61 adds ``split``, and it goes last so a frozen row still reads six-then-one."""
+    assert tuple(EvalItem.model_fields) == (*ANNOTATED_FIELDS, "split")
+
+
 def test_a_valid_row_round_trips_unchanged():
-    assert EvalItem.model_validate(ROW).model_dump() == ROW
+    assert row_json(EvalItem.model_validate(ROW)) == ROW
+
+
+def test_an_unfrozen_row_is_written_without_a_split_column():
+    """``model_dump`` would write ``"split": null`` into every draft file; row_json does not."""
+    item = EvalItem.model_validate(ROW)
+    assert item.split is None
+    assert "split" not in row_json(item)
+    assert row_json(item.model_copy(update={"split": "calib"}))["split"] == "calib"
 
 
 @pytest.mark.parametrize("field", list(ROW))

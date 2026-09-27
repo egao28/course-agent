@@ -283,6 +283,68 @@ def test_render_leaves_the_line_off_a_whole_file_finding():
     assert line == "eval/datasets/v1.jsonl  holds no rows"
 
 
+# --- the split (#61) ------------------------------------------------------------------------------
+
+
+def test_an_unfrozen_file_says_nothing_about_splits(tmp_path):
+    """Every file in the tree today is unfrozen, and that is not a finding."""
+    path = write(tmp_path, as_row(), as_row(id="v1-0002", question="How many credits is CS 225?"))
+    assert [v for v in validate_file(path) if v.field == "split"] == []
+
+
+def test_a_half_frozen_file_is_one_error_naming_the_rows_that_have_no_half(tmp_path):
+    path = write(
+        tmp_path,
+        as_row(split="calib"),
+        as_row(id="v1-0002", question="How many credits is CS 225?"),
+    )
+    found = [v for v in errors(validate_file(path)) if v.field == "split"]
+    assert len(found) == 1
+    assert "1 row carry a split and 1 do not (v1-0002)" in found[0].message
+    assert found[0].line is None  # a property of the file, not of a row
+
+
+def test_a_frozen_file_passes(tmp_path):
+    path = write(
+        tmp_path,
+        as_row(split="calib"),
+        as_row(id="v1-0002", question="How many credits is CS 225?", split="test"),
+    )
+    assert [v for v in errors(validate_file(path)) if v.field == "split"] == []
+
+
+def test_a_half_that_is_not_one_of_the_two_is_a_field_error(tmp_path):
+    path = write(tmp_path, as_row(split="cal"))
+    assert any(v.field == "split" for v in errors(validate_file(path)))
+
+
+def test_a_lopsided_bucket_warns_without_failing(tmp_path):
+    """The one stratification property that needs no seed. `--verify` is what checks the rest."""
+    rows = [
+        as_row(id=f"v1-{n:04d}", question=f"How many credits is TEST {n}?", split="calib")
+        for n in range(1, 4)
+    ]
+    path = write(tmp_path, *rows)
+    found = [v for v in warnings(validate_file(path)) if v.field == "fact"]
+    assert any("3 calib / 0 test" in v.message for v in found)
+    assert not errors(validate_file(path))
+
+
+def test_a_bucket_one_row_apart_is_not_lopsided(tmp_path):
+    rows = [
+        as_row(id=f"v1-{n:04d}", question=f"How many credits is TEST {n}?", split=half)
+        for n, half in ((1, "calib"), (2, "calib"), (3, "test"))
+    ]
+    path = write(tmp_path, *rows)
+    assert not [v for v in warnings(validate_file(path)) if "calib /" in v.message]
+
+
+def test_the_extra_field_message_names_the_seven_columns_that_exist(tmp_path):
+    path = write(tmp_path, as_row(difficulty="hard"))
+    message = next(v.message for v in errors(validate_file(path)) if v.field == "difficulty")
+    assert "the row has six fields, and `split` once #61 freezes it" in message
+
+
 # --- the datasets in the repo ---------------------------------------------------------------------
 
 

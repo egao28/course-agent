@@ -45,6 +45,8 @@ REQUIRED_SECTIONS = {
     "llm",
     "agent",
     "evidence",
+    # #61: eval.split_seed, the provenance of the frozen calibration/test split.
+    "eval",
 }
 
 
@@ -260,6 +262,22 @@ def test_a_new_section_moves_the_config_hash_and_neither_index_key(cfg):
     assert with_llm.hash != cfg.hash
     assert collection_name(with_llm, "c0ffee00") == collection_name(cfg, "c0ffee00")
     assert bm25_key(with_llm, "c0ffee00") == bm25_key(cfg, "c0ffee00")
+
+
+def test_the_eval_section_moves_the_hash_and_leaves_all_three_index_keys_alone():
+    # #61 adds `eval: {split_seed: ...}` to the live file -- the second instance of the general
+    # case above, and the claim the PR makes about the artifacts already in the tree: the reports
+    # are renamed, the two indexes answer to the names they have. Over config.yaml itself rather
+    # than the fixture, because that is the file whose hash moved.
+    live = load_config()
+    assert isinstance(live["eval"]["split_seed"], int)
+    without = Config({k: v for k, v in live.to_dict().items() if k != "eval"})
+    assert live.hash != without.hash
+    assert collection_name(live, "c0ffee00") == collection_name(without, "c0ffee00")
+    assert bm25_key(live, "c0ffee00") == bm25_key(without, "c0ffee00")
+    reseeded = Config({**live.to_dict(), "eval": {"split_seed": live["eval"]["split_seed"] + 1}})
+    assert reseeded.hash != live.hash
+    assert bm25_key(reseeded, "c0ffee00") == bm25_key(live, "c0ffee00")
 
 
 def test_bm25_key_says_so_when_there_is_no_section_to_hash(cfg):

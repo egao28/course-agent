@@ -21,6 +21,11 @@ indexes/*
 data/chunks.jsonl
 data/chunks.meta.json
 
+# stand-in drafts: rows canned by `--fake-model` with no model behind them (#56). The real
+# drafts beside them are committed, because #59 verifies them and #62 reports what they became.
+eval/datasets/drafts/*.standin.jsonl
+eval/datasets/drafts/*.standin.meta.json
+
 # os / editor
 .DS_Store
 .vscode/
