@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them (Day 3), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1346,6 +1346,88 @@ mode runs is a config value, so switching it is a new hash and a new report rath
 to this one — and on this corpus that switch is [not a free one](#evidence-gate): the fused score
 of a top-1 document barely moves between a good match and a bad one, which is why `top_score`
 refuses a hybrid block instead of comparing it.
+
+## Eval item schema
+
+Day 3's deliverable is a dataset, and a dataset without a schema is a text file. The contract and
+its check land **before** the first question is drafted: `eval/schema.py` is the row and the bucket
+table, `eval/validate.py` is the runnable check over a file of them
+([#54](../../issues/54)).
+
+```bash
+uv run python -m eval.validate eval/datasets/v1.jsonl
+```
+
+```json
+{
+  "id": "v1-0001",
+  "bucket": "fact",
+  "question": "How many credits is MATH 241?",
+  "gold_answer": "4 credit hours.",
+  "gold_doc_ids": ["2026-sp:MATH-241"],
+  "should_abstain": false
+}
+```
+
+Six fields, all required, `extra="forbid"` — a drafting run ([#56](../../issues/56)) that invents a
+`difficulty` field fails loudly instead of writing a column nothing reads. `id` is minted by
+`schema.item_id()` in pipeline order and never chosen by a model: ids are how the agreement sample
+([#60](../../issues/60)) and the frozen split ([#61](../../issues/61)) name rows, so a renumbering
+after either of those lands is a corruption that still loads.
+
+| bucket | n | `should_abstain` | `gold_doc_ids` | Day 2 exit it should reach |
+| --- | ---: | --- | --- | --- |
+| `fact` | 50 | `false` | ≥ 1 | `answer` |
+| `multihop` | 25 | `false` | ≥ 2 | `answer` |
+| `unanswerable` | 25 | `true` | empty | `out_of_scope` or `refuse_handoff` |
+| `ambiguous` | 20 | `true` | empty or ≥ 1 | `refuse_handoff` (clarify) |
+
+**`should_abstain` is redundant with `bucket`, on purpose.** The bucket fixes it, so the two can
+disagree — and a row where they do is a mislabel that one field alone would have hidden. It stays a
+single bit ("must not emit a confident answer") because the two abstaining buckets do not want the
+same behaviour: an `unanswerable` row should end at *"this catalog does not have that"*, an
+`ambiguous` one at *"which course do you mean?"*. That distinction is carried by `bucket`, every
+metric conditions on it, and for `ambiguous` rows `gold_answer` holds **the clarifying question
+that should have been asked** rather than a factual answer.
+
+**The counts warn; everything else fails.** Deleting a bad item during verification
+([#59](../../issues/59)) is the whole point of verification, and a check that fails on 49 facts is
+a check that argues for keeping a bad row.
+
+What it checks, all at once and one message per problem:
+
+- every `gold_doc_id` is really in the corpus — and a miss gets the id it was probably meant to be,
+  because `2026-sp:MATH 241` for `2026-sp:MATH-241` is the likeliest error in a hand-typed dataset
+  (`metadata.code` has the space; only the doc id has the dash);
+- no id repeated inside one row, which is how a one-hop row wears two `multihop` ids;
+- `should_abstain` agrees with the bucket, and the gold-id count is inside the bucket's bounds;
+- ids unique, and no question asked twice once whitespace and case stop counting;
+- every row is six fields with non-empty prose, `bucket` one of the four, `id` a `v1-NNNN`.
+
+```
+$ uv run python -m eval.validate tests/fixtures/eval_bad.jsonl
+tests/fixtures/eval_bad.jsonl:1  v1-0001 gold_doc_ids.0  '2026-sp:MATH 241' is not in the corpus; did you mean '2026-sp:MATH-241'?
+tests/fixtures/eval_bad.jsonl:3  v1-0003 gold_doc_ids  1 id; an unanswerable row carries no gold ids at all -- this catalog cannot answer it, so there is nothing to cite
+tests/fixtures/eval_bad.jsonl:4  v1-0004 question  repeats line 1 (v1-0001) once whitespace and case are normalised
+tests/fixtures/eval_bad.jsonl:6  v1-0006 gold_doc_ids.1  repeats '2026-sp:CS-173' from position 0; a document cited twice is still one document, and in a multihop row it is one hop wearing two ids
+tests/fixtures/eval_bad.jsonl:9  v1-0009 difficulty  Extra inputs are not permitted; the row has exactly six fields
+warning: tests/fixtures/eval_bad.jsonl  fact  5 rows, short of the planned 50
+tests/fixtures/eval_bad.jsonl: FAILED -- 9 error(s), 5 warning(s)
+```
+
+(Four of the nine errors and four of the five warnings are elided above; the run prints every one.)
+That fixture holds **one problem per row**, so "prints every violation rather than the first" is a
+count in `tests/test_eval_validate.py` and not a judgement call.
+
+**The corpus it checks against.** `data/chunks.jsonl` when it has been built, and otherwise the
+same 4,502 ids derived from the committed `data/courses.json` through `ingest.chunk.doc_id` — the
+function that minted them in the first place, so the two sets are equal by construction and a test
+says so. The chunk file is gitignored and rebuildable, and a check that skips on a fresh clone is a
+check that does not run on the machine it is for.
+
+`eval/datasets/day2_queries.jsonl` is **not** retrofitted into this shape. It is
+`{query, expected_intent, expected_exit, note}`, it exists to prove the wiring, and a test asserts
+that it still fails this validator — two artifacts with two jobs, not one artifact with a migration.
 
 ## Day 1 goal
 
