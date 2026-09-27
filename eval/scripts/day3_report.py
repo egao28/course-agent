@@ -53,7 +53,15 @@ from typing import Any, NamedTuple, TextIO
 
 from config import Config, load_config, rel_to_repo, report_path
 from eval.schema import BUCKETS, RULES, SPLITS, TARGET_TOTAL, EvalItem
-from eval.scripts import agreement, build_unanswerable, draft_items, review, split, triage
+from eval.scripts import (
+    agreement,
+    build_unanswerable,
+    draft_items,
+    recheck,
+    review,
+    split,
+    triage,
+)
 from eval.scripts.agreement import md_table
 from eval.scripts.draft_items import quantile
 from eval.validate import corpus_doc_ids, plural
@@ -88,6 +96,10 @@ class Sources(NamedTuple):
     #: the pass was assisted -- see :func:`limitation_bullets`. A report that quietly left this
     #: out would be describing a different methodology from the one that ran.
     triage: Path = triage.TRIAGE_PATH
+    #: #59's pass read a second time over a sample (`eval.scripts.recheck`). Optional, and the
+    #: only thing that turns "confirmed" into a number: without it an accept is an accept
+    #: whether it took two seconds or two minutes, and this report cannot tell the reader which.
+    recheck: Path = recheck.RECHECK_PATH
 
     @property
     def sidecar(self) -> Path:
@@ -101,6 +113,7 @@ def sources(
     log: Path | None = None,
     packet: agreement.Packet | None = None,
     advisory: Path | None = None,
+    reread: Path | None = None,
 ) -> Sources:
     """The committed locations, unless told otherwise."""
     return Sources(
@@ -109,6 +122,7 @@ def sources(
         log=review.REVIEW_LOG_PATH if log is None else Path(log),
         packet=agreement.packet() if packet is None else packet,
         triage=triage.TRIAGE_PATH if advisory is None else Path(advisory),
+        recheck=recheck.RECHECK_PATH if reread is None else Path(reread),
     )
 
 
@@ -157,6 +171,12 @@ def inputs(src: Sources) -> list[Input]:
             "machine triage",
             src.triage,
             "uv run --env-file .env python -m eval.scripts.triage",
+            required=False,
+        ),
+        Input(
+            "sampled re-read",
+            src.recheck,
+            "uv run python -m eval.scripts.recheck",
             required=False,
         ),
     ]
@@ -265,6 +285,9 @@ class Facts(NamedTuple):
     judged: Sequence[agreement.Filled]
     #: What a model suggested per row, or empty when the pass was not assisted.
     advisory: Mapping[str, triage.Triage]
+    #: The sampled re-read of the pass, and what it overturned. ``None`` when none was drawn.
+    reread_sample: recheck.Sample | None
+    reread: recheck.Result | None
 
     def of(self, bucket: str) -> list[EvalItem]:
         return [row for row in self.rows if row.bucket == bucket]
@@ -302,6 +325,7 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
             "run `python -m eval.scripts.agreement --score`, which reports all of them, first"
         )
     entries = review.read_entries(src.log)
+    drawn = recheck.read_sample(src.recheck)
     return Facts(
         cfg=cfg,
         src=src,
@@ -317,6 +341,8 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
         sample_meta=read_json(src.packet.meta),
         judged=judged,
         advisory=triage.read_triage(src.triage),
+        reread_sample=drawn,
+        reread=None if drawn is None else recheck.result(drawn.ids, entries),
     )
 
 
@@ -402,14 +428,59 @@ def headline(facts: Facts) -> str:
     Drafted counts the rows the three builders wrote, including the ones review deleted --
     otherwise "N drafted, M reviewed" would be two names for the same number and the delete
     count would have nowhere to come from.
+
+    **"reviewed by hand" is claimed only where it is true.** #62 writes the headline with that
+    phrase in it, and it is the right phrase for an unassisted pass. Where the pass was
+    model-assisted (:mod:`eval.scripts.triage`) the phrase becomes "judged", and what the
+    reviewer actually did -- confirmed a machine reading, with some part of it re-read
+    independently -- is the sentence after it. A headline that said "by hand" over a log of
+    confirmations would be the one sentence in this report a reader could catch it out on, and
+    the numbers to catch it with are two sections below.
     """
     verdicts = facts.verdicts
     counts = Counter(verdict.verdict for verdict in verdicts.values())
-    return (
-        f"**{len(facts.candidates)} rows drafted, {len(verdicts)} reviewed by hand, "
+    did = "judged" if facts.advisory else "reviewed by hand"
+    lead = (
+        f"**{len(facts.candidates)} rows drafted, {len(verdicts)} {did}, "
         f"{counts['edit']} edited, {counts['delete']} deleted** — leaving "
         f"{len(facts.rows)} in `{rel_to_repo(facts.src.dataset)}`, of which "
         f"{len(facts.judged)} were read again by a second annotator."
+    )
+    return lead if not facts.advisory else lead + " " + assisted_sentence(facts)
+
+
+def assisted_sentence(facts: Facts) -> str:
+    """What the reviewer did, where "reviewed by hand" would overstate it.
+
+    One sentence, and it carries the two numbers that qualify every count above it: how much of
+    the pass agreed with the machine, and how much of it was read a second time properly. Both
+    are in the Verification section in full; a reader who stops at the headline should still not
+    come away with the wrong claim.
+    """
+    pairs = [
+        (facts.advisory[item_id].suggested, verdict.verdict)
+        for item_id, verdict in facts.verdicts.items()
+        if item_id in facts.advisory
+    ]
+    agreed = sum(1 for suggested, verdict in pairs if suggested == verdict)
+    made = (
+        f"That pass was model-assisted: it agreed with the machine on {agreed} of {len(pairs)} "
+        f"rows"
+        if pairs
+        else "That pass was model-assisted"
+    )
+    if facts.reread is None or not facts.reread.reread:
+        return (
+            f"{made}, and **no part of it has been re-read independently**, so how much of it "
+            "is a reading and how much a confirmation is not established here."
+        )
+    found = facts.reread
+    lo, hi = found.interval
+    return (
+        f"{made}; {found.reread} of them were then re-read properly and "
+        f"{plural(len(found.changed), 'verdict')} "
+        f"{'was' if len(found.changed) == 1 else 'were'} overturned "
+        f"({found.rate:.0%}, 95% CI [{lo:.0%}, {hi:.0%}])."
     )
 
 
@@ -812,11 +883,80 @@ def render_assistance(facts: Facts) -> str:
                 "Read the agreement rate as an **upper bound** on how much the suggestions "
                 "moved the pass, not as a measurement of it: what an unassisted reader would "
                 "have decided about these rows is not recoverable afterwards. The off-diagonal "
-                "cells are the rows where a person overrode a machine, which is the only direct "
-                "evidence here that the reading happened."
+                "cells are the rows where a person overrode a machine."
             ),
+            "",
+            render_reread(facts),
         ]
     )
+
+
+def render_reread(facts: Facts) -> str:
+    """The sampled second reading: the only number here that separates reading from confirming.
+
+    A pass with no re-read gets the sentence that says so, rather than silence. The difference
+    between "every row was read" and "every row was confirmed" cannot be recovered from a log
+    of one verdict per row, so a report that left this out would leave the reader to assume the
+    stronger of the two.
+    """
+    found, drawn = facts.reread, facts.reread_sample
+    if drawn is None or found is None or not found.reread:
+        return (
+            "**No part of the pass has been re-read.** An accept is an accept in the log whether "
+            "it took two seconds or two minutes, so nothing here distinguishes a row that was "
+            "read from a row that was confirmed. `python -m eval.scripts.recheck` draws a "
+            "stratified sample for a second reading and reports what it overturns; until it has "
+            "run, read every count above as *confirmed against the machine reading*, not as "
+            "independently checked."
+        )
+    lo, hi = found.interval
+    rows = [
+        [
+            f"`{one.bucket}`",
+            f"`{one.verdict}`",
+            str(one.held),
+            str(len(one.ids)),
+        ]
+        for one in drawn.strata
+        if one.held
+    ]
+    body = [
+        (
+            f"**{found.reread} of the {len(facts.verdicts)} judged rows were re-read properly**, "
+            f"drawn stratified over bucket and verdict at seed `{drawn.seed}` "
+            f"(`{rel_to_repo(facts.src.recheck)}`), including every delete a model asked for. "
+            f"{plural(len(found.changed), 'verdict')} "
+            f"{'was' if len(found.changed) == 1 else 'were'} overturned: "
+            f"**{found.rate:.0%}, 95% CI [{lo:.0%}, {hi:.0%}]**."
+        ),
+        "",
+        md_table(["bucket", "verdict", "judged", "re-read"], rows),
+    ]
+    if found.changed:
+        body += [
+            "",
+            md_table(
+                ["id", "first pass", "on re-reading"],
+                [[f"`{one.id}`", f"`{one.first}`", f"`{one.second}`"] for one in found.changed],
+            ),
+        ]
+    else:
+        body += [
+            "",
+            (
+                f"Nothing overturned. That bounds the pass's error rate at **{hi:.0%}** and is "
+                "not the same claim as *the pass was right*; it is what {n} rows support."
+            ).format(n=found.reread),
+        ]
+    if not found.done:
+        body += [
+            "",
+            (
+                f"{drawn.ids and found.asked - found.reread} of the sampled rows are still "
+                "unread, so the interval above will move."
+            ),
+        ]
+    return "\n".join(body)
 
 
 # --- agreement ------------------------------------------------------------------------------------
@@ -1035,6 +1175,25 @@ def limitation_bullets(facts: Facts) -> list[str]:
     ]
 
 
+def reread_clause(facts: Facts) -> str:
+    """The sentence in the limitation that says what the re-read bought, or that there was none."""
+    found = facts.reread
+    if found is None or not found.reread:
+        return (
+            "**No part of the pass has been re-read independently**, so nothing here "
+            "distinguishes a row that was read from a row that was confirmed."
+        )
+    lo, hi = found.interval
+    return (
+        f"{found.reread} of the rows were re-read properly and "
+        f"{plural(len(found.changed), 'verdict')} "
+        f"{'was' if len(found.changed) == 1 else 'were'} overturned, which puts the pass's "
+        f"error rate at {found.rate:.0%} with a 95% interval of [{lo:.0%}, {hi:.0%}] — the "
+        f"other {len(facts.verdicts) - found.reread} rows are covered by that interval and by "
+        "nothing else."
+    )
+
+
 def assistance_bullet(facts: Facts) -> list[str]:
     """The seventh limitation, and only when there is one: the pass was model-assisted.
 
@@ -1057,10 +1216,10 @@ def assistance_bullet(facts: Facts) -> list[str]:
             f"row before judging it{against}. A person shown a suggestion agrees with it more "
             "often than one shown nothing, so the accept rate in the Verification section is "
             "not the accept rate of an unassisted pass, and the agreement rate reported there "
-            "bounds the effect rather than measuring it. Every row was still read and decided "
-            "by a person, and no suggestion reached the review log: they are a separate "
-            f"append-only file (`{rel_to_repo(facts.src.triage)}`) whose rows carry neither a "
-            "`verdict` nor a `ts`, which is what makes the two unmistakable for each other."
+            f"bounds the effect rather than measuring it. {reread_clause(facts)} No suggestion "
+            "reached the review log: they are a separate append-only file "
+            f"(`{rel_to_repo(facts.src.triage)}`) whose rows carry neither a `verdict` nor a "
+            "`ts`, which is what makes the two unmistakable for each other."
         ),
     ]
 

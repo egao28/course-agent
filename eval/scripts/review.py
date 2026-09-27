@@ -1010,6 +1010,28 @@ def promotion_report(promotion: Promotion, path: Path) -> str:
 # --- the command ----------------------------------------------------------------------------------
 
 
+def wanted(
+    candidates: Sequence[Candidate],
+    judged: Mapping[str, Verdict],
+    redo: Sequence[str] | None,
+) -> list[Candidate]:
+    """Which rows this sitting shows: the unjudged ones, all of them, or a named few.
+
+    ``redo`` is three states and they are not the same: ``None`` (no flag) is the pass proper,
+    which skips what has a verdict; an empty list (bare ``--redo``) re-opens everything; and a
+    list of ids re-opens exactly those, judged or not. The third is what a sampled re-read
+    needs -- thirty rows read properly, without the other hundred and twenty-two in the way,
+    and with the earlier verdict printed above each one so the re-reader can see what they are
+    being asked to confirm.
+    """
+    if redo is None:
+        return [c for c in candidates if c.id not in judged]
+    if not redo:
+        return list(candidates)
+    asked = set(redo)
+    return [c for c in candidates if c.id in asked]
+
+
 def suggestions(where: str | None, candidates: Sequence[Candidate]) -> dict[str, str]:
     """``--triage``'s advisory lines by id, or nothing at all when the flag was not passed.
 
@@ -1056,9 +1078,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--redo",
-        action="store_true",
+        nargs="*",
+        default=None,
+        metavar="ID",
         help="show rows that already have a verdict too, with their edits applied; a new "
-        "verdict replaces the old one",
+        "verdict replaces the old one. Bare, it re-opens every judged row; with ids, only "
+        "those -- which is how a sampled re-read (`python -m eval.scripts.recheck`) is run "
+        "without walking the whole queue again",
     )
     parser.add_argument(
         "--limit",
@@ -1161,8 +1187,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{rel_to_repo(out_path)} not written.", file=sys.stderr)
         return 1
 
-    queue = interleave([c for c in candidates if args.redo or c.id not in judged])
+    queue = interleave(wanted(candidates, judged, args.redo))
     if not queue:
+        if args.redo:
+            print(
+                f"none of the {plural(len(args.redo), 'id')} given is a drafted row. Ids are "
+                "minted by eval.scripts.draft_items.ID_BLOCKS; --stats lists what exists."
+            )
+            return 1
         print(
             f"every one of the {len(candidates)} drafted rows has a verdict. "
             "--stats for the counts, --promote to write the dataset, --redo to re-judge."
