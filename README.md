@@ -2173,6 +2173,26 @@ files, a review log with an accept, an edit and a delete in it, the promoted dat
 and a filled sheet — and checks the report against it; the last test asserts that the inputs are
 still missing here, and says to delete itself when they land.
 
+## Retrieval ablation
+
+`eval/scripts/ablation.py` ([#75](../../issues/75)) runs every row of one half that carries
+`gold_doc_ids` (`fact` and `multihop`) through `retrieve(question, mode, k=5)` for `dense`, `bm25`
+and `hybrid`, and writes one line per (row, mode) with Recall@5 and MRR@5 from `eval/metrics.py`.
+`unanswerable` and `ambiguous` rows are skipped, and the skips are counted by bucket and printed.
+
+```bash
+uv run --env-file .env python -m eval.scripts.ablation --split calib   # choose and debug here
+uv run --env-file .env python -m eval.scripts.ablation --split test    # the reported number
+```
+
+The output goes to `eval/runs/ablation_{split}_{hash}.jsonl` plus a `.meta.json` sidecar that holds
+the config hash, `dense_key`, `bm25_key`, the dataset sha256 from the freeze, and the row ids.
+**The run file is the artifact.** The bootstrap (#76) and the table (#77) read it and never
+re-query an index. `--split` is required. Each half gets its own file because the strongest
+single mode is picked on `calib` and tested on `test`. The runner is deterministic, but the
+live dense side is not: embedding the same query twice can give slightly different vectors,
+and two calib runs differed in 1 of 41 dense lines.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
