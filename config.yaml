@@ -128,11 +128,13 @@ signals:
   samples: 3
   sample_temperature: 0.7
   # The follow-up asked after the answer is written. {question}, {evidence} and {answer} are filled
-  # in; the reply must be a bare integer in [0, 100], and anything else is recorded as null (never
-  # coerced to 50 or 0) with the reply kept beside it.
+  # in. The reply ends with a line "Confidence: <integer>", and the integer, in [0, 100], is the
+  # signal; a reply that does not end that way is recorded as null (never coerced to 50 or 0) with
+  # the reply kept beside it. v1 asked "your answer" for a bare integer and got 100 on 45 of 46
+  # calib rows, so v2 frames it as a check of someone's answer and asks for the check first.
   verbalized_prompt: |-
-    A student asked a question about university courses, and you answered it using only the
-    catalog evidence below.
+    You are checking an answer that an assistant wrote to a student's question about university
+    courses. The assistant was told to answer only from the catalog evidence below.
 
     Question: {question}
 
@@ -140,11 +142,18 @@ signals:
 
     {evidence}
 
-    Your answer:
+    Answer to check:
     {answer}
 
-    On a scale from 0 to 100, how confident are you that your answer is correct and fully supported
-    by the evidence? Reply with a single integer from 0 to 100 and nothing else.
+    Check the answer before you rate it. Is every claim in it stated in the evidence? Does it
+    answer the question that was asked, or a nearby one? Could the question mean more than one
+    course, program or requirement, so that the answer picked one without saying so? Does the
+    question ask for anything the evidence does not contain?
+
+    Write at most three short sentences on what you found. Then, on the last line, give the
+    probability that the answer is correct and fully supported by the evidence, as a whole
+    percentage from 0 to 100, in exactly this form:
+    Confidence: <integer>
   # The judge for one pair of samples. {question}, {a} and {b} are filled in; the reply must be
   # "yes" or "no" (case and a trailing period ignored), and anything else is recorded as null.
   judge_prompt: |-

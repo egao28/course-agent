@@ -132,11 +132,23 @@ class OpenAIEmbedder:
     The SDK retries a rate-limited or 5xx request on its own; ``max_retries`` is raised above its
     default because a build is ~18 sequential requests and losing one of them means re-running the
     whole thing (or paying for a ``--rebuild``).
+
+    ``timeout`` is per request and well below the SDK's 600 s default. A query-side embedding that
+    hung without an error stalled #87's live signal run for over 40 minutes on 2026-09-28. A
+    256-text build batch takes seconds, so 120 s leaves it plenty of room.
     """
 
-    def __init__(self, model: str, client: Any | None = None, max_retries: int = 5) -> None:
+    def __init__(
+        self,
+        model: str,
+        client: Any | None = None,
+        max_retries: int = 5,
+        timeout: float = 120.0,
+    ) -> None:
         self.model = model
-        self._client = openai_client(max_retries=max_retries) if client is None else client
+        self._client = (
+            openai_client(max_retries=max_retries, timeout=timeout) if client is None else client
+        )
 
     def embed(self, texts: Sequence[str]) -> Vectors:
         texts = list(texts)

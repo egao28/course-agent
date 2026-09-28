@@ -6,7 +6,9 @@
     "unanswerable": 4
   },
   "bm25_key": "877a6610",
-  "citation_discarded": {},
+  "citation_discarded": {
+    "ambiguous": 1
+  },
   "config_hash": "c73b197d",
   "dataset": "eval/datasets/v1.jsonl",
   "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
@@ -72,14 +74,14 @@
     "answer_v1": "6de696d3d0873e19b40a0655edc57705330b696ea331038b3f8e62792fa4a65c",
     "judge": "8fc5f97ebc578928ecc0d89d1c14b25859ac1b662aebf989a014e5f7e63c7a6f",
     "router_v2": "3314cfc1f5e97a274115ed026fc1b42b34787d96ff1fc0387cb334fe680ac204",
-    "verbalized": "9cc3a1c5951b3f57976228f759f67d5bd48cf75e109985b038778884f74759fc"
+    "verbalized": "f2545d66bcf4b5f31a6dfe449dae43aed0ca78229b65cecd854fc9b97d28a84c"
   },
   "retrieval_mode": "bm25",
-  "run": "eval/runs/signals_calib_40070d8d.jsonl",
+  "run": "eval/runs/signals_calib_37164723.jsonl",
   "sample_temperature": 0.7,
   "samples": 3,
-  "sha256": "f39d5ebccc6f55d4fb71e8c47b6456c02c0ced28b3218214a2ac86409d464bac",
-  "signals_key": "40070d8d",
+  "sha256": "cd29fdf7e551165eaf9cf372ef10cf9d8b3ff9e9e233111c822464f662a8bac3",
+  "signals_key": "37164723",
   "skipped": {
     "no_evidence": 15,
     "out_of_scope": 3

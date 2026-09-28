@@ -12,14 +12,21 @@ nothing that says whether the answer was right.
 
 * ``retrieval_score`` -- the top-1 score of the retrieval the agent actually ran
   (``agent.retrieval_mode``, bm25 today), **not** an RRF score: hybrid top-1 is near-constant
-  (see ``agent/nodes/check_evidence.py``, ``UNGATEABLE``) and ranks nothing. ``dense_top1`` is
-  recorded beside it, from ``retrieve(q, "dense", k=1)``, as the fallback column if BM25's number
-  turns out to carry no signal. A **tool row** (an exact catalog lookup, ``score is None``) has no
-  retrieval score, and both columns are ``null`` there -- never 1.0, which would put every lookup
-  at the confident end of #89's curves. Tool rows are counted by bucket.
-* ``verbalized`` -- a follow-up call after the answer is written (``signals.verbalized_prompt``),
-  parsed as one bare integer in [0, 100]. Anything else is ``null``, with the reply kept in
-  ``verbalized_raw`` and counted. It is never coerced to 50 or 0.
+  (see ``agent/nodes/check_evidence.py``, ``UNGATEABLE``) and ranks nothing. A **tool row** (an
+  exact catalog lookup, ``score is None``) has no retrieval score and gets ``null`` -- never 1.0,
+  which would put every lookup at the confident end of #89's curves. Tool rows are counted by
+  bucket.
+* ``dense_top1`` -- the best cosine ``retrieve(q, "dense", k=1)`` gives the *question*, on every
+  answered row, tool rows included. It is not the agent's evidence on a tool row, and it is not a
+  stand-in for ``retrieval_score``: it asks how well the question matches anything in the corpus,
+  which is defined whatever dispatch did. On the first calib run 36 of 46 answered rows were tool
+  rows, so ``retrieval_score`` alone would leave #89 a retrieval signal on 10 rows.
+* ``verbalized`` -- a follow-up call after the answer is written (``signals.verbalized_prompt``).
+  The prompt asks for a short check of the answer against the evidence and then a last line
+  ``Confidence: <integer>``. The integer on that line, in [0, 100], is the signal. A reply whose
+  last line is anything else is ``null``, with the reply kept in ``verbalized_raw`` and counted. It
+  is never coerced to 50 or 0. The first prompt asked for a bare integer and got 100 on 45 of 46
+  calib rows. That run is in this file's history.
 * ``self_consistency`` -- ``signals.samples`` answers at ``signals.sample_temperature``, drawn with
   exactly the answer node's prompt and separate from its temperature-0 answer. A judge
   (``signals.judge_prompt``, temperature 0) rules on every pair, and the score is agreeing pairs /
@@ -105,8 +112,9 @@ PLACEHOLDERS: dict[str, frozenset[str]] = {
     "judge_prompt": frozenset({"question", "a", "b"}),
 }
 
-#: A verbalized reply that counts: a bare integer, nothing around it. Range is checked separately.
-INTEGER_RE = re.compile(r"[0-9]{1,3}")
+#: The last line of a verbalized reply that counts: ``Confidence: <integer>``, and nothing else on
+#: it. Case and a trailing ``%`` or period are forgiven; range is checked separately.
+CONFIDENCE_RE = re.compile(r"confidence:\s*([0-9]{1,3})\s*%?\.?", re.IGNORECASE)
 
 #: A judge reply that counts, after lowercasing and dropping one trailing period.
 VERDICTS = {"yes": True, "no": False}
@@ -178,11 +186,16 @@ def sha256_text(text: str) -> str:
 
 
 def parse_verbalized(reply: str) -> int | None:
-    """One integer in [0, 100], or ``None``. Never a default: a null is counted, a 50 is a lie."""
-    text = reply.strip()
-    if not INTEGER_RE.fullmatch(text):
+    """The integer on the reply's ``Confidence:`` last line, in [0, 100], or ``None``.
+
+    Only the last non-empty line is read, so a number in the reasoning above it can never be
+    taken for the answer. Never a default: a null is counted, a 50 is a lie.
+    """
+    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    match = CONFIDENCE_RE.fullmatch(lines[-1]) if lines else None
+    if match is None:
         return None
-    value = int(text)
+    value = int(match.group(1))
     return value if 0 <= value <= 100 else None
 
 
@@ -322,7 +335,7 @@ def collect(
 
     score, source = retrieval_signal(docs)
     try:
-        cosine = None if score is None else dense_top1(row.question, cfg)
+        cosine = dense_top1(row.question, cfg)
 
         evidence = render_evidence(docs)
         verbalized_raw = chat.complete(
@@ -484,7 +497,7 @@ def collect_split(
         if outcome.line is not None:
             lines.append(outcome.line)
             line = outcome.line
-            note = f"verbalized {line['verbalized_raw']!r}, sc {line['self_consistency']}"
+            note = f"verbalized {line['verbalized']}, sc {line['self_consistency']}"
         else:
             skipped.append({"id": row.id, "bucket": row.bucket, "reason": outcome.skipped})
             note = f"skipped: {outcome.skipped}"

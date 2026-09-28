@@ -32,11 +32,11 @@ ROWS = [
     # A retrieval row: BM25 answers, and its fake scores sit under the 15.0 threshold, so the Day 2
     # gate would have refused it -- the bypass answers it anyway.
     ("v1-0001", "fact", "calib", "what is machine learning about?", ["2026-sp:CS-446"],
-     "compare_recommend", "85", ["yes", "yes", "no"]),
+     "compare_recommend", "Supported.\nConfidence: 85", ["yes", "yes", "no"]),
     # A tool row: an exact lookup, no retrieval score. An unparseable verbalized reply and an
     # unparseable judge verdict.
     ("v1-0002", "fact", "calib", "how many hours is cs 374?", ["2026-sp:CS-374"],
-     "course_fact", "I'd say about 90", ["Yes.", "maybe", "no"]),
+     "course_fact", "Confidence: 90\nI'd say.", ["Yes.", "maybe", "no"]),
     # Never reaches dispatch.
     ("v1-0003", "unanswerable", "calib", "what is the weather today?", [],
      "out_of_scope", "0", ["yes"] * 3),
@@ -74,7 +74,7 @@ class FakeChat:
             else:
                 n = sum(1 for call in self.calls if call[0] == "sample")
                 kind, reply = "sample", f"Sample {n}. [{doc_id}]"
-        elif "how confident" in prompt:
+        elif "Confidence: <integer>" in prompt:
             kind, reply = "verbalized", row[6]
         elif "Do A and B agree?" in prompt:
             n = self.judged.get(question, 0)
@@ -169,15 +169,17 @@ def test_a_retrieval_row_carries_its_top1_and_the_gate_it_bypassed(cfg, dataset,
     assert line["gate_ok"] is False  # 10.0 < 15.0: Day 2 would have handed this over
     assert line["exit"] == "answer"
     assert line["answer"] == "The answer. [2026-sp:CS-446]"
-    assert line["verbalized"] == 85 and line["verbalized_raw"] == "85"
+    assert line["verbalized"] == 85 and line["verbalized_raw"] == "Supported.\nConfidence: 85"
     assert line["pair_agree"] == [True, True, False]
     assert line["self_consistency"] == pytest.approx(2 / 3)
 
 
-def test_a_tool_row_has_null_retrieval_scores_never_one(cfg, dataset, tmp_path):
+def test_a_tool_row_has_a_null_retrieval_score_never_one(cfg, dataset, tmp_path):
     lines, meta, printed, _ = collect(cfg, dataset, tmp_path)
     line = lines[1]
-    assert line["retrieval_score"] is None and line["dense_top1"] is None
+    assert line["retrieval_score"] is None
+    # The question's own dense top-1 is still recorded: it does not depend on what dispatch did.
+    assert line["dense_top1"] == 0.61
     assert line["retrieval_source"] == "get_course"
     assert line["gate_ok"] is True
     assert meta["tool_rows"] == {"fact": 1}
@@ -187,7 +189,7 @@ def test_a_tool_row_has_null_retrieval_scores_never_one(cfg, dataset, tmp_path):
 def test_an_unparseable_verbalized_reply_is_null_and_kept_and_counted(cfg, dataset, tmp_path):
     lines, meta, printed, _ = collect(cfg, dataset, tmp_path)
     assert lines[1]["verbalized"] is None
-    assert lines[1]["verbalized_raw"] == "I'd say about 90"
+    assert lines[1]["verbalized_raw"] == "Confidence: 90\nI'd say."  # not the last line
     assert meta["verbalized_unparsed"] == 1
     assert "verbalized unparsed (null): 1" in printed
 
@@ -275,10 +277,12 @@ def test_split_is_required(capsys):
 
 @pytest.mark.parametrize(
     ("reply", "value"),
-    [("85", 85), (" 0\n", 0), ("100", 100), ("101", None), ("-5", None), ("85%", None),
-     ("85.0", None), ("about 85", None), ("", None), ("eighty", None)],
+    [("Confidence: 85", 85), ("It checks out.\nConfidence: 0\n", 0), ("confidence: 100%", 100),
+     ("Confidence: 70.", 70), ("Confidence: 101", None), ("Confidence: -5", None),
+     ("Confidence: 85.5", None), ("85", None), ("Confidence: 85\nbut maybe less", None),
+     ("Says 90 in the evidence.\nConfidence: 40", 40), ("", None), ("Confidence: eighty", None)],
 )  # fmt: skip
-def test_verbalized_is_one_bare_integer_in_range_or_null(reply, value):
+def test_verbalized_is_the_integer_on_the_last_confidence_line_or_null(reply, value):
     assert sg.parse_verbalized(reply) == value
 
 
