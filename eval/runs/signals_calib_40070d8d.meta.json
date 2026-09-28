@@ -1,0 +1,186 @@
+{
+  "answered": {
+    "ambiguous": 5,
+    "fact": 25,
+    "multihop": 12,
+    "unanswerable": 4
+  },
+  "bm25_key": "877a6610",
+  "citation_discarded": {},
+  "config_hash": "c73b197d",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "dense_key": "094143d8",
+  "gate": "bypassed: every row with evidence was answered; gate_ok is what the Day 2 top_score gate would have said",
+  "gate_would_refuse": {
+    "ambiguous": 4,
+    "unanswerable": 2
+  },
+  "ids": [
+    "v1-0003",
+    "v1-0005",
+    "v1-0006",
+    "v1-0007",
+    "v1-0008",
+    "v1-0014",
+    "v1-0019",
+    "v1-0027",
+    "v1-0030",
+    "v1-0031",
+    "v1-0033",
+    "v1-0036",
+    "v1-0037",
+    "v1-0048",
+    "v1-0051",
+    "v1-0053",
+    "v1-0058",
+    "v1-0060",
+    "v1-0061",
+    "v1-0062",
+    "v1-0063",
+    "v1-0065",
+    "v1-0066",
+    "v1-0067",
+    "v1-0068",
+    "v1-1004",
+    "v1-1005",
+    "v1-1007",
+    "v1-1009",
+    "v1-1012",
+    "v1-1013",
+    "v1-1014",
+    "v1-1015",
+    "v1-1021",
+    "v1-1022",
+    "v1-1024",
+    "v1-1025",
+    "v1-2003",
+    "v1-2004",
+    "v1-2005",
+    "v1-2025",
+    "v1-3020",
+    "v1-3024",
+    "v1-3029",
+    "v1-3030",
+    "v1-3039"
+  ],
+  "judge_unparsed": 0,
+  "model": "gpt-4o-mini",
+  "n_lines": 46,
+  "n_rows": 64,
+  "prompts_sha256": {
+    "answer_v1": "6de696d3d0873e19b40a0655edc57705330b696ea331038b3f8e62792fa4a65c",
+    "judge": "8fc5f97ebc578928ecc0d89d1c14b25859ac1b662aebf989a014e5f7e63c7a6f",
+    "router_v2": "3314cfc1f5e97a274115ed026fc1b42b34787d96ff1fc0387cb334fe680ac204",
+    "verbalized": "9cc3a1c5951b3f57976228f759f67d5bd48cf75e109985b038778884f74759fc"
+  },
+  "retrieval_mode": "bm25",
+  "run": "eval/runs/signals_calib_40070d8d.jsonl",
+  "sample_temperature": 0.7,
+  "samples": 3,
+  "sha256": "f39d5ebccc6f55d4fb71e8c47b6456c02c0ced28b3218214a2ac86409d464bac",
+  "signals_key": "40070d8d",
+  "skipped": {
+    "no_evidence": 15,
+    "out_of_scope": 3
+  },
+  "skipped_rows": [
+    {
+      "bucket": "fact",
+      "id": "v1-0011",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "fact",
+      "id": "v1-0050",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "fact",
+      "id": "v1-0052",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "fact",
+      "id": "v1-0057",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2001",
+      "reason": "no_evidence: course_not_found"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2002",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2009",
+      "reason": "no_evidence: course_not_found"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2011",
+      "reason": "no_evidence: no_program"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2012",
+      "reason": "no_evidence: course_not_found"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2013",
+      "reason": "no_evidence: course_not_found"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2014",
+      "reason": "out_of_scope"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2021",
+      "reason": "out_of_scope"
+    },
+    {
+      "bucket": "unanswerable",
+      "id": "v1-2023",
+      "reason": "out_of_scope"
+    },
+    {
+      "bucket": "ambiguous",
+      "id": "v1-3001",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "ambiguous",
+      "id": "v1-3003",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "ambiguous",
+      "id": "v1-3014",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "ambiguous",
+      "id": "v1-3019",
+      "reason": "no_evidence: no_course_code"
+    },
+    {
+      "bucket": "ambiguous",
+      "id": "v1-3025",
+      "reason": "no_evidence: no_course_code"
+    }
+  ],
+  "split": "calib",
+  "tool_rows": {
+    "fact": 23,
+    "multihop": 12,
+    "unanswerable": 1
+  },
+  "verbalized_unparsed": 0
+}

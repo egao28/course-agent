@@ -56,7 +56,9 @@ class Chat(Protocol):
 
     model: str
 
-    def complete(self, prompt: str, *, system: str | None = None) -> str: ...
+    def complete(
+        self, prompt: str, *, system: str | None = None, temperature: float | None = None
+    ) -> str: ...
 
 
 # --- config ---------------------------------------------------------------------------------------
@@ -120,6 +122,10 @@ class OpenAIChat:
     ``max_retries`` is above the SDK default for the reason ``OpenAIEmbedder`` raises it too: a
     smoke run is ten queries and two calls each, and a rate-limited request that gives up costs
     the report a row rather than a retry.
+
+    ``timeout`` is per request, and far below the SDK's 600 s default: #87's signal run makes ~600
+    calls a half, and one request that hung without an error stalled a live run for over ten
+    minutes on 2026-09-28. A timed-out request is retried like any other.
     """
 
     def __init__(
@@ -130,14 +136,25 @@ class OpenAIChat:
         max_tokens: int = 800,
         client: Any | None = None,
         max_retries: int = 5,
+        timeout: float = 60.0,
     ) -> None:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._client = openai_client(max_retries=max_retries) if client is None else client
+        self._client = (
+            openai_client(max_retries=max_retries, timeout=timeout) if client is None else client
+        )
 
-    def complete(self, prompt: str, *, system: str | None = None) -> str:
+    def complete(
+        self, prompt: str, *, system: str | None = None, temperature: float | None = None
+    ) -> str:
         """The model's reply to ``prompt``, stripped; ``system`` leads the message list if given.
+
+        ``temperature`` overrides ``llm.temperature`` for this one call and no other. The router
+        and the answer node never pass it -- both are deterministic tasks -- and Day 5's
+        self-consistency samples (#87) do, at ``signals.sample_temperature``: a per-call value
+        rather than a second client, so the samples go through the same model, the same
+        ``max_tokens`` and the same three refusals below as the answer they are compared with.
 
         The reply comes back stripped because one caller compares it against five exact labels and
         the other renders it as markdown, so neither has a use for leading whitespace.
@@ -155,7 +172,7 @@ class OpenAIChat:
         response = self._client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=self.temperature,
+            temperature=self.temperature if temperature is None else temperature,
             max_tokens=self.max_tokens,
         )
         choices = getattr(response, "choices", None) or []
@@ -235,8 +252,13 @@ class StandInChat:
     #: configured model name: a stand-in run must never be mistaken for a run of ``gpt-4o-mini``.
     model = "stand-in"
 
-    def complete(self, prompt: str, *, system: str | None = None) -> str:
-        """The first evidence block's opening line, with that block's id cited after it."""
+    def complete(
+        self, prompt: str, *, system: str | None = None, temperature: float | None = None
+    ) -> str:
+        """The first evidence block's opening line, with that block's id cited after it.
+
+        ``temperature`` is accepted and ignored: a canned reply has nothing to sample.
+        """
         match = STANDIN_BLOCK_RE.search(prompt)
         if match is None:
             raise ValueError(

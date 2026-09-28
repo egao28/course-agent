@@ -2223,7 +2223,49 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`8a1980f9`) covers every value, and it names only the bootstrap result.
+(`fcd1062e` since #87 added `signals`, which is also left out) covers every value, and it names
+only the bootstrap result.
+
+## Confidence signals
+
+`eval/scripts/signals.py` (#87) runs every row of one half through the Day 2 agent and records
+three confidence signals per answered row to `eval/runs/signals_{split}_{signals_key}.jsonl`, with
+a sidecar listing every row it did not answer and why. Correctness labels are #88's.
+
+```
+uv run --env-file .env python -m eval.scripts.signals --split calib   # --split is required
+```
+
+- **`retrieval_score`** is the top-1 of the mode the agent ran (bm25), not an RRF score, and
+  `dense_top1` is recorded beside it. A tool row (an exact lookup) has `null` in both, never 1.0.
+- **`verbalized`** is a follow-up call (`signals.verbalized_prompt`), parsed as one bare integer in
+  [0, 100]. Anything else is `null`, with the reply kept in `verbalized_raw`.
+- **`self_consistency`** uses 3 samples at T = 0.7 with the answer node's own prompt, and a judge
+  (`signals.judge_prompt`) rules on each of the 3 pairs. The score is one of 0, 1/3, 2/3 or 1.
+- **The gate is bypassed** so that every row with evidence gets an answer. `gate_ok` is what the
+  Day 2 gate would have said. Rows with no evidence, and `out_of_scope` rows, are skipped and
+  counted.
+- **`signals` does not move the config hash.** Like `eval.bootstrap` it is in
+  `config.AFTER_THE_RUNS`, so `cfg.hash` stays `c73b197d` and the Day 4 run files keep their names.
+  The run is named after `config.signals_key`: `cfg.hash` plus the whole section, prompts included.
+- **The committed file is the sample.** The samples are random and the dense side jitters, so a
+  rerun is a different draw.
+
+Calib half, 64 rows, gpt-4o-mini, signals key `40070d8d`:
+
+| | count |
+|---|---|
+| answered | 46 (25 fact, 12 multihop, 4 unanswerable, 5 ambiguous) |
+| skipped: no evidence | 15 (10 `no_course_code`, 4 `course_not_found`, 1 `no_program`) |
+| skipped: `out_of_scope` | 3 (all unanswerable) |
+| tool rows (`retrieval_score` null) | 36 of 46 |
+| `verbalized` = 100 | 45 of 46 (the other is 80) |
+| `self_consistency` = 1 | 42 of 46 (3 at 1/3, 1 at 2/3; all 4 are ambiguous rows) |
+| unparsed replies | 0 verbalized, 0 judge |
+
+Read that before building on it. Verbalized confidence sits at the ceiling. Only 10 rows carry a
+retrieval score. The 18 skipped rows include 4 `fact` rows that dispatch could not find a course
+code in.
 
 ## Day 1 goal
 
