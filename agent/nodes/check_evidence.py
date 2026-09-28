@@ -3,9 +3,12 @@
     dispatch ──► check_evidence ──► answer
                        └──────────► refuse_handoff
 
-Day 5 replaces this node with conformal prediction. Day 2's version is a threshold -- and the
-reason it is a module with a config section rather than one comparison inlined in the graph is
-that the naive version of it does not work.
+Two methods, named by ``evidence.method``. ``top_score`` is Day 2's threshold, and most of this
+docstring is about why the naive version of it does not work. ``conformal`` (#92) is the gate #90
+fitted on the calib half: under it this node keeps the hard failures below, compares the
+``retrieval_score`` signal itself when that is the one chosen, and otherwise passes every row with
+evidence on to the answer and to :mod:`agent.nodes.confidence_gate`, which reads a signal off the
+written answer. See **Under conformal** below.
 
 **One fixed number cannot work, because the scales are unrelated.** ``Evidence.score`` is whatever
 the retriever that produced it uses, and :mod:`retrieval.types` already says what that means:
@@ -95,6 +98,22 @@ one: a retrieval row stamps the mode on every hit it converts, and a tool row pr
 with no score. A ``docs`` list carrying two retrievers' raw scores is a new dispatch row whose gate
 has not been designed yet, and the design belongs in that issue, not in a ``max()`` here.
 
+**Under conformal.** The pinned fit is loaded and checked when the node is built
+(:func:`agent.nodes.confidence_gate.conformal_gate`). A named ``tool_error`` and an empty ``docs``
+still fail. Then:
+
+* signal ``retrieval_score``: the best score against the fitted ``t``, as ``top_score`` does it but
+  with one threshold, fitted for the mode the signals run used. A tool row passes uncompared: #87
+  recorded ``retrieval_score = null`` there and #90 fitted on the non-null rows only, so the
+  threshold says nothing about lookups, and an exact lookup is still the strongest evidence this
+  agent gets. ``t = +inf`` refuses every scored row.
+* signal ``verbalized`` or ``self_consistency``: pass. The comparison needs a written answer and
+  happens after ``answer``. The best score is still recorded when there is one, with no threshold,
+  so the retrieval column stays filled for Day 5.
+
+Both methods write ``signals['evidence_method']``, and ``conformal`` also writes the gate it
+applied to ``signals['conformal']``.
+
 **The source is already in the record, so it is not written twice.**
 ``signals["retrieval_mode"]`` is #36's, and for a scored block it *is* ``Evidence.source`` -- the
 dispatcher stamps the mode on every hit -- so a third column here would agree with it on every row
@@ -108,6 +127,7 @@ from typing import Any, NamedTuple
 
 import retrieval
 from agent.nodes import Node
+from agent.nodes.confidence_gate import Conformal, conformal_gate
 from agent.state import AgentState, Evidence
 from config import Config
 
@@ -117,6 +137,10 @@ from config import Config
 #: distinguishable only by their date.
 METHODS: dict[str, str] = {
     "top_score": "the best-scoring block, against the threshold for the source that produced it",
+    "conformal": (
+        "the signal and threshold #90 fitted on the calib half (evidence.conformal), compared "
+        "here for retrieval_score and after the answer for verbalized and self_consistency"
+    ),
 }
 
 #: Which sources a threshold may be declared for: :data:`retrieval.MODES`, and nothing else. Those
@@ -178,12 +202,7 @@ def evidence_section(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def check_method(cfg: Mapping[str, Any]) -> str:
-    """The gate's method, refused unless this module implements it.
-
-    Day 5's ``conformal`` is named in the message on purpose: the config is where that swap
-    happens, and a reader who set it early should be told it is not here yet rather than get a
-    threshold run reported under the name of a calibrated one.
-    """
+    """The gate's method, refused unless this module implements it."""
     section = evidence_section(cfg)
     if "method" not in section:
         raise ValueError(
@@ -195,8 +214,7 @@ def check_method(cfg: Mapping[str, Any]) -> str:
         known = "; ".join(f"{name} -- {gloss}" for name, gloss in METHODS.items())
         raise ValueError(
             f"config sets evidence.method to {method!r}, which this repo does not implement. "
-            f"Methods: {known}. Day 5 replaces the threshold with conformal prediction and will "
-            "add 'conformal' here; until it does, setting it names a gate that does not exist"
+            f"Methods: {known}"
         )
     return method
 
@@ -300,7 +318,7 @@ def check_gateable(source: str) -> str:
         raise ValueError(
             f"evidence from {source!r} cannot be gated by top_score: {UNGATEABLE[source]}. "
             f"Gate a mode whose score means something per document (agent.retrieval_mode: "
-            f"{gateable()}), or wait for the calibrated method Day 5 adds as evidence.method"
+            f"{gateable()}), or gate it with evidence.method: conformal (#92)"
         )
     return source
 
@@ -323,8 +341,8 @@ def check_retrieval_mode(cfg: Mapping[str, Any]) -> None:
             f"config sets agent.retrieval_mode to {mode!r} and evidence.method to 'top_score', "
             f"which cannot gate it: {UNGATEABLE[mode]}. Every run would pass the gate, which in a "
             f"report is indistinguishable from evidence that was checked and found good. Set "
-            f"agent.retrieval_mode to one of {gateable()}, or gate it with the calibrated method "
-            "Day 5 adds as evidence.method"
+            f"agent.retrieval_mode to one of {gateable()}, or gate it with evidence.method: "
+            "conformal (#92)"
         )
 
 
@@ -381,8 +399,25 @@ def judge(docs: Sequence[Evidence], tool_error: Any, table: Mapping[str, float])
     return Verdict(score >= threshold, score, threshold)
 
 
+def judge_conformal(docs: Sequence[Evidence], tool_error: Any, gate: Conformal) -> Verdict:
+    """The pre-answer half of the calibrated gate. See "Under conformal" in the module docstring.
+
+    The same hard failures as :func:`judge`, in the same order. After them only a
+    ``retrieval_score`` gate compares anything; a post-answer signal passes, with the best score
+    kept and no threshold beside it.
+    """
+    if tool_error or not docs:
+        return Verdict(False, None, None)
+    if any(block.score is None for block in docs):
+        return Verdict(True, None, None)
+    _, score = one_source(docs)
+    if gate.signal != "retrieval_score":
+        return Verdict(True, score, None)
+    return Verdict(score >= gate.threshold, score, gate.threshold)
+
+
 def check_evidence_node(cfg: Config) -> Node:
-    """Build the gate: the config's thresholds, and a verdict plus its two numbers on every query.
+    """Build the gate: the config's method, and a verdict plus its two numbers on every query.
 
     Nothing is injectable. The thresholds are the whole behaviour of this node and they are read
     from the config on purpose: they are hashed, the hash names the report, and a threshold handed
@@ -390,18 +425,28 @@ def check_evidence_node(cfg: Config) -> Node:
     ablation builds a variant :class:`~config.Config` -- the idiom :mod:`config` documents -- and
     gets a new hash and a new report name for free.
     """
-    check_method(cfg)
-    check_retrieval_mode(cfg)
+    method = check_method(cfg)
+    # Validated under either method: `top_score` stays selectable, so a config that switches to
+    # conformal must still carry a Day 2 gate that would build.
     table = thresholds(cfg)
+    gate = conformal_gate(cfg) if method == "conformal" else None
+    if gate is None:
+        check_retrieval_mode(cfg)
 
     def node(state: AgentState) -> dict[str, Any]:
         signals: Mapping[str, Any] = state.get("signals") or {}
-        verdict = judge(state.get("docs") or [], signals.get("tool_error"), table)
+        docs = state.get("docs") or []
+        if gate is None:
+            verdict = judge(docs, signals.get("tool_error"), table)
+        else:
+            verdict = judge_conformal(docs, signals.get("tool_error"), gate)
         return {
             "evidence_ok": verdict.ok,
             "signals": {
                 "retrieval_top_score": verdict.score,
                 "evidence_threshold": verdict.threshold,
+                "evidence_method": method,
+                "conformal": None if gate is None else gate.record(),
             },
         }
 

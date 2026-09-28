@@ -51,6 +51,9 @@ drop.
 run jitters (see ``eval/scripts/ablation.py``). The committed run file is the sample: nothing
 downstream re-queries, and a rerun is a different draw, not a check of this one.
 
+The verbalized and self-consistency calls live in :mod:`agent.confidence`, which #92's post-answer
+gate calls too, so the live gate and this run read the same signal the same way.
+
 Each answered row costs 2 + samples + pairs chat calls (router, answer, verbalized, 3 samples, 3
 judgments = 9 with the shipped settings) and one embedding call.
 """
@@ -59,17 +62,28 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import itertools
-import re
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from string import Formatter
 from typing import Any, NamedTuple, TextIO
 
 import openai
 
+from agent.confidence import (  # noqa: F401  (re-exported: #88 and the tests read them here)
+    CONFIDENCE_RE,
+    PLACEHOLDERS,
+    VERDICTS,
+    Settings,
+    agreement,
+    fields_of,
+    pairs,
+    parse_verbalized,
+    parse_verdict,
+    self_consistency,
+    settings,
+    verbalized,
+)
 from agent.graph import run as run_agent
 from agent.nodes import Node
 from agent.nodes.answer import answer_node
@@ -80,7 +94,6 @@ from agent.prompts import (
     ANSWER_SYSTEM_PROMPT,
     ROUTER_PROMPT_VERSION,
     ROUTER_SYSTEM_PROMPT,
-    render_evidence,
 )
 from agent.state import AgentState, Evidence
 from config import (
@@ -105,116 +118,14 @@ from retrieval import retrieve
 #: Where run files go. Committed: they are what Day 5's figures and thresholds are computed from.
 RUNS_DIR = REPO_ROOT / "eval" / "runs"
 
-#: The placeholders each prompt must carry, exactly -- a prompt missing ``{answer}`` would ask for
-#: confidence in nothing, and one with a stray ``{field}`` would raise one row into the run.
-PLACEHOLDERS: dict[str, frozenset[str]] = {
-    "verbalized_prompt": frozenset({"question", "evidence", "answer"}),
-    "judge_prompt": frozenset({"question", "a", "b"}),
-}
-
-#: The last line of a verbalized reply that counts: ``Confidence: <integer>``, and nothing else on
-#: it. Case and a trailing ``%`` or period are forgiven; range is checked separately.
-CONFIDENCE_RE = re.compile(r"confidence:\s*([0-9]{1,3})\s*%?\.?", re.IGNORECASE)
-
-#: A judge reply that counts, after lowercasing and dropping one trailing period.
-VERDICTS = {"yes": True, "no": False}
-
 
 def run_path(split: Split, cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
     """``eval/runs/signals_{split}_{signals_key}.jsonl`` -- one file per half, per setting."""
     return Path(runs_dir) / f"signals_{split}_{signals_key(cfg)}.jsonl"
 
 
-# --- config ---------------------------------------------------------------------------------------
-
-
-class Settings(NamedTuple):
-    """The ``signals`` section, validated."""
-
-    samples: int
-    sample_temperature: float
-    verbalized_prompt: str
-    judge_prompt: str
-
-
-def fields_of(template: str) -> set[str]:
-    return {name for _, name, _, _ in Formatter().parse(template) if name is not None}
-
-
-def settings(cfg: Mapping[str, Any]) -> Settings:
-    """The ``signals`` section, refused by name if a value would make a run that cannot happen."""
-    section = cfg.get("signals")
-    if not section:
-        raise ValueError("config has no `signals` section; see config.yaml for the one #87 added")
-    missing = [key for key in Settings._fields if key not in section]
-    if missing:
-        raise ValueError(f"config signals section is missing {', '.join(missing)}")
-    samples = section["samples"]
-    if isinstance(samples, bool) or not isinstance(samples, int) or samples < 2:
-        # One sample has no pair to judge, so its score would be 0/0.
-        raise ValueError(f"signals.samples must be an integer >= 2, got {samples!r}")
-    temperature = section["sample_temperature"]
-    if (
-        isinstance(temperature, bool)
-        or not isinstance(temperature, (int, float))
-        or not 0 < temperature <= 2
-    ):
-        # 0 would draw the temperature-0 answer n more times, and agreement would measure nothing.
-        raise ValueError(
-            f"signals.sample_temperature must be a number in (0, 2], got {temperature!r}"
-        )
-    for key, wanted in PLACEHOLDERS.items():
-        template = section[key]
-        if not isinstance(template, str) or not template.strip():
-            raise ValueError(f"signals.{key} must be a non-empty string")
-        found = fields_of(template)
-        if found != wanted:
-            raise ValueError(
-                f"signals.{key} must use exactly the placeholders "
-                f"{', '.join(sorted(wanted))}; it uses {', '.join(sorted(found)) or 'none'}"
-            )
-    return Settings(
-        samples, float(temperature), section["verbalized_prompt"], section["judge_prompt"]
-    )
-
-
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-# --- parsing the two replies ----------------------------------------------------------------------
-
-
-def parse_verbalized(reply: str) -> int | None:
-    """The integer on the reply's ``Confidence:`` last line, in [0, 100], or ``None``.
-
-    Only the last non-empty line is read, so a number in the reasoning above it can never be
-    taken for the answer. Never a default: a null is counted, a 50 is a lie.
-    """
-    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
-    match = CONFIDENCE_RE.fullmatch(lines[-1]) if lines else None
-    if match is None:
-        return None
-    value = int(match.group(1))
-    return value if 0 <= value <= 100 else None
-
-
-def parse_verdict(reply: str) -> bool | None:
-    """``True`` for yes, ``False`` for no, ``None`` for anything else."""
-    text = reply.strip().lower()
-    return VERDICTS.get(text.removesuffix("."))
-
-
-def pairs(n: int) -> list[tuple[int, int]]:
-    """Every unordered pair of ``n`` samples, in a fixed order: (0, 1), (0, 2), (1, 2) for 3."""
-    return list(itertools.combinations(range(n), 2))
-
-
-def agreement(verdicts: Sequence[bool | None]) -> float | None:
-    """Agreeing pairs / pairs, or ``None`` if any verdict is unreadable -- not a smaller ratio."""
-    if any(verdict is None for verdict in verdicts):
-        return None
-    return sum(1 for verdict in verdicts if verdict) / len(verdicts)
 
 
 # --- the agent, with the gate bypassed and the answer draft kept ---------------------------------
@@ -336,26 +247,10 @@ def collect(
     score, source = retrieval_signal(docs)
     try:
         cosine = dense_top1(row.question, cfg)
-
-        evidence = render_evidence(docs)
-        verbalized_raw = chat.complete(
-            config.verbalized_prompt.format(
-                question=row.question, evidence=evidence, answer=draft.reply
-            )
-        )
-        samples = [
-            chat.complete(draft.prompt, system=draft.system, temperature=config.sample_temperature)
-            for _ in range(config.samples)
-        ]
-        judged = [
-            chat.complete(
-                config.judge_prompt.format(question=row.question, a=samples[i], b=samples[j])
-            )
-            for i, j in pairs(config.samples)
-        ]
+        rated = verbalized(chat, config, row.question, docs, draft.reply)
+        sampled = self_consistency(chat, config, row.question, draft.prompt, draft.system)
     except (RuntimeError, openai.APIError) as error:
         return Outcome(None, f"error: {error}")
-    verdicts = [parse_verdict(reply) for reply in judged]
     return Outcome(
         {
             "id": row.id,
@@ -370,12 +265,12 @@ def collect(
             "retrieval_score": score,
             "retrieval_source": source,
             "dense_top1": cosine,
-            "verbalized": parse_verbalized(verbalized_raw),
-            "verbalized_raw": verbalized_raw,
-            "samples": samples,
-            "pair_agree": verdicts,
-            "judge_raw": judged,
-            "self_consistency": agreement(verdicts),
+            "verbalized": rated.value,
+            "verbalized_raw": rated.raw,
+            "samples": sampled.samples,
+            "pair_agree": sampled.pair_agree,
+            "judge_raw": sampled.judge_raw,
+            "self_consistency": sampled.value,
         }
     )
 

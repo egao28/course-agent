@@ -249,8 +249,13 @@ def test_every_nodes_signals_survive_to_the_end_of_the_run(cfg):
         "tool_error": None,
         "retrieval_top_score": 29.0337,
         "evidence_threshold": 10.0,
+        # Not written: the fake gate is Day 2's shape, and no confidence gate is in this graph.
+        "evidence_method": None,
+        "conformal": None,
         "citations_verified": ["2026-sp:CS-374"],
         "citations_unknown": None,
+        "confidence": None,
+        "confidence_raw": None,
     }
 
 
@@ -371,7 +376,7 @@ def test_every_node_the_graph_builds_is_the_real_one(cfg):
     # stub's `stub_answer` name used to give away -- and what a future stand-in would again.
     built = ag.build_nodes(cfg)
     assert {name: node.__name__ for name, node in built.items()} == {
-        name: name for name in ag.NODE_BUILDERS
+        name: name for name in ag.NODE_BUILDERS if name != "confidence_gate"
     }
 
 
@@ -385,15 +390,19 @@ def test_the_run_with_no_overrides_at_all_is_a_whole_run(cfg, monkeypatch):
 # --- building the nodes ---------------------------------------------------------------------------
 
 
-def test_the_registry_holds_all_six_nodes():
+def test_the_registry_holds_the_six_nodes_and_the_conditional_confidence_gate(cfg):
     assert set(ag.NODE_BUILDERS) == {
         "route_intent",
         "dispatch",
         "check_evidence",
         "answer",
+        "confidence_gate",
         "out_of_scope",
         "refuse_handoff",
     }
+    assert set(ag.CONDITIONAL) == {"confidence_gate"}
+    # A top_score config builds six, and has no seventh to override.
+    assert "confidence_gate" not in ag.node_names(cfg)
 
 
 def test_an_override_replaces_one_node_and_leaves_the_other_five(cfg):

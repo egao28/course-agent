@@ -471,6 +471,7 @@ def test_the_bootstrap_settings_move_only_the_full_hash():
     without = {
         **{k: v for k, v in data.items() if k not in {"signals", "correctness", "conformal"}},
         "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"},
+        "evidence": {k: v for k, v in data["evidence"].items() if k != "conformal"},
     }
     assert Config(without).hash == Config(without).full_hash == live.hash
     reseeded = {**data, "eval": {**data["eval"], "bootstrap": {"n_resamples": 10, "seed": 1}}}
