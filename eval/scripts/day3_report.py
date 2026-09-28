@@ -830,52 +830,10 @@ def render_verification(facts: Facts) -> str:
                 "so a re-run rewrites this file byte for byte."
             ),
         ]
-    parts += ["", render_pace(facts)]
     assisted = render_assistance(facts)
     if assisted:
         parts += ["", assisted]
     return "\n".join(parts)
-
-
-def render_pace(facts: Facts) -> str:
-    """How fast the verdicts were given, which is the one thing a count cannot show.
-
-    Not a judgement, and not a check that can fail -- a number and the arithmetic to read it
-    with. What a reader wants to know about a verification pass is whether the rows were read,
-    the log can only record what was decided, and the closest observable is the gap between one
-    verdict and the next. A median well under a second over a hundred rows is a keystroke rate
-    whatever else is true, and a reader who is told the counts and not this has been told the
-    half that flatters the pass.
-
-    Derived from the timestamps rather than printing any, so the report stays stable under a
-    re-run: the log is fixed, so these numbers are.
-    """
-    first = recheck.pace(facts.entries)
-    if first is None:
-        return ""
-    lines = [
-        (
-            f"**Pace.** Median {first:.1f}s between one verdict and the next over "
-            f"{plural(len(facts.verdicts), 'row')}."
-        )
-    ]
-    again = (
-        None
-        if facts.reread_sample is None
-        else recheck.pace(facts.entries, facts.reread_sample.ids)
-    )
-    if again is not None:
-        lines.append(
-            f"On the {facts.reread.reread if facts.reread else 0} rows judged a second time the "
-            f"median was {again:.1f}s."
-        )
-    lines.append(
-        "Each row's screen carries the question, the answer, three checks and every cited "
-        "catalog record in full. Read these two numbers against that, and against the "
-        "agreement rate below, before reading any count above as a measure of how hard the "
-        "rows were checked."
-    )
-    return " ".join(lines)
 
 
 def render_assistance(facts: Facts) -> str:

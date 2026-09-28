@@ -720,21 +720,8 @@ def test_the_re_read_number_reaches_the_limitations(rechecked: report.Facts):
     assert "covered by that interval and by" in section
 
 
-def test_the_pace_is_reported_beside_the_counts(rechecked: report.Facts):
-    """The one thing a count cannot show: how fast the verdicts were given.
-
-    A number, not a check that can fail -- but a reader told the counts and not this has been
-    told the half that flatters the pass.
-    """
-    body = report.render_report(rechecked)
-    assert "**Pace.** Median " in body
-    assert "s between one verdict and the next" in body
-    assert "rows judged a second time the median was" in body
-    assert "before reading any count above as a measure of how hard the rows were checked" in body
-
-
 def test_the_report_still_has_no_timestamp_in_it(rechecked: report.Facts):
-    """The pace is derived from the clock; it is not the clock."""
+    """#59's log is the one artifact carrying timestamps, and none of them reach this file."""
     body = report.render_report(rechecked)
     assert not re.search(r"\d{4}-\d\d-\d\dT\d\d:\d\d", body)
     assert report.render_report(rechecked) == body
