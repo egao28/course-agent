@@ -117,3 +117,18 @@ eval:
     n_resamples: 10000
     seed: 76
     ci: 0.95
+# The stretch row (#79): hybrid's top `pool` reranked by a cross-encoder, and the top 5 kept. It is
+# a step after retrieve(), not a fourth mode -- `hybrid` means what it meant before -- and it reads
+# its pool through retrieve(q, "hybrid", k=pool). `pool` is the ceiling: the reranker can only
+# reorder what hybrid@pool already holds, so its Recall@5 is at most hybrid's Recall@pool. Like
+# eval.bootstrap, it cannot change a line of anything made before it, so config.hash leaves it out
+# (config.AFTER_THE_RUNS) and stays c73b197d; its run is named after config.rerank_key instead.
+rerank:
+  model: BAAI/bge-reranker-base
+  # The Hugging Face commit the weights were downloaded at. A model id alone names whatever the
+  # hub serves today, and a re-uploaded checkpoint would change the row without changing a byte
+  # here.
+  revision: 2cfc18c9415c912f9d8155881c133215df768a70
+  pool: 20                    # = fusion.top_k_each: how deep hybrid already looks on each side
+  batch_size: 20              # one forward pass per question
+  device: cpu

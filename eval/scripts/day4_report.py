@@ -22,6 +22,12 @@ so a diff under ``report/`` is a run file or the bootstrap having moved.
 **Intervals only where n carries them.** The main table is the whole test half (n = 41). The
 bucket split is point estimates only: at n = 12 one multihop question moves a mean by up to 1/12,
 and an interval that wide printed beside a number reads as a finding it is not.
+
+**The stretch row (#79)** is ``hybrid_rerank``: the bootstrap result carries its interval and the
+``rerank - hybrid`` gap, and the rerank run's sidecar carries the ceiling (hybrid Recall@20) and
+the latency. With a ``rerank`` section in ``config.yaml`` both are required inputs, checked like
+the rest -- the bootstrap must name the rerank run on disk by digest, and the rerank run must have
+been paired with the test run on disk.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from config import Config, file_sha256, load_config, rel_to_repo, report_path
 from eval.schema import BUCKETS
 from eval.scripts import bootstrap as bs
 from eval.scripts import hybrid_failures as hf
+from eval.scripts import rerank as rr
 from eval.scripts.ablation import RUNS_DIR, K, run_path
 from eval.scripts.agreement import md_table
 from eval.scripts.review import DATASET_PATH
@@ -97,6 +104,13 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
             "uv run --env-file .env python -m eval.scripts.hybrid_failures",
         )
     )
+    if "rerank" in cfg:
+        run = rr.run_path("test", cfg, src.runs_dir)
+        how = "uv run --env-file .env --extra local python -m eval.scripts.rerank --split test"
+        found[-2:-2] = [
+            Input("rerank run", run, how),
+            Input("rerank sidecar", run.with_suffix(META_SUFFIX), how),
+        ]
     return found
 
 
@@ -141,6 +155,8 @@ class Facts(NamedTuple):
     multi_gold: dict[str, int]
     #: #78's failure-log sidecar: hybrid's misses on the same test run, by bucket.
     failures: dict[str, Any]
+    #: #79's rerank run over the test half, when config.yaml has a ``rerank`` section.
+    rerank: rr.Rerank | None = None
 
 
 def read_facts(cfg: Config, src: Sources) -> Facts:
@@ -177,6 +193,18 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
         failures = hf.load_failures(cfg, test.path, src.runs_dir)
     except ValueError as exc:
         problems.append(str(exc))
+    rerank = None
+    if "rerank" in cfg:
+        try:
+            rerank = rr.load_rerank(cfg, test, src.runs_dir)
+        except ValueError as exc:
+            problems.append(str(exc))
+        else:
+            if result.get("rerank", {}).get("sha256") != file_sha256(rerank.path):
+                problems.append(
+                    f"{rel_to_repo(path)} was not computed from the rerank run on disk: "
+                    "re-run `python -m eval.scripts.bootstrap`"
+                )
     if problems:
         raise ValueError("refusing to write the report:\n  " + "\n  ".join(problems))
 
@@ -198,7 +226,17 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
             mode: {m: sum(lines[i, mode][m] for i in ids) / len(ids) for m in bs.METRICS}
             for mode in MODES
         }
-    return Facts(cfg, src, result, test, by_bucket, bucket_n, dict(multi_gold), failures)
+        if rerank is not None:
+            at = {i: n for n, i in enumerate(test.ids)}
+            by_bucket[bucket][rr.MODE] = {
+                m: float(sum(rerank.scores[m][at[i]] for i in ids) / len(ids)) for m in bs.METRICS
+            }
+    return Facts(cfg, src, result, test, by_bucket, bucket_n, dict(multi_gold), failures, rerank)
+
+
+def rows_of(facts: Facts) -> list[str]:
+    """The table's rows: the three modes, then the stretch row when there is one."""
+    return [*MODES, rr.MODE] if facts.rerank is not None else list(MODES)
 
 
 # --- saying it ------------------------------------------------------------------------------------
@@ -237,7 +275,13 @@ def render_header(facts: Facts) -> str:
             "",
             (
                 f"Recall@{K} and MRR@{K} for `dense`, `bm25` and `hybrid` through "
-                f"`retrieve(q, mode, k={K})`, on the frozen `test` half."
+                f"`retrieve(q, mode, k={K})`, on the frozen `test` half"
+                + (
+                    f", and for `{rr.MODE}`: hybrid's top {facts.rerank.meta['pool']} reranked "
+                    f"by a cross-encoder, cut to {K}."
+                    if facts.rerank is not None
+                    else "."
+                )
             ),
             "",
             f"- **n** = {n} test rows ({split}) — the rows that carry gold doc ids",
@@ -249,6 +293,17 @@ def render_header(facts: Facts) -> str:
             (
                 f"- **runs** `{runs['test']['run']}` (reported), `{runs['calib']['run']}` "
                 "(chooses the strongest single mode only)"
+            ),
+            *(
+                [
+                    (
+                        f"- **rerank** `{facts.rerank.meta['run']}` — `{r['rerank']['model']}` at "
+                        f"revision `{r['rerank']['revision'][:12]}`, rerank key "
+                        f"`{r['rerank']['rerank_key']}`"
+                    )
+                ]
+                if facts.rerank is not None
+                else []
             ),
             (
                 f"- **bootstrap** `{rel_to_repo(bs.result_path(facts.cfg, facts.src.runs_dir))}` — "
@@ -262,7 +317,10 @@ def render_header(facts: Facts) -> str:
 def render_table(facts: Facts) -> str:
     r = facts.result
     metrics = r["metrics"]
-    rows = [[f"`{mode}`", *(cell(metrics[m]["test"][mode]) for m in bs.METRICS)] for mode in MODES]
+    rows = [
+        [f"`{mode}`", *(cell(metrics[m]["test"][mode]) for m in bs.METRICS)]
+        for mode in rows_of(facts)
+    ]
     subs = subtrahends(r)
     same = len(set(subs)) == 1
     label = f"*hybrid − {subs[0]}*" if same else "*hybrid − strongest single*"
@@ -272,6 +330,17 @@ def render_table(facts: Facts) -> str:
         text = f"{cell(gap, signed=True)}, {verdict(gap)}"
         gaps.append(f"*{text}*" if same else f"*vs {gap['subtrahend']}: {text}*")
     rows.append([label, *gaps])
+    if facts.rerank is not None:
+        rows.append(
+            [
+                f"*{rr.MODE} − {rr.BASE}*",
+                *(
+                    f"*{cell(metrics[m]['rerank_difference'], signed=True)}, "
+                    f"{verdict(metrics[m]['rerank_difference'])}*"
+                    for m in bs.METRICS
+                ),
+            ]
+        )
     table = md_table(["mode", *(LABELS[m] for m in bs.METRICS)], rows)
 
     reading = []
@@ -292,7 +361,7 @@ def render_table(facts: Facts) -> str:
     degenerate = [
         f"`{mode}` {LABELS[m]}"
         for m in bs.METRICS
-        for mode in MODES
+        for mode in rows_of(facts)
         if metrics[m]["test"][mode]["degenerate"]
     ]
     if degenerate:
@@ -345,7 +414,7 @@ def render_buckets(facts: Facts) -> str:
     rows = [
         [f"`{mode}`"]
         + [num(facts.by_bucket[b][mode][m]) for b in facts.by_bucket for m in bs.METRICS]
-        for mode in MODES
+        for mode in rows_of(facts)
     ]
     smallest = min(facts.bucket_n, key=facts.bucket_n.get)
     k = facts.bucket_n[smallest]
@@ -360,6 +429,63 @@ def render_buckets(facts: Facts) -> str:
                 f"mean by up to 1/{k} = {num(1 / k)}, so an interval on this split is too wide to "
                 "be read as a finding. The split describes where the rows in the main table come "
                 "from. It is not a second test."
+            ),
+        ]
+    )
+
+
+def render_rerank(facts: Facts) -> str:
+    """The stretch row's own section: the ceiling, the gap, what it cost, and the pool's drift."""
+    meta, r = facts.rerank.meta, facts.result
+    depth, n = meta["pool"], r["n"]["test"]
+    ceiling = meta[f"pool_recall_at_{depth}"]
+    rerank_ms, pool_ms = meta["latency_ms"]["rerank"], meta["latency_ms"]["pool"]
+    drifted = meta["pool_top5_differs"]
+    reading = []
+    for m in bs.METRICS:
+        gap = r["metrics"][m]["rerank_difference"]
+        if gap["significant"]:
+            higher = rr.MODE if gap["point"] > 0 else rr.BASE
+            tail = f"the interval excludes 0: on this metric `{higher}` is higher."
+        else:
+            tail = f"the interval contains 0: these {n} questions do not separate them."
+        reading.append(
+            f"- **{LABELS[m]}**: {rr.MODE} − {rr.BASE} = {num(gap['point'], signed=True)} "
+            f"[{num(gap['lo'])}, {num(gap['hi'])}]; {tail}"
+        )
+    versions = ", ".join(f"{p} {v}" for p, v in meta["versions"].items() if v)
+    return "\n".join(
+        [
+            "## Reranking hybrid's top 20 (stretch, #79)",
+            "",
+            (
+                f'`{rr.MODE}` is `retrieve(q, "hybrid", k={depth})`, rescored by '
+                f"`{meta['rerank']['model']}` on (question, chunk text) pairs, and cut to {K}. "
+                f"It is a step after `retrieve()`, not a fourth mode, so `hybrid` means what it "
+                "meant above. Its interval uses the same resample indices as the three modes."
+            ),
+            "",
+            *reading,
+            (
+                f"- **Ceiling**: hybrid Recall@{depth} = {num(ceiling)} over the same {n} rows. "
+                f"The reranker only reorders the pool, so its Recall@{K} cannot exceed that."
+            ),
+            (
+                f"- **Cost**: the cross-encoder takes a median of {rerank_ms['median']:.0f} ms per "
+                f"question (p90 {rerank_ms['p90']:.0f}, max {rerank_ms['max']:.0f}) on "
+                f"{meta['rerank']['device']}, on top of the hybrid@{depth} retrieval's own median "
+                f"of {pool_ms['median']:.0f} ms. Model loading is excluded ({versions})."
+            ),
+            (
+                f"- **Pairing**: the pool is a second live draw, and its top {K} matches the "
+                f"committed hybrid top {K} on {n - len(drifted)} of {n} rows"
+                + (f" (not on {', '.join(drifted)})" if drifted else "")
+                + "."
+            ),
+            "",
+            (
+                f"A reranker that does not separate from hybrid at n = {n} is a finding about this "
+                "corpus and this sample size, not a failed experiment."
             ),
         ]
     )
@@ -420,17 +546,18 @@ REPRODUCTION = """\
 ```bash
 uv run --env-file .env python -m eval.scripts.ablation --split calib
 uv run --env-file .env python -m eval.scripts.ablation --split test
+uv run --env-file .env --extra local python -m eval.scripts.rerank --split test
 uv run python -m eval.scripts.bootstrap
 uv run --env-file .env python -m eval.scripts.hybrid_failures
 uv run python -m eval.scripts.day4_report
 ```
 
-This file is a function of the two committed run files, the bootstrap result computed from them,
-the failure log's sidecar, the dataset, and `config.yaml`. It has no timestamp, so re-running the
-last command over unchanged inputs rewrites it byte for byte. Re-running the first two does not
-reproduce the run files: the embeddings API returns slightly different query vectors from call to
-call, and two live calib runs differed in 1 of 41 dense lines. The committed run files are the
-sample this table describes.
+This file is a function of the two committed run files, the rerank run, the bootstrap result
+computed from them, the failure log's sidecar, the dataset, and `config.yaml`. It has no timestamp,
+so re-running the last command over unchanged inputs rewrites it byte for byte. Re-running the
+first three does not reproduce the run files: the embeddings API returns slightly different query
+vectors from call to call (two live calib runs differed in 1 of 41 dense lines), and the rerank run
+records its own timings. The committed run files are the sample this table describes.
 """
 
 
@@ -440,6 +567,7 @@ def render_report(facts: Facts) -> str:
         render_table(facts),
         render_strongest(facts),
         render_buckets(facts),
+        *([render_rerank(facts)] if facts.rerank is not None else []),
         render_failures(facts),
         render_definitions(facts),
         REPRODUCTION.rstrip(),
@@ -455,6 +583,11 @@ def summary(facts: Facts, path: Path) -> str:
         out.append(
             f"{LABELS[m]:<9} hybrid − {gap['subtrahend']} {cell(gap, signed=True)}  {verdict(gap)}"
         )
+        if "rerank_difference" in metrics[m]:
+            gap = metrics[m]["rerank_difference"]
+            out.append(
+                f"{LABELS[m]:<9} {rr.MODE} − {rr.BASE} {cell(gap, signed=True)}  {verdict(gap)}"
+            )
     out.append(f"wrote {rel_to_repo(path)}")
     return "\n".join(out)
 

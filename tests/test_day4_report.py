@@ -19,6 +19,7 @@ from eval.scripts import ablation as ab
 from eval.scripts import bootstrap as bs
 from eval.scripts import day4_report as report
 from eval.scripts import hybrid_failures as hf
+from eval.scripts import rerank as rr
 from eval.scripts.draft_items import write_json
 from retrieval import MODES
 
@@ -94,9 +95,45 @@ def day4(cfg, tmp_path):
     sha = file_sha256(dataset)
     write_run(cfg, tmp_path, "calib", CALIB, sha)
     write_run(cfg, tmp_path, "test", TEST, sha)
+    write_rerank(cfg, tmp_path)
     bs.bootstrap(cfg, StringIO(), tmp_path)
     write_failures(cfg, tmp_path)
     return report.Sources(dataset, tmp_path)
+
+
+#: (recall, mrr) per TEST row for #79's row: it lifts the first two rows' MRR to 1, loses row 3.
+RERANK = [(1.0, 1.0), (1.0, 1.0), (0.0, 0.0), (0.5, 1.0), (0.0, 0.0)]
+
+
+def write_rerank(cfg, runs_dir, rows=RERANK):
+    """#79's rerank run in its format, paired with the test run already in ``runs_dir``."""
+    test_run = bs.load_run("test", cfg, runs_dir)
+    lines = [
+        {"id": i, "bucket": b, "mode": rr.MODE, "recall_at_5": r, "mrr_at_5": m}
+        for i, (b, _, _), (r, m) in zip(test_run.ids, TEST, rows, strict=True)
+    ]
+    path = ab.write_lines(rr.run_path("test", cfg, runs_dir), lines)
+    spread = {"median": 700.0, "p90": 990.0, "mean": 720.0, "max": 1250.0}
+    write_json(
+        path.with_suffix(".meta.json"),
+        {
+            "run": "eval/runs/" + path.name,
+            "sha256": file_sha256(path),
+            "config_hash": cfg.hash,
+            "rerank_key": rr.rerank_key(cfg),
+            "rerank": dict(cfg["rerank"]),
+            "versions": {"sentence-transformers": "6.0.1", "torch": None},
+            "paired_with": {"sha256": file_sha256(test_run.path)},
+            "ids": test_run.ids,
+            "k": 5,
+            "pool": 20,
+            "n": len(TEST),
+            "pool_recall_at_20": 0.9,
+            "pool_top5_differs": ["v1-test-02"],
+            "latency_ms": {"pool": {**spread, "median": 175.0}, "rerank": spread},
+        },
+    )
+    return path
 
 
 def write_failures(cfg, runs_dir):
@@ -181,6 +218,7 @@ def test_the_failure_count_is_stated_by_bucket_with_a_pointer_to_the_log(cfg, da
 def test_a_failure_log_from_another_test_run_is_refused(cfg, day4):
     rows = [TEST[0], *TEST[1:-1], TEST[0]]  # another draw of the test half
     write_run(cfg, day4.runs_dir, "test", rows, file_sha256(day4.dataset))
+    write_rerank(cfg, day4.runs_dir)
     bs.bootstrap(cfg, StringIO(), day4.runs_dir)
     with pytest.raises(ValueError, match="not read from the test run on disk"):
         report.read_facts(cfg, day4)
@@ -239,6 +277,57 @@ def test_minus_signs_are_real_and_negative_zero_is_not_printed():
     assert report.num(0.0004, signed=True) == "+0.000"
     assert report.num(-0.0004, signed=True) == "+0.000"
     assert report.num(0.07317) == "0.073"
+
+
+# --- the stretch row (#79) ------------------------------------------------------------------------
+
+
+def test_the_rerank_row_and_its_gap_are_the_bootstrap_result(cfg, day4):
+    body = report.render_report(report.read_facts(cfg, day4))
+    table = body.split("## Result")[1].split("## Strongest")[0]
+    rows = {line.split("|")[1].strip(): line for line in table.splitlines() if line.startswith("|")}
+    result = json.loads(bs.result_path(cfg, day4.runs_dir).read_text())
+    for key, label in (
+        ("test", "`hybrid_rerank`"),
+        ("rerank_difference", "*hybrid_rerank − hybrid*"),
+    ):
+        expected = []
+        for metric in bs.METRICS:
+            block = result["metrics"][metric][key]
+            iv = block["hybrid_rerank"] if key == "test" else block
+            expected += [round(iv["point"], 3), round(iv["lo"], 3), round(iv["hi"], 3)]
+        assert numbers(rows[label]) == pytest.approx(expected, abs=1e-9)
+    assert list(rows)[-1] == "*hybrid_rerank − hybrid*"
+
+
+def test_the_rerank_section_states_the_ceiling_the_cost_and_the_pairing(cfg, day4):
+    section = report.render_rerank(report.read_facts(cfg, day4))
+    assert "hybrid Recall@20 = 0.900" in section
+    assert "median of 700 ms per question (p90 990, max 1250) on cpu" in section
+    assert "own median of 175 ms" in section
+    assert "on 4 of 5 rows (not on v1-test-02)" in section
+    assert "sentence-transformers 6.0.1" in section and "torch" not in section
+    assert "not a failed experiment" in section
+
+
+def test_the_bucket_split_has_the_rerank_row(cfg, day4):
+    facts = report.read_facts(cfg, day4)
+    assert facts.by_bucket["multihop"]["hybrid_rerank"]["recall_at_5"] == pytest.approx(0.25)
+    assert "| `hybrid_rerank` |" in report.render_buckets(facts)
+
+
+def test_a_bootstrap_without_the_rerank_run_on_disk_is_refused(cfg, day4):
+    write_rerank(cfg, day4.runs_dir, [(1.0, 1.0)] * len(TEST))
+    with pytest.raises(ValueError, match="not computed from the rerank run on disk"):
+        report.read_facts(cfg, day4)
+
+
+def test_check_lists_the_rerank_run_and_the_command_that_makes_it(cfg, day4):
+    rr.run_path("test", cfg, day4.runs_dir).unlink()
+    out = StringIO()
+    assert report.render_check(cfg, day4, out) == 1
+    assert "MISSING  rerank run" in out.getvalue()
+    assert "--extra local python -m eval.scripts.rerank --split test" in out.getvalue()
 
 
 # --- the committed report -------------------------------------------------------------------------
