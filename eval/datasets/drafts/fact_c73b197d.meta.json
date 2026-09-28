@@ -450,6 +450,131 @@
       "model": "gpt-4.1-mini",
       "per_batch": 3,
       "prompt_version": "v1"
+    },
+    {
+      "batch": 19,
+      "doc_ids": [
+        "2026-sp:BIOC-406",
+        "2026-sp:CSE-401",
+        "2026-sp:EALC-390",
+        "2026-sp:ENSU-300",
+        "2026-sp:AE-482",
+        "2026-sp:ASTR-405",
+        "2026-sp:SCAN-104",
+        "2026-sp:ACCY-551",
+        "2026-sp:EDUC-299",
+        "2026-sp:AHS-199"
+      ],
+      "dropped": {},
+      "ignored": 0,
+      "kept": [
+        "v1-0055",
+        "v1-0056",
+        "v1-0057"
+      ],
+      "model": "gpt-4.1-mini",
+      "per_batch": 3,
+      "prompt_version": "v1"
+    },
+    {
+      "batch": 20,
+      "doc_ids": [
+        "2026-sp:DTX-180",
+        "2026-sp:HIST-308",
+        "2026-sp:BIOE-210",
+        "2026-sp:THEA-422",
+        "2026-sp:ENGL-265",
+        "2026-sp:CLE-683",
+        "2026-sp:AIS-288",
+        "2026-sp:RHET-105",
+        "2026-sp:ANSC-580",
+        "2026-sp:PSM-503"
+      ],
+      "dropped": {},
+      "ignored": 0,
+      "kept": [
+        "v1-0058",
+        "v1-0059",
+        "v1-0060"
+      ],
+      "model": "gpt-4.1-mini",
+      "per_batch": 3,
+      "prompt_version": "v1"
+    },
+    {
+      "batch": 21,
+      "doc_ids": [
+        "2026-sp:CLCV-111",
+        "2026-sp:MCB-418",
+        "2026-sp:CEE-465",
+        "2026-sp:PLPA-395",
+        "2026-sp:CB-592",
+        "2026-sp:ADV-392",
+        "2026-sp:ESE-210",
+        "2026-sp:TE-450",
+        "2026-sp:ECON-448",
+        "2026-sp:ART-221"
+      ],
+      "dropped": {},
+      "ignored": 0,
+      "kept": [
+        "v1-0061",
+        "v1-0062",
+        "v1-0063"
+      ],
+      "model": "gpt-4.1-mini",
+      "per_batch": 3,
+      "prompt_version": "v1"
+    },
+    {
+      "batch": 22,
+      "doc_ids": [
+        "2026-sp:BADM-370",
+        "2026-sp:NRES-105",
+        "2026-sp:VCM-508",
+        "2026-sp:HUM-492",
+        "2026-sp:BIOP-586",
+        "2026-sp:ACE-561",
+        "2026-sp:HORT-395",
+        "2026-sp:HT-504",
+        "2026-sp:SHS-593",
+        "2026-sp:BCOG-200"
+      ],
+      "dropped": {},
+      "ignored": 0,
+      "kept": [
+        "v1-0064",
+        "v1-0065",
+        "v1-0066"
+      ],
+      "model": "gpt-4.1-mini",
+      "per_batch": 3,
+      "prompt_version": "v1"
+    },
+    {
+      "batch": 23,
+      "doc_ids": [
+        "2026-sp:MSE-595",
+        "2026-sp:LCTL-301",
+        "2026-sp:MUSC-407",
+        "2026-sp:DANC-232",
+        "2026-sp:UP-210",
+        "2026-sp:EURO-502",
+        "2026-sp:LAW-796",
+        "2026-sp:REES-115",
+        "2026-sp:GWS-230",
+        "2026-sp:ME-310"
+      ],
+      "dropped": {},
+      "ignored": 0,
+      "kept": [
+        "v1-0067",
+        "v1-0068",
+        "v1-0069"
+      ],
+      "model": "gpt-4.1-mini",
+      "per_batch": 3,
+      "prompt_version": "v1"
     }
   ],
   "bucket": "fact",
@@ -459,6 +584,6 @@
     "chunks": 4502,
     "subjects": 187
   },
-  "rows": 54,
+  "rows": 69,
   "seed": 42
 }

@@ -1914,6 +1914,44 @@ than a measurement of it: what an unassisted reader would have decided is not re
 afterwards, and the off-diagonal cells are the only direct evidence in the report that the
 reading happened.
 
+## Sampled re-read
+
+`eval/scripts/recheck.py` exists because the review log cannot tell a row that was **read** from
+a row that was **confirmed** — an accept is an accept whether it took two seconds or two minutes,
+and that distinction is the whole difference between a human-verified set and a machine-verified
+one. So a stratified sample of already-judged rows is read again properly, and the second verdict
+is compared against the first.
+
+```bash
+uv run python -m eval.scripts.recheck            # draw the sample, print the re-read command
+uv run python -m eval.scripts.recheck --result   # what the re-read overturned
+```
+
+**It needs no new file.** #59's log is append-only and replays latest-timestamp-wins, so a row
+judged twice carries both verdicts and `overturns()` reads the pair straight off it. That is the
+property which makes this measurable at all, and the reason the review log carries a clock when
+nothing else in the repo does.
+
+**Stratified over bucket *and verdict*, with a floor of one row per cell.** The verdict matters
+more than the bucket: an accept that should have been a delete leaves a wrong row for Day 4 to
+score against, while a delete that should have been an accept throws a row away and **nothing
+downstream will ever say so**. Deletes are the smaller group and the less recoverable error, so
+every delete a *model* recommended is taken whole, and the rule 2 deletes are sampled like
+anything else since those came from a lookup rather than a judgement. The floor of one is what
+keeps a one-row cell — `(multihop, delete)` holds exactly one — from being rounded out of the
+sample by a proportional share.
+
+**What comes out is an interval, not a verdict on the pass.** Nothing overturned at n=30 bounds
+the pass's error rate at **11.4%**; that is worth stating and is not the same claim as *the pass
+was right*. #62 puts the rate and its Wilson interval in the Verification section, in the
+limitations, and in the **headline** — and where the pass was model-assisted the headline stops
+saying "reviewed by hand" and says "judged", with what the reviewer actually did in the sentence
+after it. A headline claiming "by hand" over a log of confirmations would be the one sentence in
+that report a reader could catch it out on.
+
+`review --redo` takes ids for this, so a thirty-row re-read does not walk the whole queue again;
+the earlier verdict is printed above each row, and a different one replaces it.
+
 ## Second annotator
 
 Fifteen rows, one other person, the same `eval/GUIDELINES.md` and no conversation

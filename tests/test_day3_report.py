@@ -47,7 +47,15 @@ import pytest
 
 from config import load_config, rel_to_repo
 from eval.schema import BUCKETS, RULES, EvalItem, item_id, row_json
-from eval.scripts import agreement, build_multihop, build_unanswerable, review, split, triage
+from eval.scripts import (
+    agreement,
+    build_multihop,
+    build_unanswerable,
+    recheck,
+    review,
+    split,
+    triage,
+)
 from eval.scripts import day3_report as report
 from eval.scripts.draft_items import ID_BLOCKS
 from eval.scripts.draft_items import PROVENANCE_KEYS as DRAFTED_KEYS
@@ -299,10 +307,11 @@ def src(tmp_path: Path, cfg, known: frozenset[str], doc_ids: list[str]) -> repor
         drafts=drafts,
         log=log,
         packet=pack,
-        # Named, and pointed at a file that does not exist: the default is the committed
-        # eval/datasets/triage.jsonl, and a fixture that fell through to it would report on a
-        # real model-assisted pass and fail the moment one happened.
+        # Named, and pointed at files that do not exist: the defaults are the committed
+        # eval/datasets/triage.jsonl and recheck.meta.json, and a fixture that fell through to
+        # either would report on a real pass and fail the moment one happened.
         triage=datasets / "triage.jsonl",
+        recheck=datasets / "recheck.meta.json",
     )
 
 
@@ -327,6 +336,7 @@ def test_check_lists_every_input_and_what_produces_it(cfg, tmp_path: Path):
         log=tmp_path / "review_log.jsonl",
         packet=agreement.packet(tmp_path),
         advisory=tmp_path / "triage.jsonl",
+        reread=tmp_path / "recheck.meta.json",
     )
     out = StringIO()
     assert report.render_check(cfg, empty, out) == 1
@@ -502,7 +512,8 @@ def test_an_assisted_pass_is_disclosed_and_measured(assisted: report.Facts):
     section = body.split("## Limitations", 1)[1]
     assert section.count("\n- **") == 7
     assert "anchors a" in section
-    assert "no suggestion reached the review log" in section
+    assert "No suggestion reached the review log" in section
+    assert "has been re-read independently" in section
 
 
 def test_the_agreement_rate_counts_the_rows_both_judged(assisted: report.Facts):
@@ -632,3 +643,76 @@ def test_no_day3_report_is_committed_because_the_pass_has_not_run(cfg):
     assert not report.report_path(report.STEM, cfg).exists()
     assert report.main(["--check"]) == 1
 
+
+
+# --- the sampled re-read --------------------------------------------------------------------------
+
+
+def test_a_pass_with_no_re_read_says_so_rather_than_nothing(assisted: report.Facts):
+    """The strongest reading is the one a reader assumes, so the absence has to be stated."""
+    body = report.render_report(assisted)
+    assert "**No part of the pass has been re-read.**" in body
+    assert "read from a row that was confirmed" in body
+    assert "no part of it has been re-read independently" in body  # the headline's own clause
+
+
+@pytest.fixture
+def rechecked(assisted: report.Facts, cfg) -> report.Facts:
+    """The assisted pass with a drawn sample, all of it re-read, one verdict overturned."""
+    from eval.scripts.draft_items import write_json
+
+    src = assisted.src
+    judged = review.read_verdicts(src.log)
+    sample = recheck.draw(assisted.candidates, judged, seed=42, n=8)
+    write_json(src.recheck, recheck.sidecar(sample, cfg, judged))
+    moved = next(one for one in sample.ids if judged[one].verdict == "accept")
+    for one in sample.ids:
+        held = judged[one]
+        verdict = "delete" if one == moved else held.verdict
+        reason = "wrong on re-read" if one == moved else held.reason
+        review.append_verdict(
+            src.log, review.Verdict(one, verdict, reason, "2026-09-28T09:00:00.000000Z")
+        )
+    return report.read_facts(cfg, src)
+
+
+def test_the_re_read_is_reported_with_its_interval(rechecked: report.Facts):
+    """The number that separates a reading from a confirmation, and it goes in the headline."""
+    found = rechecked.reread
+    assert found is not None and found.reread == 8
+    body = report.render_report(rechecked)
+    assert "of the 8 judged rows were re-read properly" not in body  # it is 8 of 152, not of 8
+    assert "were re-read properly" in body or "was re-read properly" in body
+    assert "95% CI [" in body
+    assert "| bucket | verdict | judged | re-read |" in body
+    assert f"seed `{rechecked.reread_sample.seed}`" in body
+
+
+def test_an_overturned_verdict_is_named(rechecked: report.Facts):
+    """A row the second reading moved is the only direct evidence that it was a reading."""
+    found = rechecked.reread
+    assert found is not None and found.changed
+    body = report.render_report(rechecked)
+    assert "| id | first pass | on re-reading |" in body
+    for one in found.changed:
+        assert f"`{one.id}`" in body
+
+
+def test_the_headline_stops_claiming_by_hand_when_the_pass_was_assisted(assisted: report.Facts):
+    """#62 writes "reviewed by hand"; that is right for an unassisted pass and wrong here.
+
+    The unassisted half of this is asserted by
+    :func:`test_the_headline_sentence_is_the_one_the_issue_names`, over a fixture with no triage
+    file. It cannot be asserted here too: both fixtures build on the same ``src``, so asking for
+    an assisted and an unassisted reading in one test would read one log twice.
+    """
+    body = report.render_report(assisted)
+    assert "reviewed by hand" not in body
+    assert "judged, " in body
+    assert "That pass was model-assisted" in body
+
+
+def test_the_re_read_number_reaches_the_limitations(rechecked: report.Facts):
+    section = report.render_report(rechecked).split("## Limitations", 1)[1]
+    assert "were re-read properly" in section or "was re-read properly" in section
+    assert "covered by that interval and by" in section
