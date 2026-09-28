@@ -2317,6 +2317,20 @@ Judge runs on both halves of signals key `37164723` (gpt-4o-mini, correctness ke
 
 All 88 replies parsed.
 
+Labels (human pass, reviewer `eve`, every row of both halves; `signals_{split}_37164723.csv`):
+
+| bucket | calib: correct / rows | test: correct / rows |
+|---|---|---|
+| fact | 23 / 25 | 21 / 21 |
+| multihop | 0 / 12 | 2 / 12 |
+| unanswerable | 3 / 4 | 2 / 3 |
+| ambiguous | 0 / 5 | 0 / 6 |
+| all | 26 / 46 | 25 / 42 |
+
+The reviewer accepted the judge's call on all 88 rows (0 overturned), so judge × human is diagonal on
+both halves. 37 calib verdicts were carried over from the first pass. `ambiguous` has no correct row
+in either half, and `multihop` has none in calib.
+
 - **A verdict follows the answer text, not the run.** A log entry applies to a row when its `id` and
   answer hash both match. When #87 recollected calib under `37164723`, 37 of 46 answers came back
   word for word, despite temperature 0, and 9 did not. The 37 keep the verdicts given under
