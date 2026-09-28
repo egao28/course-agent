@@ -1,0 +1,59 @@
+{
+  "by_bucket": {
+    "ambiguous": {
+      "accepted_judge": 5,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 5,
+      "rows": 5
+    },
+    "fact": {
+      "accepted_judge": 25,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 25,
+      "rows": 25
+    },
+    "multihop": {
+      "accepted_judge": 12,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 12,
+      "rows": 12
+    },
+    "unanswerable": {
+      "accepted_judge": 4,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 4,
+      "rows": 4
+    }
+  },
+  "csv": "eval/runs/signals_calib_40070d8d.csv",
+  "judge_run": "eval/runs/judge_calib_c0dfa1b6.jsonl",
+  "judge_run_sha256": "715a0f264780f1fda8d2dd9aefa53b3573bb075c94255ae023d1cfaebe0cfb5e",
+  "judge_x_human": {
+    "correct": {
+      "correct": 26,
+      "incorrect": 0
+    },
+    "incorrect": {
+      "correct": 0,
+      "incorrect": 20
+    },
+    "unparsed": {
+      "correct": 0,
+      "incorrect": 0
+    }
+  },
+  "n_rows": 46,
+  "review_log": "eval/runs/correctness_log.jsonl",
+  "review_log_sha256": "87a05686704bd1893bdb6aaf2c7efa1b010a941d2fe30a7243686d399b170c7f",
+  "reviewers": {
+    "eve": 46
+  },
+  "sha256": "9e890c0d92e4908101a423b12bae283ece29b12b8a9231a8b77002be8ae120e5",
+  "signals_key": "40070d8d",
+  "signals_run": "eval/runs/signals_calib_40070d8d.jsonl",
+  "signals_run_sha256": "f39d5ebccc6f55d4fb71e8c47b6456c02c0ced28b3218214a2ac86409d464bac"
+}
