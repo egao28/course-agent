@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -2428,6 +2428,40 @@ test is 70, so every row clears it. On raw BM25, 0.7 also answers every non-null
 `self_consistency`, 0.7 answers the 35 unanimous rows at 0.314 error, three times the target.
 `dense_top1`, a diagnostic and not a signal, peaks at 0.740 on test, so a raw 0.7 there answers
 4 of 42. The Day 2 maximum was 0.678, so "almost nothing" holds, but "nothing" does not.
+
+## Day 5 report
+
+`eval/scripts/day5_report.py` ([#93](../../issues/93)) closes Day 5:
+`report/day5_signals_{conformal_key}.md` (committed: `day5_signals_83496e82.md`), with the
+risk-coverage figure `report/figures/risk_coverage_test_{signals_key}.png` beside it.
+
+```bash
+uv run python -m eval.scripts.day5_report --check     # every input, and what makes a missing one
+uv run python -m eval.scripts.day5_report             # write the report
+uv run python -m eval.scripts.day5_report --dry-run   # print it, write nothing
+```
+
+Six sections in the issue's order: **setup** (n per half and bucket, the gate bypass, nulls per
+signal, model, sampling and call count), **labels** (judge × human, overturned, carried over),
+**RQ2** (#89's figure and AUROC/AURC table), **RQ3** (#91's conformal vs fixed-0.7 tables and
+what 0.7 means on each scale), **wiring** (#92: the live method, and the dormant gate built and
+checked while writing), and **limitations**, each one computed from the runs.
+
+**It reads, it never runs.** No model call, no resample, no fit. It refuses to write unless every
+run file matches its sidecar's sha256, every downstream file names its upstream by sha256, every
+file is under this config's key chain and every run was collected on the committed dataset. It
+also refuses while any signals CSV has an unreviewed row, and it recomputes #91's reading, which
+is pure, and requires it to equal the committed JSON. There is no `--force`.
+
+**Named after the conformal key.** `signals`, `correctness` and `conformal` are all left out of
+`cfg.hash`, so `day5_signals_{cfg.hash}` would be overwritten by a changed prompt under the same
+name. The conformal key hashes the whole chain.
+
+**The RQ2 and RQ3 tables are the owning scripts' `summary()` output**, embedded verbatim. What
+the report adds is what those tables cannot say on their own. `retrieval_score`'s
+1.000 [1.000, 1.000] is perfect separation on 10 non-null rows, not certainty. Its "significant"
+paired differences rank different rows (10 vs 42), so they do not show it orders the same answers
+better.
 
 ## Day 1 goal
 
