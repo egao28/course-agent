@@ -628,20 +628,28 @@ def test_dry_run_writes_nothing(cfg, src: report.Sources, tmp_path: Path, monkey
     assert "## Limitations" in capsys.readouterr().out
 
 
-# --- the repository as it stands ------------------------------------------------------------------
+# --- the committed report -------------------------------------------------------------------------
 
 
-def test_no_day3_report_is_committed_because_the_pass_has_not_run(cfg):
-    """The status this branch ships in, asserted rather than described.
+def test_the_committed_report_regenerates_byte_identically(cfg):
+    """#62's acceptance line, over the real artifacts: the report is a function of them.
 
-    ``v1.jsonl`` is #59's ``--promote`` output; 70 of the 120 rows are undrafted and no row has
-    been verified. Until they are, this report cannot be populated from committed artifacts, and
-    a file under ``report/`` would be the claim that it was.
+    This replaces the check that used to assert the inputs were still missing -- they are not,
+    as of the pass on 2026-09-27. What matters now is the opposite property, and it is the one
+    the issue actually asks for: regenerate from the committed dataset, sidecar, drafts, log,
+    triage, re-read sample and returned sheet, and compare against the file under ``report/``.
+
+    It fails on two things worth failing on. Somebody edited the report by hand -- a report about
+    how a dataset was built is the one document that may not be touched up. Or an artifact moved
+    and the report was not regenerated in the same commit, which is the state in which every
+    number in it is quietly about a different dataset.
     """
     gaps = report.missing(report.sources())
-    assert gaps, "inputs have landed -- write the report and drop this test"
-    assert not report.report_path(report.STEM, cfg).exists()
-    assert report.main(["--check"]) == 1
+    assert not gaps, [rel_to_repo(one.path) for one in gaps]
+    path = report.report_path(report.STEM, cfg)
+    assert path.exists(), "run `python -m eval.scripts.day3_report`"
+    body = report.render_report(report.read_facts(cfg, report.sources()))
+    assert body == path.read_text(encoding="utf-8")
 
 
 
