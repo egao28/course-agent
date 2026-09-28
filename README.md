@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -1985,6 +1985,83 @@ not exist — two of the four buckets are undrafted and no row has been verified
 frozen here and no dataset or sidecar is committed. The checks over the committed file are written
 and skip until it lands; the table above is a run over a synthetic 120-row set with the target
 counts, which is also what `tests/test_split.py` drives.
+
+## Day 3 report
+
+`eval/scripts/day3_report.py` ([#62](../../issues/62)) is Day 3's acceptance in one file:
+`report/day3_evalset_{hash}.md`, six sections, every number in them read out of a committed
+artifact.
+
+```bash
+uv run python -m eval.scripts.day3_report --check     # what exists, and what makes the rest
+uv run python -m eval.scripts.day3_report             # write report/day3_evalset_{hash}.md
+uv run python -m eval.scripts.day3_report --dry-run   # print it, write nothing
+```
+
+**Composition** (the counts as they are, not as they were planned, plus the question-length and
+depth distributions, `fact`'s subject coverage and #57's four failure shapes), **provenance**
+(which model drafted which rows, under which prompt version, from which seed and how many
+batches), **verification** (#59's per-bucket accept / edit / delete counts and the reasons
+given), **agreement** (#60's numbers), **split** (#61's seed, digest and conformal ceiling), and
+**limitations**.
+
+**The headline sentence is the count, not the claim.** *"N rows drafted, M reviewed by hand, K
+edited, J deleted"* is rendered by one function and printed twice — at the top and over the
+verification table — so the sentence a reader quotes and the table under it cannot disagree.
+
+**The agreement section is #60's own rendering, one heading level down.** #62 asks for exactly
+what `report/day3_agreement_{hash}.md` already prints — the per-field table with its Wilson
+interval, the bucket confusion matrix, the itemised disagreements — and a second implementation
+of those tables is two reports that can disagree about a number a reader will compare across
+them. `demote()` moves the headings and nothing else; a test asserts the demoted string appears
+in the report byte for byte.
+
+**Limitations is a section, and it is computed.** The five things wrong with this dataset are
+known in advance but their sizes are not, so each is rendered from the run's own figures: what
+share of rows a second person actually read, the residual question/chunk overlap distribution
+after #56 rewrote its worst decile, and the widest 95% interval a per-bucket accuracy on the test
+half can have. A limitation written as fixed prose goes stale the moment the numbers move, which
+is worse than none because it reads as though somebody checked.
+
+**Three properties the acceptance names, and how each is held.** There is no clock anywhere in
+the body — #59's log carries the timestamps and this prints none of them — so a re-run over
+unchanged inputs rewrites the file byte for byte and a diff under `report/` means an artifact
+moved. Every path goes through `rel_to_repo()`, so no home directory reaches a tracked file. And
+no metric here is computed on the test half: the counting tables read the whole file through
+`eval.validate.parse_items`, `load_split` is not imported, and `tests/test_day3_report.py`
+asserts over the module source that it stays that way.
+
+**It refuses to write rather than print a section that says "not measured yet".** A file called
+`day3_evalset_{hash}.md` is the claim that Day 3 happened, and one with an empty verification
+section is that claim made about a dataset nobody read. `--check` is what runs today:
+
+```
+report report/day3_evalset_c73b197d.md  config c73b197d
+
+  ok       drafts                 eval/datasets/drafts
+  MISSING  review log             eval/datasets/review_log.jsonl
+                                  uv run python -m eval.scripts.review
+  MISSING  dataset                eval/datasets/v1.jsonl
+                                  uv run python -m eval.scripts.review --promote
+  MISSING  split sidecar          eval/datasets/v1.meta.json
+                                  uv run python -m eval.scripts.split
+  MISSING  agreement sample       eval/datasets/agreement_sample.jsonl
+                                  uv run python -m eval.scripts.agreement
+  ...
+
+2 draft files in eval/datasets/drafts, 50 of 120 rows drafted
+
+6 inputs missing, so the report is not written.
+```
+
+**Status: the tool, not the report.** No `report/day3_evalset_*.md` is committed, because the
+dataset it reports on does not exist — 70 of the 120 rows are undrafted, no row has been
+verified, there is no second annotator and nothing has been split. Writing the file anyway would
+mean inventing every number in it, which is the one thing a report about how an eval set was
+built cannot do. `tests/test_day3_report.py` builds the whole of Day 3 in `tmp_path` — four draft
+files, a review log with an accept, an edit and a delete in it, the promoted dataset, the freeze
+and a filled sheet — and checks the report against it; the last test asserts that the inputs are
+still missing here, and says to delete itself when they land.
 
 ## Day 1 goal
 
