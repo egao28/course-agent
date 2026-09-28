@@ -30,11 +30,17 @@ by ``cfg.hash`` and cannot be redone -- after a setting none of them saw. Its ru
 :func:`signals_key` instead: ``cfg.hash`` plus the whole ``signals`` section, so the prompts and
 the sampling settings still name the file they produced.
 
+``correctness`` (#88) is left out for the same reason, one step later: its judge prompts grade a
+signals run that already exists, and hashing them into :func:`signals_key` would rename that run
+file -- which cannot be redone, because its samples are a random draw. The judge's output is named
+after :func:`correctness_key` instead: the signals key plus the whole ``correctness`` section.
+
 Artifacts are named with a hash so results from different settings never mix::
 
     Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
     BM25 index          <repo>/indexes/bm25_{bm25_key}.pkl    bm25_path(cfg, chunk_key)
     signals run         eval/runs/signals_{split}_{signals_key}.jsonl    signals_key(cfg)
+    judge run           eval/runs/judge_{split}_{correctness_key}.jsonl  correctness_key(cfg)
     reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
 The two indexes are *not* named after the full hash; only the reports are. An index is a function
@@ -111,7 +117,11 @@ def canonical_dump(cfg: Mapping[str, Any]) -> str:
 #: ``(section, key)`` pairs read only after every other artifact exists, and so left out of
 #: :func:`config_hash` -- see "What the hash leaves out" above. :func:`full_hash` keeps them.
 #: A key of ``None`` is the whole section.
-AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (("eval", "bootstrap"), ("signals", None))
+AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (
+    ("eval", "bootstrap"),
+    ("signals", None),
+    ("correctness", None),
+)
 
 
 def _digest(cfg: Mapping[str, Any]) -> str:
@@ -321,6 +331,22 @@ def signals_key(cfg: Mapping[str, Any]) -> str:
     if not section:
         raise ValueError("config has no `signals` section; see config.yaml for the one #87 added")
     content = {"config_hash": config_hash(cfg), "signals": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def correctness_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a judge run: the signals run it grades, and its own prompts.
+
+    :func:`signals_key` goes in whole -- a verdict is about one run's answers -- and the
+    ``correctness`` section goes in whole, so a changed word in any bucket's prompt names a new
+    file. Neither section moves ``cfg.hash`` (:data:`AFTER_THE_RUNS`).
+    """
+    section = cfg.get("correctness")
+    if not section:
+        raise ValueError(
+            "config has no `correctness` section; see config.yaml for the one #88 added"
+        )
+    content = {"signals_key": signals_key(cfg), "correctness": _to_plain(section)}
     return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 

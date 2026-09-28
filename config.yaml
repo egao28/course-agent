@@ -3,7 +3,8 @@
 # Every artifact this repo produces (Chroma collection, BM25 pickle, report, retrieve() result)
 # is tagged with the config hash: sha256 of the canonical dump of this file, first 8 hex chars.
 # Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash, except
-# eval.bootstrap and signals, which only their own results are named after (config.AFTER_THE_RUNS);
+# eval.bootstrap, signals and correctness, which only their own results are named after
+# (config.AFTER_THE_RUNS);
 # reordering keys does not. Print the current hash with:  uv run python config.py
 
 seed: 42
@@ -172,3 +173,97 @@ signals:
     {b}
 
     Do A and B agree? Reply with exactly one word: yes or no.
+# Day 5's correctness labels (#88): the LLM judge's first call on every row of a signals run, made
+# by eval/scripts/judge.py before a person reviews every row (eval/scripts/review_signals.py). Its
+# own section rather than a key under `signals`, because config.signals_key hashes that section
+# whole, and a prompt added there would rename the signals run it is meant to grade. Named after
+# config.correctness_key: the signals key plus this whole section. Left out of config.hash.
+correctness:
+  # One prompt per bucket, because gold_answer means something different in each (eval/schema.py).
+  # {question}, {gold} and {answer} are filled in. The reply's first line must open with "correct"
+  # or "incorrect" (any case; the reason may follow a period or colon on the same line), and anything
+  # else is recorded as null. The rest is a one-line rationale for the reviewer.
+  judge_prompts:
+    fact: |-
+      A student asked a question about university courses. Below are the question, a reference
+      answer checked by a person against the catalog, and the answer a system gave.
+
+      Question: {question}
+
+      Reference answer:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if every fact it asserts agrees with the reference answer and it
+      answers the question. Wording, order, citations in brackets and extra detail that does not
+      contradict the reference do not matter. A wrong course, number, prerequisite or requirement
+      makes it incorrect, and so does declining to answer or answering a different question.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    multihop: |-
+      A student asked a question about university courses that needs more than one catalog record
+      to answer: a chain of prerequisites, or facts about several courses joined together. Below
+      are the question, a reference answer checked by a person against the catalog, and the answer
+      a system gave.
+
+      Question: {question}
+
+      Reference answer:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct only if it gets every hop right: each course and each
+      requirement the reference names that the question asks for, with no step missing and none
+      wrong. Wording, order, citations in brackets and extra detail that does not contradict the
+      reference do not matter. Stopping after the first hop, a wrong course or requirement at any
+      step, or declining to answer makes it incorrect.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    unanswerable: |-
+      A student asked a question about university courses that this course catalog cannot answer:
+      the course, program or fact it asks about is not in the catalog, or the catalog does not
+      record it. Below are the question, one acceptable reply written by a person, and the answer a
+      system gave.
+
+      Question: {question}
+
+      One acceptable reply:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if it declines, or says the catalog does not contain what was
+      asked. It does not need to match the wording above. It is incorrect if it gives an answer
+      anyway -- a number, a course, a requirement, a guess -- even with a hedge, or if it answers
+      about a different course as though that were the one asked about.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    ambiguous: |-
+      A student asked a question about university courses that does not say enough to be answered:
+      it could mean more than one course, and the right reply asks which one is meant. Below are
+      the question, the clarifying question a person wrote that should have been asked, and the
+      answer a system gave.
+
+      Question: {question}
+
+      Clarifying question that should have been asked:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if it asks the student to clarify which course or program they
+      mean. It does not need to list the same options. It is incorrect if it picks one reading and
+      answers it without asking, even if it mentions that other readings exist, or if it declines
+      without asking.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.

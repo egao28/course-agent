@@ -469,7 +469,7 @@ def test_the_bootstrap_settings_move_only_the_full_hash():
     assert live.full_hash != live.hash
     data = live.to_dict()
     without = {
-        **{k: v for k, v in data.items() if k != "signals"},
+        **{k: v for k, v in data.items() if k not in {"signals", "correctness"}},
         "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"},
     }
     assert Config(without).hash == Config(without).full_hash == live.hash

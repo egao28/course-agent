@@ -2223,8 +2223,8 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`b409d58d` since #87 added `signals`, which is also left out) covers every value, and it names
-only the bootstrap result.
+(`35bbd61b` since #87 added `signals` and #88 added `correctness`, both also left out) covers every
+value, and it names only the bootstrap result.
 
 ## Confidence signals
 
@@ -2272,6 +2272,50 @@ gpt-4o-mini, signals key `37164723`, one run per half:
 These are counts, not results: no row is labelled correct or wrong yet (#88). Many rows never
 reach an answer (18 on calib, 21 on test), mostly questions where dispatch found no course code.
 Verbalized confidence still sits at 100 on about 60% of rows.
+
+## Correctness labels
+
+`correct` on every row of a signals run comes from a person. An LLM judge makes the first call,
+and the reviewer accepts or overturns it (#88).
+
+```
+uv run --env-file .env python -m eval.scripts.judge --split calib           # the judge's first call
+uv run python -m eval.scripts.review_signals --split calib --reviewer NAME  # the human pass, resumable
+uv run python -m eval.scripts.review_signals --split calib --stats          # progress, judge vs human
+uv run python -m eval.scripts.review_signals --split calib --write-csv      # -> signals CSV
+```
+
+- **One judge prompt per bucket** (`correctness.judge_prompts`). A `fact` answer must agree with
+  `gold_answer`, and a `multihop` answer must get every hop. An `unanswerable` answer must decline
+  (its `gold_answer` is one acceptable refusal, not an empty string). An `ambiguous` answer must ask
+  which course is meant. The judge's verdict and one-line reason go to
+  `eval/runs/judge_{split}_{correctness_key}.jsonl`. They are not labels.
+- **The reviewer sees** the question, the gold answer, the system's answer, the judge's verdict
+  and reason, and a warning when the citation check discarded the draft. `a` accepts the judge's
+  call, `y`/`n` gives your own, and an overturn needs a one-line reason. Each verdict goes to the
+  append-only `eval/runs/correctness_log.jsonl` with the reviewer's name, a timestamp, the signals
+  key and the hash of the answer it judged, fsynced before the next row.
+- **`--write-csv` refuses** until every row of the signals run has a human verdict for its current
+  answer. The CSV is `eval/runs/signals_{split}_{signals_key}.csv` with columns `id, bucket, split,
+  retrieval_score, dense_top1, verbalized, self_consistency, judge_correct, correct, reviewer`.
+  Booleans are written as 1/0, and a missing value as an empty cell. The sidecar holds judge vs
+  human: accepted, overturned and no-verdict counts per bucket, and the confusion matrix.
+- **`correctness` does not move the config hash or the signals key.** It is in
+  `config.AFTER_THE_RUNS`, and the judge run is named after `config.correctness_key`: the signals
+  key plus the whole section. Under `signals`, it would have renamed the calib run it grades, and
+  that run is a random draw that cannot be redone.
+
+Calib judge run (gpt-4o-mini, correctness key `c0dfa1b6`), **the judge's calls, not labels**:
+
+| bucket | judge: correct | judge: incorrect |
+|---|---|---|
+| fact | 23 | 2 |
+| multihop | 0 | 12 |
+| unanswerable | 3 | 1 |
+| ambiguous | 0 | 5 |
+
+All 46 replies parsed. The human pass has not been done, so no CSV and no review log are
+committed. The test half has no signals run yet (#87), so it has nothing to judge.
 
 ## Day 1 goal
 
