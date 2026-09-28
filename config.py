@@ -23,10 +23,18 @@ cannot be redone to follow, since it is read once and the dense side does not re
 ``cfg.hash`` leaves it out, and ``cfg.full_hash`` (every value, no exceptions) names the one
 artifact it does decide: the bootstrap's own result.
 
+``signals`` (#87) is left out too. Day 5's signal collection is a run of its own over the frozen
+set, and its sampling settings and prompts reach no chunk, index, draft, split or Day 4 run file;
+hashing them would rename every one of those -- and orphan the Day 4 run files, which are looked up
+by ``cfg.hash`` and cannot be redone -- after a setting none of them saw. Its run is named after
+:func:`signals_key` instead: ``cfg.hash`` plus the whole ``signals`` section, so the prompts and
+the sampling settings still name the file they produced.
+
 Artifacts are named with a hash so results from different settings never mix::
 
     Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
     BM25 index          <repo>/indexes/bm25_{bm25_key}.pkl    bm25_path(cfg, chunk_key)
+    signals run         eval/runs/signals_{split}_{signals_key}.jsonl    signals_key(cfg)
     reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
 The two indexes are *not* named after the full hash; only the reports are. An index is a function
@@ -102,7 +110,8 @@ def canonical_dump(cfg: Mapping[str, Any]) -> str:
 
 #: ``(section, key)`` pairs read only after every other artifact exists, and so left out of
 #: :func:`config_hash` -- see "What the hash leaves out" above. :func:`full_hash` keeps them.
-AFTER_THE_RUNS = (("eval", "bootstrap"),)
+#: A key of ``None`` is the whole section.
+AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (("eval", "bootstrap"), ("signals", None))
 
 
 def _digest(cfg: Mapping[str, Any]) -> str:
@@ -113,6 +122,9 @@ def _without_after_the_runs(cfg: Mapping[str, Any]) -> dict[str, Any]:
     """A plain copy with :data:`AFTER_THE_RUNS` removed, and a section they emptied dropped."""
     plain = _to_plain(cfg)
     for section, key in AFTER_THE_RUNS:
+        if key is None:
+            plain.pop(section, None)
+            continue
         inner = plain.get(section)
         if isinstance(inner, dict) and key in inner:
             kept = {k: v for k, v in inner.items() if k != key}
@@ -293,6 +305,22 @@ def bm25_key(cfg: Mapping[str, Any], chunk_key: str) -> str:
             "(see config.yaml) -- all of them are hashed into the BM25 index name"
         )
     content = {"chunk_key": chunk_key, "bm25": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def signals_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a signals run: the agent's settings, and the ``signals`` section.
+
+    The run goes through the whole agent -- router, dispatch, answer -- which is a function of
+    everything :func:`config_hash` sees, so that hash goes in whole; the section goes in whole for
+    the reason :func:`bm25_key` gives. ``signals`` is left out of ``cfg.hash``
+    (:data:`AFTER_THE_RUNS`), so this is the only name that moves when a prompt, the sample count or
+    the sampling temperature does.
+    """
+    section = cfg.get("signals")
+    if not section:
+        raise ValueError("config has no `signals` section; see config.yaml for the one #87 added")
+    content = {"config_hash": config_hash(cfg), "signals": _to_plain(section)}
     return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 

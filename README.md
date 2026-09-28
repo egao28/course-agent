@@ -2223,7 +2223,55 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`8a1980f9`) covers every value, and it names only the bootstrap result.
+(`b409d58d` since #87 added `signals`, which is also left out) covers every value, and it names
+only the bootstrap result.
+
+## Confidence signals
+
+`eval/scripts/signals.py` (#87) runs every row of one half through the Day 2 agent and records
+three confidence signals per answered row to `eval/runs/signals_{split}_{signals_key}.jsonl`, with
+a sidecar listing every row it did not answer and why. Correctness labels are #88's.
+
+```
+uv run --env-file .env python -m eval.scripts.signals --split calib   # --split is required
+```
+
+- **`retrieval_score`** is the top-1 of the mode the agent ran (bm25), not an RRF score. A tool row
+  (an exact lookup) has `null`, never 1.0.
+- **`dense_top1`** is the question's own dense top-1 cosine, recorded on every answered row,
+  tool rows included. Most answered rows are tool rows, so without it #89 would have a
+  retrieval-based signal on about 10 rows per half.
+- **`verbalized`** is a follow-up call (`signals.verbalized_prompt`): a short check of the answer
+  against the evidence, then a last line `Confidence: <integer>`. Any other last line is `null`,
+  with the reply kept in `verbalized_raw`. The first prompt asked for a bare integer and got 100 on
+  45 of 46 calib rows, so it was replaced before the test half was read.
+- **`self_consistency`** uses 3 samples at T = 0.7 with the answer node's own prompt, and a judge
+  (`signals.judge_prompt`) rules on each of the 3 pairs. The score is one of 0, 1/3, 2/3 or 1.
+- **The gate is bypassed** so that every row with evidence gets an answer. `gate_ok` is what the
+  Day 2 gate would have said. Rows with no evidence, and `out_of_scope` rows, are skipped and
+  counted.
+- **`signals` does not move the config hash.** Like `eval.bootstrap` it is in
+  `config.AFTER_THE_RUNS`, so `cfg.hash` stays `c73b197d` and the Day 4 run files keep their names.
+  The run is named after `config.signals_key`: `cfg.hash` plus the whole section, prompts included.
+- **The committed file is the sample.** The samples are random and the dense side jitters, so a
+  rerun is a different draw.
+
+gpt-4o-mini, signals key `37164723`, one run per half:
+
+| | calib (64) | test (63) |
+|---|---|---|
+| answered | 46 (25 fact, 12 multihop, 4 unanswerable, 5 ambiguous) | 42 (21 fact, 12 multihop, 3 unanswerable, 6 ambiguous) |
+| skipped: no evidence | 15 (10 `no_course_code`, 4 `course_not_found`, 1 `no_program`) | 15 (12 `no_course_code`, 3 `course_not_found`) |
+| skipped: `out_of_scope` | 3 | 6 |
+| tool rows (`retrieval_score` null) | 36 | 32 |
+| `verbalized` = 100 | 28 of 46 | 26 of 42 |
+| `verbalized` range | 0–100 | 70–100 |
+| `self_consistency` < 1 | 3 (all ambiguous) | 7 (5 multihop, 2 ambiguous) |
+| unparsed replies | 0 | 0 |
+
+These are counts, not results: no row is labelled correct or wrong yet (#88). Many rows never
+reach an answer (18 on calib, 21 on test), mostly questions where dispatch found no course code.
+Verbalized confidence still sits at 100 on about 60% of rows.
 
 ## Day 1 goal
 

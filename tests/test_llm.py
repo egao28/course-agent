@@ -162,6 +162,16 @@ def test_openai_chat_sends_the_system_prompt_first_and_the_settings_from_the_con
     assert call["messages"][1]["content"] == "How many credits is CS 374?"
 
 
+def test_a_per_call_temperature_overrides_the_config_for_that_call_only():
+    # #87's self-consistency samples: one call at 0.7, and the next call back at the config's 0.
+    chat = llm.OpenAIChat("gpt-4o-mini", temperature=0.0, max_tokens=800, client=fake_client())
+    chat.complete("How many credits is CS 374?", temperature=0.7)
+    chat.complete("How many credits is CS 374?")
+    calls = chat._client.chat.completions.calls
+    assert [call["temperature"] for call in calls] == [0.7, 0.0]
+    assert chat.temperature == 0.0
+
+
 def test_openai_chat_sends_one_message_when_there_is_no_system_prompt():
     chat = llm.OpenAIChat("m", client=fake_client())
     chat.complete("hi")

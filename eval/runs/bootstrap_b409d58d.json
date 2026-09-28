@@ -8,7 +8,7 @@
   "config_hash": "c73b197d",
   "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
   "dense_key": "094143d8",
-  "full_hash": "8a1980f9",
+  "full_hash": "b409d58d",
   "k": 5,
   "metrics": {
     "mrr_at_5": {
