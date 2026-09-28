@@ -25,6 +25,7 @@ from config import (
     collection_name,
     config_hash,
     dense_key,
+    full_hash,
     load_config,
     rel_to_repo,
     report_path,
@@ -455,3 +456,28 @@ def test_cli_source_digest(raw, tmp_path, capsys):
     cfg_file.write_text(yaml.safe_dump(raw))
     config.main([str(cfg_file), "--source-digest"])
     assert capsys.readouterr().out.strip() == hashlib.sha256(b"x").hexdigest()
+
+
+def test_the_bootstrap_settings_move_only_the_full_hash():
+    # #76: eval.bootstrap is read after every run file exists, so it must not rename a single
+    # artifact made before it -- config.yaml's hash stays where #61 left it, and only the full
+    # hash, which names the bootstrap's own result, sees it.
+    live = load_config()
+    assert "bootstrap" in live["eval"]
+    assert live.hash == "c73b197d"
+    assert live.full_hash != live.hash
+    data = live.to_dict()
+    without = {**data, "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"}}
+    assert Config(without).hash == Config(without).full_hash == live.hash
+    reseeded = {**data, "eval": {**data["eval"], "bootstrap": {"n_resamples": 10, "seed": 1}}}
+    assert Config(reseeded).hash == live.hash
+    assert Config(reseeded).full_hash != live.full_hash
+    # Anything a run does see still moves both.
+    moved = {**data, "eval": {**data["eval"], "split_seed": 62}}
+    assert Config(moved).hash != live.hash and Config(moved).full_hash != live.full_hash
+    # A plain mapping hashes the same way as the Config built from it.
+    assert config_hash(data) == live.hash and full_hash(data) == live.full_hash
+    # An eval section holding nothing but bootstrap hashes as if it were absent.
+    only = {**without, "eval": {"bootstrap": data["eval"]["bootstrap"]}}
+    bare = {k: v for k, v in without.items() if k != "eval"}
+    assert config_hash(only) == config_hash(bare)

@@ -2193,6 +2193,38 @@ single mode is picked on `calib` and tested on `test`. The runner is determinist
 live dense side is not: embedding the same query twice can give slightly different vectors,
 and two calib runs differed in 1 of 41 dense lines.
 
+## Paired bootstrap
+
+`eval/scripts/bootstrap.py` ([#76](../../issues/76)) reads the two committed run files and puts a
+95% percentile interval on every mean, plus one on hybrid − the strongest single mode. It never
+calls `retrieve()`.
+
+```bash
+uv run python -m eval.scripts.bootstrap    # -> eval/runs/bootstrap_{full_hash}.json
+```
+
+- **Paired.** One draw of B = 10,000 index vectors over the test questions is shared by every
+  mode, and the difference is taken per resample from those same indices.
+  `paired_bootstrap(scores, B, seed)` is the pure function; the rest is I/O. It runs in well
+  under a second.
+- **Strongest single is chosen on `calib`, per metric, and tested on `test`.** Choosing it on the
+  test half would compare hybrid with the larger of two noisy means. On both metrics it is bm25.
+- **A degenerate interval is labelled as one.** A mode that scores 1 on every question has [1, 1],
+  which means no variance was seen, not that the mode is certain. With n = 41, Recall@5 on the 29
+  `fact` rows moves in steps of 1/29.
+
+Test half, n = 41 (29 fact + 12 multihop), seed 76:
+
+| metric | dense | bm25 | hybrid | hybrid − bm25 |
+|---|---|---|---|---|
+| Recall@5 | 0.705 [0.571, 0.833] | 0.870 [0.778, 0.951] | 0.866 [0.783, 0.935] | −0.004 [−0.085, 0.073], not significant |
+| MRR@5 | 0.637 [0.502, 0.764] | 0.923 [0.850, 0.984] | 0.802 [0.707, 0.891] | −0.120 [−0.225, −0.023], significant |
+
+**The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
+other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
+`c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
+(`8a1980f9`) covers every value, and it names only the bootstrap result.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
