@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table (→ report/day4_ablation_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -2224,6 +2224,27 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
 (`8a1980f9`) covers every value, and it names only the bootstrap result.
+
+## Day 4 report
+
+`eval/scripts/day4_report.py` ([#77](../../issues/77)) writes the RQ1 table,
+`report/day4_ablation_{hash}.md`, from the committed run files and the bootstrap result. It
+resamples nothing and re-queries nothing.
+
+```bash
+uv run python -m eval.scripts.day4_report --check     # what exists, and what makes the rest
+uv run python -m eval.scripts.day4_report             # write report/day4_ablation_{hash}.md
+uv run python -m eval.scripts.day4_report --dry-run   # print it, write nothing
+```
+
+- **Refuses mismatched inputs.** The bootstrap result has to name the run files on disk by
+  sha256, and the test run has to come from the `v1.jsonl` that is committed now. Otherwise
+  nothing is written.
+- **Intervals only on the full test half.** The per-bucket split (29 fact, 12 multihop) shows
+  point estimates only. At n = 12, one question moves a mean by up to 0.083.
+- **No clock in the body**, so a re-run over the same inputs gives the same bytes.
+  `tests/test_day4_report.py` regenerates the committed report and compares it byte for byte,
+  and parses every number in a fixture report back out to check it against the bootstrap JSON.
 
 ## Day 1 goal
 

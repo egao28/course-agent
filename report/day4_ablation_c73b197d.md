@@ -1,0 +1,61 @@
+# Day 4 — RQ1: retrieval ablation
+
+Recall@5 and MRR@5 for `dense`, `bm25` and `hybrid` through `retrieve(q, mode, k=5)`, on the frozen `test` half.
+
+- **n** = 41 test rows (fact 29, multihop 12) — the rows that carry gold doc ids
+- **dataset** `eval/datasets/v1.jsonl` sha256 `2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6`
+- **config** `c73b197d` (dense index `094143d8`, bm25 index `877a6610`)
+- **runs** `eval/runs/ablation_test_c73b197d.jsonl` (reported), `eval/runs/ablation_calib_c73b197d.jsonl` (chooses the strongest single mode only)
+- **bootstrap** `eval/runs/bootstrap_8a1980f9.json` — paired, B = 10,000, seed 76, 95% percentile intervals (full hash `8a1980f9`)
+
+## Result
+
+Test half, n = 41. Point estimate on all n rows, 95% paired-bootstrap interval in brackets.
+
+| mode | Recall@5 | MRR@5 |
+| --- | --- | --- |
+| `dense` | 0.705 [0.571, 0.833] | 0.637 [0.502, 0.764] |
+| `bm25` | 0.870 [0.778, 0.951] | 0.923 [0.850, 0.984] |
+| `hybrid` | 0.866 [0.783, 0.935] | 0.802 [0.707, 0.891] |
+| *hybrid − bm25* | *−0.004 [−0.085, 0.073], not significant (CI contains 0)* | *−0.120 [−0.225, −0.023], significant (CI excludes 0)* |
+
+- **Recall@5**: hybrid − bm25 = −0.004 [−0.085, 0.073]; the interval contains 0: these 41 questions do not separate them.
+- **MRR@5**: hybrid − bm25 = −0.120 [−0.225, −0.023]; the interval excludes 0: on this metric `bm25` is higher.
+
+## Strongest single mode
+
+Chosen per metric on `calib`, then tested on `test`. Choosing it on the test rows would compare hybrid with the larger of two noisy means, which biases the gap against hybrid.
+
+- **Recall@5**: `bm25` (calib n = 41: `bm25` 0.870, `dense` 0.750)
+- **MRR@5**: `bm25` (calib n = 41: `bm25` 0.939, `dense` 0.621)
+
+## By bucket (point estimates only)
+
+| mode | fact Recall@5 (n = 29) | fact MRR@5 (n = 29) | multihop Recall@5 (n = 12) | multihop MRR@5 (n = 12) |
+| --- | --- | --- | --- | --- |
+| `dense` | 0.793 | 0.682 | 0.493 | 0.528 |
+| `bm25` | 0.966 | 0.908 | 0.639 | 0.958 |
+| `hybrid` | 0.966 | 0.829 | 0.625 | 0.739 |
+
+No intervals here, on purpose. At n = 12 one `multihop` question moves a mean by up to 1/12 = 0.083, so an interval on this split is too wide to be read as a finding. The split describes where the rows in the main table come from. It is not a second test.
+
+## Definitions
+
+- **MRR is MRR@5.** 1 / rank of the first gold id in the top 5, and 0 if none is there (`eval/metrics.py`, #74).
+- **Recall@5 is fractional on multi-gold rows.** It is |gold ∩ top-5| / |gold|, not Hit@5. Rows with more than one gold id: 0 of 29 `fact`, 12 of 12 `multihop`.
+- The ranked list is cut to 5 before anything is counted, and a repeated id in the top k counts once.
+
+## Reproduction
+
+```bash
+uv run --env-file .env python -m eval.scripts.ablation --split calib
+uv run --env-file .env python -m eval.scripts.ablation --split test
+uv run python -m eval.scripts.bootstrap
+uv run python -m eval.scripts.day4_report
+```
+
+This file is a function of the two committed run files, the bootstrap result computed from them,
+the dataset, and `config.yaml`. It has no timestamp, so re-running the last command over unchanged
+inputs rewrites it byte for byte. Re-running the first two does not reproduce the run files: the
+embeddings API returns slightly different query vectors from call to call, and two live calib runs
+differed in 1 of 41 dense lines. The committed run files are the sample this table describes.
