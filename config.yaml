@@ -53,13 +53,18 @@ agent:
   # index exists; it is still empty (#5 is blocked on OpenAI credits), so bm25 is the only mode that
   # answers today, and a default nothing can run is not a default — it is a crash on query one.
   retrieval_mode: bm25
-# The evidence gate (#37): is there enough here to answer from at all? Day 5 replaces this whole
-# section with conformal prediction; Day 2's version is a threshold, one per source — retrieve()'s
-# three modes score on three unrelated scales (see retrieval/types.py), so a single number cannot
-# serve all three. Hashed like everything else here, and it reaches no index key.
+# The evidence gate (#37): is there enough here to answer from at all? Day 2's version is a
+# threshold, one per source — retrieve()'s three modes score on three unrelated scales (see
+# retrieval/types.py), so a single number cannot serve all three. Day 5 (#92) adds the calibrated
+# method below. Hashed like everything else here, and it reaches no index key.
 evidence:
   # top_score — the best-scoring block, against the threshold for the source that produced it.
-  # Day 5 adds "conformal", which is why this is a named method and not an implied one.
+  # conformal — the signal and threshold #90 fitted on the calib half (the `conformal` block below).
+  #
+  # Still top_score. #90's fit accepted no threshold for any signal at alpha 0.10 (every signal
+  # got t = +inf, eval/runs/conformal_83496e82.json), so the calibrated gate answers nothing: under
+  # `conformal` every question that reaches evidence is handed over, tool rows aside when the
+  # signal is retrieval_score. Switching is one word here, and it moves the config hash.
   method: top_score
   # A block passes when its score is >= the threshold for its source. A tool result carries no
   # score and is never compared: an exact catalog lookup has no ranking to be unsure about.
@@ -96,6 +101,23 @@ evidence:
     # number is kept so the table stays one entry per retrieval mode, and so Day 5's conformal
     # method — which calibrates rather than thresholds — has somewhere to land.
     hybrid: 0.025
+  # The gate `method: conformal` runs (#92). Every value is copied from the fit it names, and the
+  # node refuses to build unless they still agree with it: the file's sha256, alpha, fit_on (the
+  # file's split), and this signal's t there. It also refuses an agent that is no longer the one
+  # the fit calibrated — the config hash, signals, correctness and conformal sections are checked
+  # down the key chain the file records. Left out of the config hash while `method` is not
+  # conformal (config.py, DORMANT), so carrying it here renames nothing.
+  conformal:
+    # The one #90 chose: highest calib AUROC (0.792). verbalized and self_consistency are read
+    # after the answer is written, so the graph gains a confidence_gate node after `answer`;
+    # retrieval_score is read in check_evidence, before it.
+    signal: verbalized
+    # null is t = +inf, the file's own spelling: no threshold passed the scan, answer nothing.
+    threshold: null
+    alpha: 0.10
+    fit_on: calib
+    source: eval/runs/conformal_83496e82.json
+    source_sha256: 27987e369aaa27c37f5a9a95cdbe33e7d151e88d901ee30256c062ff26e067b2
 # The frozen 50/50 split of the eval set (#61). Day 5's conformal prediction calibrates on the
 # `calib` half and every final number is reported on `test`; a conformal guarantee computed on the
 # data the thresholds were tuned on is a description, not a guarantee. Hashed like everything else

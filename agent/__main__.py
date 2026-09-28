@@ -16,9 +16,10 @@ was asked" because the run says so, not because this module passed a flag along.
 
 ``--fake-model`` puts :class:`llm.StandInChat` behind the answer node: the prompt is assembled and
 sent, the reply is canned (the first line of the first evidence block, citing that block's id),
-and the citation check runs against it for real. It requires ``--intent``, because a stand-in
-cannot classify -- a faked label would be a routing decision nobody made, printed beside the four
-that a dispatch table acted on.
+and the citation check runs against it for real. Under a verbalized conformal gate (#92) it goes
+behind the confidence check too, which then reads no number and hands over. It requires
+``--intent``, because a stand-in cannot classify -- a faked label would be a routing decision
+nobody made, printed beside the four that a dispatch table acted on.
 
 **It prints a trace, not an answer.** Which label was chosen, which row of the dispatch table ran,
 what the gate compared and which exit was taken are the things that go wrong; the answer alone
@@ -40,6 +41,7 @@ from time import perf_counter
 from agent.graph import run
 from agent.nodes import Node
 from agent.nodes.answer import answer_node
+from agent.nodes.confidence_gate import confidence_gate_node, post_answer, signal_of
 from agent.nodes.route_intent import route_intent_node
 from agent.prompts import ANSWER_PROMPT_VERSION, ROUTER_PROMPT_VERSION
 from agent.state import INTENTS
@@ -61,6 +63,19 @@ def build_overrides(cfg: Config, intent: str | None, fake_model: bool) -> dict[s
         from llm import StandInChat
 
         overrides["answer"] = answer_node(cfg, chat=StandInChat())
+        # #92: a post-answer confidence gate calls a model too. The stand-in's reply to the
+        # verbalized prompt has no `Confidence:` line, so the gate reads no number and hands over
+        # -- which is the honest outcome. A self-consistency judge prompt carries no evidence
+        # block for it to quote, so it cannot answer that one at all.
+        signal = signal_of(cfg)
+        if signal == "self_consistency":
+            raise ValueError(
+                "--fake-model cannot run a self_consistency confidence gate: the stand-in quotes "
+                "the evidence in its prompt, and the judge prompt that compares two samples "
+                "carries none. Run it with a model, or set evidence.method: top_score"
+            )
+        if post_answer(cfg):
+            overrides["confidence_gate"] = confidence_gate_node(cfg, chat=StandInChat())
     return overrides
 
 

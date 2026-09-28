@@ -39,6 +39,14 @@ after :func:`correctness_key` instead: the signals key plus the whole ``correctn
 labelled signals run that already exists. It is named after :func:`conformal_key`, the correctness
 key plus the whole ``conformal`` section, and left out of ``cfg.hash``.
 
+``evidence.conformal`` (#92) is left out **only while it is dormant**, that is while
+``evidence.method`` is not ``conformal``. It is the gate a report would run under the calibrated
+method -- which signal, its threshold, the fit it came from -- and the agent does not read a word of
+it until the method names it. Hashing it while dormant would move ``cfg.hash``, and with it every
+signals, judge and conformal name keyed off that hash, for a setting no run used. Set
+``method: conformal`` and the block is hashed like any other agent setting: the hash moves, and
+changing the signal or the threshold moves it again. See :data:`DORMANT`.
+
 Artifacts are named with a hash so results from different settings never mix::
 
     Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
@@ -130,12 +138,21 @@ AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (
 )
 
 
+#: ``(section, key, switch, value)``: ``section.key`` is left out of :func:`config_hash` unless
+#: ``section.switch == value`` -- a setting the agent reads only when another one selects it. See
+#: "What the hash leaves out" above. :func:`full_hash` keeps it either way.
+DORMANT: tuple[tuple[str, str, str, str], ...] = (("evidence", "conformal", "method", "conformal"),)
+
+
 def _digest(cfg: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_dump(cfg).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 
 def _without_after_the_runs(cfg: Mapping[str, Any]) -> dict[str, Any]:
-    """A plain copy with :data:`AFTER_THE_RUNS` removed, and a section they emptied dropped."""
+    """A plain copy with :data:`AFTER_THE_RUNS` and dormant :data:`DORMANT` keys removed.
+
+    A section that :data:`AFTER_THE_RUNS` emptied is dropped.
+    """
     plain = _to_plain(cfg)
     for section, key in AFTER_THE_RUNS:
         if key is None:
@@ -148,6 +165,10 @@ def _without_after_the_runs(cfg: Mapping[str, Any]) -> dict[str, Any]:
                 plain[section] = kept
             else:
                 del plain[section]
+    for section, key, switch, value in DORMANT:
+        inner = plain.get(section)
+        if isinstance(inner, dict) and key in inner and inner.get(switch) != value:
+            plain[section] = {k: v for k, v in inner.items() if k != key}
     return plain
 
 

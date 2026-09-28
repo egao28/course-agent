@@ -23,6 +23,7 @@ offered this spring is indistinguishable here from one that never existed.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from agent.nodes import Node
@@ -111,6 +112,30 @@ UNCITED_REASON = (
 )
 UNCITED_REMEDY = "ask again about one course, or one requirement, at a time"
 
+#: When #92's confidence gate did not clear a written answer. The answer existed and cited real
+#: evidence; what failed is the calibrated check, and the sentence says which signal against which
+#: threshold, so a reader can tell "unsure" from "the gate answers nothing".
+CONFIDENCE_REASON = (
+    "I drafted an answer, but it did not clear the confidence check -- its {signal} was {value}, "
+    "against a threshold of {threshold} fitted on the {fit_on} half at alpha = {alpha}"
+)
+#: The same, when the fit accepted no threshold at all (t = +inf): no answer clears it, and the
+#: sentence must not read as though this one was close.
+NOTHING_REASON = (
+    "I drafted an answer, but the confidence check is set to answer nothing -- on the {fit_on} "
+    "half no {signal} threshold kept the error rate at or under alpha = {alpha}, so no draft "
+    "clears it"
+)
+#: When the confidence signal could not be read off the reply at all.
+UNREAD_REASON = (
+    "I drafted an answer, but the confidence check came back with no {signal} score I could "
+    "read, and an answer I cannot rate is not one I will pass on"
+)
+CONFIDENCE_REMEDY = (
+    "ask again about one course at a time, or take it to an advisor -- the draft and the check "
+    "are in the trace"
+)
+
 EMPTY_REASON = "nothing in the catalog came back for it at all"
 EMPTY_REMEDY = (
     "the course may not be offered in {term}, or may be listed under a different subject code"
@@ -151,9 +176,15 @@ def handoff_reason(state: AgentState, term: str) -> tuple[str, str]:
     if verified is not None and not verified:
         return UNCITED_REASON, UNCITED_REMEDY
 
+    gate = signals.get("conformal")
+    if state.get("confident") is False and gate:
+        return confidence_reason(gate, signals.get("confidence")), CONFIDENCE_REMEDY
+
     score = signals.get("retrieval_top_score")
     threshold = signals.get("evidence_threshold")
     if score is not None and threshold is not None:
+        if gate and math.isinf(threshold):
+            return NOTHING_REASON.format(**gate), CONFIDENCE_REMEDY
         source = signals.get("retrieval_mode") or "retrieval"
         return (
             SCORE_REASON.format(source=source, score=score, threshold=threshold),
@@ -164,6 +195,17 @@ def handoff_reason(state: AgentState, term: str) -> tuple[str, str]:
         return EMPTY_REASON, EMPTY_REMEDY.format(term=term)
 
     return DEFAULT_REASON, DEFAULT_REMEDY
+
+
+def confidence_reason(gate: dict[str, Any], value: Any) -> str:
+    """Why #92's gate refused a written answer: unreadable, unreachable, or under the line."""
+    if value is None:
+        return UNREAD_REASON.format(**gate)
+    if gate["threshold"] is None:
+        return NOTHING_REASON.format(**gate)
+    return CONFIDENCE_REASON.format(
+        **{**gate, "value": f"{value:g}", "threshold": f"{gate['threshold']:g}"}
+    )
 
 
 def out_of_scope_node(cfg: Config) -> Node:

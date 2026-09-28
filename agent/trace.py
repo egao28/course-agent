@@ -39,6 +39,7 @@ the one that went stale.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -131,6 +132,23 @@ def gathered(state: Mapping[str, Any]) -> str:
     return "none -- nothing came back"
 
 
+def number(value: float) -> str:
+    """A threshold or signal value as the trace prints it: ``+inf`` for "answer nothing"."""
+    return "+inf" if math.isinf(value) else f"{value:g}"
+
+
+def calibration(gate: Mapping[str, Any]) -> str:
+    """``conformal, α=0.10, calib n=46`` -- what a conformal comparison was fitted on."""
+    note = f"conformal, α={gate['alpha']:.2f}, {gate['fit_on']} n={gate['n']}"
+    if gate.get("threshold") is None:
+        note += ": no threshold passed, so it answers nothing"
+    return note
+
+
+def threshold_of(gate: Mapping[str, Any]) -> float:
+    return math.inf if gate.get("threshold") is None else float(gate["threshold"])
+
+
 def gate_note(state: Mapping[str, Any]) -> str:
     """The gate's verdict and the comparison behind it, both read off ``signals`` (#37).
 
@@ -146,6 +164,12 @@ def gate_note(state: Mapping[str, Any]) -> str:
     score = marks.get("retrieval_top_score")
     threshold = marks.get("evidence_threshold")
     source = marks.get("retrieval_mode") or "retrieval"
+    gate = marks.get("conformal")
+    if gate and score is not None and threshold is not None:
+        comparison = f"{score:.4f} {'>=' if ok else '<'} {number(threshold)}"
+        return f"{'passed' if ok else 'refused'} -- {comparison} ({source}; {calibration(gate)})"
+    if gate and ok and gate["signal"] != "retrieval_score":
+        return f"passed -- evidence came back; {gate['signal']} is checked after the answer"
     if score is not None and threshold is not None:
         comparison = f"{score:.4f} {'>=' if ok else '<'} {threshold} ({source})"
         return f"{'passed' if ok else 'refused'} -- {comparison}"
@@ -157,9 +181,29 @@ def gate_note(state: Mapping[str, Any]) -> str:
     return "refused -- no evidence came back to compare"
 
 
+def check_note(state: Mapping[str, Any]) -> str | None:
+    """#92's post-answer check, or ``None`` when this run's graph had no such node."""
+    marks = signals(state)
+    gate = marks.get("conformal")
+    if not gate or gate["signal"] == "retrieval_score":
+        return None
+    confident = state.get("confident")
+    if confident is None:
+        return "not reached -- no answer was kept to check"
+    value = marks.get("confidence")
+    if value is None:
+        unread = f"no {gate['signal']} score could be read off the reply"
+        return f"refused -- {unread} ({calibration(gate)})"
+    comparison = f"{gate['signal']} {number(value)} {'>=' if confident else '<'} "
+    comparison += number(threshold_of(gate))
+    return f"{'passed' if confident else 'refused'} -- {comparison} ({calibration(gate)})"
+
+
 def exit_note(state: Mapping[str, Any]) -> str:
     """What the exit node had to say for itself: the citations, or why the draft was dropped."""
     marks = signals(state)
+    if state.get("confident") is False:
+        return "draft dropped -- it did not clear the confidence check"
     unknown = marks.get("citations_unknown")
     if unknown:
         return f"draft dropped -- it cited {', '.join(unknown)}, which this run never retrieved"
@@ -269,8 +313,11 @@ def format_trace(state: AgentState, model: str | None = None) -> str:
     table = format_evidence_table(state)
     if table:
         lines += ["", table, ""]
+    lines.append(labelled("gate", gate_note(state)))
+    check = check_note(state)
+    if check is not None:
+        lines.append(labelled("check", check))
     lines += [
-        labelled("gate", gate_note(state)),
         labelled("exit", str(state.get("exit")), exit_note(state)),
         labelled("answer", answer_note(state, model)),
         "",

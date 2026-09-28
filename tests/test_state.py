@@ -101,7 +101,7 @@ def test_check_docs_returns_a_list_copy():
 # --- signals --------------------------------------------------------------------------------------
 
 
-def test_the_declared_signals_are_the_eight_day_5_reads():
+def test_the_declared_signals_are_day_2s_eight_and_day_5s_four():
     assert set(SIGNAL_KEYS) == {
         "intent_raw",
         "intent_unparsed",
@@ -111,6 +111,11 @@ def test_the_declared_signals_are_the_eight_day_5_reads():
         "tool_error",
         "citations_verified",
         "citations_unknown",
+        # #92
+        "evidence_method",
+        "conformal",
+        "confidence",
+        "confidence_raw",
     }
     assert len(set(SIGNAL_KEYS)) == len(SIGNAL_KEYS)
 

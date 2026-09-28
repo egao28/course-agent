@@ -8,6 +8,17 @@
                                       │              │
                                       └──────────────┴► refuse_handoff ──► END
 
+**Under a post-answer conformal signal there is a seventh node** (#92). ``evidence.method:
+conformal`` with ``verbalized`` or ``self_consistency`` reads its signal off the written answer, so
+the graph gains :mod:`agent.nodes.confidence_gate` between ``answer`` and END::
+
+    ... check_evidence ──► answer ──► confidence_gate ──► END
+                                             └──────────► refuse_handoff
+
+Under ``top_score``, or conformal on ``retrieval_score``, the node is not built and not wired: the
+comparison happens in ``check_evidence``, and a pass-through node would put a step in every trace
+that did nothing. :func:`node_names` is the one place that decides.
+
 Six nodes, three exits, and no cycle: a query is classified, evidence is gathered for it, the
 evidence is judged sufficient or not, and one of three things is said. ``run(query)`` is the whole
 public surface -- the CLI (#39) and every test call that, not the compiled graph object, so the
@@ -57,6 +68,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agent.nodes import Node, NodeBuilder
 from agent.nodes.answer import answer_node
 from agent.nodes.check_evidence import check_evidence_node
+from agent.nodes.confidence_gate import confidence_gate_node, post_answer
 from agent.nodes.dispatch import dispatch_node
 from agent.nodes.exits import out_of_scope_node, refuse_handoff_node
 from agent.nodes.route_intent import route_intent_node
@@ -71,24 +83,36 @@ from agent.state import (
 )
 from config import Config, load_config
 
-#: How to build each of the six nodes -- all six real as of #38, so a ``run(query)`` with no
-#: overrides is a whole run. A test passes already-built nodes to :func:`build_graph` instead of
-#: patching this.
+#: How to build each node -- the six real as of #38, and #92's confidence gate, which only a
+#: post-answer conformal config builds (:func:`node_names`). A test passes already-built nodes to
+#: :func:`build_graph` instead of patching this.
 NODE_BUILDERS: dict[str, NodeBuilder] = {
     "route_intent": route_intent_node,
     "dispatch": dispatch_node,
     "check_evidence": check_evidence_node,
     "answer": answer_node,
+    "confidence_gate": confidence_gate_node,
     "out_of_scope": out_of_scope_node,
     "refuse_handoff": refuse_handoff_node,
 }
+
+#: The nodes only some configs put in the graph, and what puts them there.
+CONDITIONAL: dict[str, str] = {
+    "confidence_gate": "evidence.method: conformal with a post-answer signal "
+    "(verbalized or self_consistency)",
+}
+
+
+def node_names(cfg: Mapping[str, Any]) -> tuple[str, ...]:
+    """The nodes this config's graph has, in registry order."""
+    return tuple(name for name in NODE_BUILDERS if name != "confidence_gate" or post_answer(cfg))
 
 
 # --- building the nodes ---------------------------------------------------------------------------
 
 
 def build_nodes(cfg: Config, nodes: Mapping[str, Node] | None = None) -> dict[str, Node]:
-    """The six nodes, built from ``cfg``, with anything in ``nodes`` used as given.
+    """The graph's nodes (:func:`node_names`), built from ``cfg``, with ``nodes`` used as given.
 
     ``nodes`` is a partial override: naming one leaves the other five at their registered builder,
     which is what lets a test drive one exit with a single fake, and lets the two nodes that call a
@@ -106,10 +130,15 @@ def build_nodes(cfg: Config, nodes: Mapping[str, Node] | None = None) -> dict[st
         raise KeyError(
             f"no node(s) named {', '.join(map(repr, unknown))} in the graph; its nodes are: {known}"
         )
+    names = node_names(cfg)
+    absent = sorted(set(nodes or ()) - set(names))
+    if absent:
+        raise KeyError(
+            f"node(s) {', '.join(map(repr, absent))} are not in this config's graph; "
+            + "; ".join(f"{name} is built only under {CONDITIONAL[name]}" for name in absent)
+        )
     given = dict(nodes or {})
-    return {
-        name: given[name] if name in given else build(cfg) for name, build in NODE_BUILDERS.items()
-    }
+    return {name: given[name] if name in given else NODE_BUILDERS[name](cfg) for name in names}
 
 
 def guard(name: str, node: Node) -> Node:
@@ -180,13 +209,24 @@ def route_after_answer(state: AgentState) -> str:
     return END
 
 
+def route_after_confidence(state: AgentState) -> str:
+    """Show the answer, or hand it over: #92's verdict on the written draft."""
+    confident = state.get("confident")
+    if confident is None:
+        raise ValueError(
+            "the confidence_gate node did not set `confident`; it returns True or False for "
+            "every answer it sees, False when the signal could not be read (#92)"
+        )
+    return END if confident else "refuse_handoff"
+
+
 # --- the graph ------------------------------------------------------------------------------------
 
 
 def build_graph(
     cfg: Config | None = None, nodes: Mapping[str, Node] | None = None
 ) -> CompiledStateGraph:
-    """Wire the six nodes and compile.
+    """Wire the nodes and compile.
 
     ``cfg`` defaults to the live ``config.yaml``; ``nodes`` overrides individual nodes by name
     (see :func:`build_nodes`). Compiling is cheap and does nothing at the edges -- no index is
@@ -211,11 +251,19 @@ def build_graph(
         route_after_gate,
         {"answer": "answer", "refuse_handoff": "refuse_handoff"},
     )
+    # route_after_answer says "done" as END; with a confidence gate, done means "check it first".
+    after_answer = "confidence_gate" if "confidence_gate" in built else END
     graph.add_conditional_edges(
         "answer",
         route_after_answer,
-        {"refuse_handoff": "refuse_handoff", END: END},
+        {"refuse_handoff": "refuse_handoff", END: after_answer},
     )
+    if "confidence_gate" in built:
+        graph.add_conditional_edges(
+            "confidence_gate",
+            route_after_confidence,
+            {"refuse_handoff": "refuse_handoff", END: END},
+        )
     graph.add_edge("out_of_scope", END)
     graph.add_edge("refuse_handoff", END)
     return graph.compile()

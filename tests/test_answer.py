@@ -513,8 +513,12 @@ def test_every_signal_of_an_answered_run_survives_to_the_end(cfg):
         "tool_error": None,
         "retrieval_top_score": 29.0337,
         "evidence_threshold": 10.0,
+        "evidence_method": "top_score",
+        "conformal": None,
         "citations_verified": ["2026-sp:CS-374"],
         "citations_unknown": None,
+        "confidence": None,
+        "confidence_raw": None,
     }
 
 

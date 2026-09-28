@@ -90,9 +90,14 @@ SIGNAL_KEYS: tuple[str, ...] = (
     # #36, dispatch: which retrieval mode ran, and why a tool produced nothing.
     "retrieval_mode",
     "tool_error",
-    # #37, the gate: the number it compared and the number it compared against.
+    # #37, the gate: the number it compared and the number it compared against -- and, since #92,
+    # which method it ran and, under `conformal`, the calibrated gate it applied (signal,
+    # threshold, alpha, fit_on, calib n, source), so a trace can say what a refusal was measured
+    # against without the config.
     "retrieval_top_score",
     "evidence_threshold",
+    "evidence_method",
+    "conformal",
     # #38, the answer: the doc_ids the answer cited and this run can show, and the ones it cited
     # that were never in `docs`. Both, because the pair is what tells the three outcomes apart: a
     # verified list with no unknowns is an answer that stood, an unknown id is a fabrication that
@@ -100,6 +105,10 @@ SIGNAL_KEYS: tuple[str, ...] = (
     # all -- which is also discarded. `citations_verified is None` means this node never ran.
     "citations_verified",
     "citations_unknown",
+    # #92, the confidence gate after the answer (only under a post-answer conformal signal): the
+    # signal's value on the written answer, and the reply or replies it was read from.
+    "confidence",
+    "confidence_raw",
 )
 
 
@@ -167,6 +176,9 @@ class AgentState(TypedDict):
     docs: list[Evidence]
     #: #37's verdict: is there enough here to answer at all?
     evidence_ok: bool | None
+    #: #92's verdict on the written answer. ``None`` unless the graph has a confidence gate and the
+    #: run reached it.
+    confident: bool | None
     #: Everything a later day wants to calibrate on. See :data:`SIGNAL_KEYS`.
     signals: Annotated[dict[str, Any], merge_signals]
     #: The answer, or one of the two fixed exit messages. ``None`` until an exit node writes it.
@@ -184,6 +196,7 @@ NODE_WRITES: dict[str, frozenset[str]] = {
     "dispatch": frozenset({"docs"}),  # 36
     "check_evidence": frozenset({"evidence_ok"}),  # 37
     "answer": frozenset({"answer", "exit"}),  # 38
+    "confidence_gate": frozenset({"confident"}),  # 92
     "out_of_scope": frozenset({"answer", "exit"}),
     "refuse_handoff": frozenset({"answer", "exit"}),
 }
@@ -210,6 +223,7 @@ def initial_state(query: str) -> AgentState:
         intent=None,
         docs=[],
         evidence_ok=None,
+        confident=None,
         signals=initial_signals(),
         answer=None,
         exit=None,
@@ -307,6 +321,11 @@ def check_update(node: str, update: Any) -> dict[str, Any]:
         raise TypeError(
             f"{node} set evidence_ok to {update['evidence_ok']!r}; the gate returns True or "
             "False -- None is 'the gate has not run', which it has"
+        )
+    if "confident" in update and not isinstance(update["confident"], bool):
+        raise TypeError(
+            f"{node} set confident to {update['confident']!r}; the confidence gate returns True "
+            "or False -- a signal it could not read is False, with the reply kept in signals"
         )
     if "answer" in update and (
         not isinstance(update["answer"], str) or not update["answer"].strip()

@@ -198,15 +198,15 @@ def test_a_missing_method_names_the_ones_there_are(cfg):
         check_method(partial)
 
 
-def test_the_only_method_today_is_top_score(cfg):
+def test_the_two_methods_are_top_score_and_conformal(cfg):
     assert check_method(cfg) == "top_score"
-    assert set(METHODS) == {"top_score"}
+    assert set(METHODS) == {"top_score", "conformal"}
 
 
-def test_day_5s_method_is_refused_by_name_until_it_exists(cfg):
-    # Setting it early must not produce a threshold run reported as a calibrated one.
+def test_conformal_with_no_gate_block_is_refused_by_name(cfg):
+    # The method names a fit; with nothing to name, it must not fall back to a threshold run.
     early = Config({**cfg.to_dict(), "evidence": {**EVIDENCE, "method": "conformal"}})
-    with pytest.raises(ValueError, match="evidence.method to 'conformal'"):
+    with pytest.raises(ValueError, match="no evidence.conformal block"):
         check_evidence_node(early)
 
 
@@ -291,7 +291,12 @@ def test_a_tool_result_passes_without_consulting_any_threshold(cfg):
     # returning the record *is* the evidence, and there is no ranking to be unsure about.
     update = gate(cfg, [lookup()])
     assert update["evidence_ok"] is True
-    assert update["signals"] == {"retrieval_top_score": None, "evidence_threshold": None}
+    assert update["signals"] == {
+        "retrieval_top_score": None,
+        "evidence_threshold": None,
+        "evidence_method": "top_score",
+        "conformal": None,
+    }
 
 
 def test_one_certain_block_carries_a_mixed_list(cfg):
@@ -306,7 +311,12 @@ def test_a_named_tool_error_fails_without_a_threshold(cfg):
     # #36 writes no docs with one, and the label is more specific than any number could be.
     update = gate(cfg, [], tool_error="no_course_code")
     assert update["evidence_ok"] is False
-    assert update["signals"] == {"retrieval_top_score": None, "evidence_threshold": None}
+    assert update["signals"] == {
+        "retrieval_top_score": None,
+        "evidence_threshold": None,
+        "evidence_method": "top_score",
+        "conformal": None,
+    }
 
 
 def test_a_tool_error_outranks_evidence_that_would_have_passed(cfg):
@@ -324,7 +334,12 @@ def test_empty_docs_fail(cfg):
 def test_a_high_scoring_retrieval_passes_and_both_numbers_are_kept(cfg):
     update = gate(cfg, [hit(29.0337), hit(11.5, "2026-sp:CS-173")])
     assert update["evidence_ok"] is True
-    assert update["signals"] == {"retrieval_top_score": 29.0337, "evidence_threshold": 10.0}
+    assert update["signals"] == {
+        "retrieval_top_score": 29.0337,
+        "evidence_threshold": 10.0,
+        "evidence_method": "top_score",
+        "conformal": None,
+    }
 
 
 def test_a_weak_retrieval_fails_and_both_numbers_are_still_kept(cfg):
@@ -333,7 +348,12 @@ def test_a_weak_retrieval_fails_and_both_numbers_are_still_kept(cfg):
     # it would make Day 5 start by re-running everything.
     update = gate(cfg, [hit(8.4812)])
     assert update["evidence_ok"] is False
-    assert update["signals"] == {"retrieval_top_score": 8.4812, "evidence_threshold": 10.0}
+    assert update["signals"] == {
+        "retrieval_top_score": 8.4812,
+        "evidence_threshold": 10.0,
+        "evidence_method": "top_score",
+        "conformal": None,
+    }
 
 
 def test_the_threshold_itself_passes(cfg):
@@ -386,10 +406,15 @@ def test_judge_is_a_function_of_what_it_was_given():
 # --- the node -------------------------------------------------------------------------------------
 
 
-def test_the_node_writes_only_its_own_key_and_the_two_gate_signals(cfg):
+def test_the_node_writes_only_its_own_key_and_the_gate_signals(cfg):
     update = gate(cfg, [hit(29.0337)])
     assert set(update) == {"evidence_ok", "signals"}
-    assert set(update["signals"]) == {"retrieval_top_score", "evidence_threshold"}
+    assert set(update["signals"]) == {
+        "retrieval_top_score",
+        "evidence_threshold",
+        "evidence_method",
+        "conformal",
+    }
     assert check_update("check_evidence", update) == update
 
 
@@ -511,8 +536,12 @@ def test_the_real_dispatcher_and_the_real_gate_agree_on_a_measured_score(cfg):
         "tool_error": None,
         "retrieval_top_score": 18.2746,
         "evidence_threshold": 10.0,
+        "evidence_method": "top_score",
+        "conformal": None,
         "citations_verified": None,
         "citations_unknown": None,
+        "confidence": None,
+        "confidence_raw": None,
     }
 
 
