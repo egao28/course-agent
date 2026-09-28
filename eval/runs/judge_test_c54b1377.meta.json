@@ -1,0 +1,37 @@
+{
+  "by_bucket": {
+    "ambiguous": {
+      "incorrect": 6
+    },
+    "fact": {
+      "correct": 21
+    },
+    "multihop": {
+      "correct": 2,
+      "incorrect": 10
+    },
+    "unanswerable": {
+      "correct": 2,
+      "incorrect": 1
+    }
+  },
+  "config_hash": "c73b197d",
+  "correctness_key": "c54b1377",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "model": "gpt-4o-mini",
+  "n_lines": 42,
+  "note": "judge_correct is the LLM judge's first call, not the label; `correct` comes only from a person's verdict in the review log",
+  "prompts_sha256": {
+    "ambiguous": "d900474c9913f693de17c2ac55eb9e43fd176986f964307b7ce160aea3110b89",
+    "fact": "8ff193af6e61a75fd9715fdedef31c7df7dd1b82bafd1ef178a6acfa243dcf00",
+    "multihop": "f80a2d88ca845c077dd83a3c7af0fdce5a019b842018177707adc8a984a18236",
+    "unanswerable": "77743aa6dfb4713c77f50ec3dd7e9d222c3b833df42a51ec4923b4a559255bf2"
+  },
+  "run": "eval/runs/judge_test_c54b1377.jsonl",
+  "sha256": "b6a949d0ecc73691e309e10019ae4977e13f12d293a92dc6a9c101a6c7bd1ed5",
+  "signals_key": "37164723",
+  "signals_run": "eval/runs/signals_test_37164723.jsonl",
+  "signals_run_sha256": "abd246c1716fcb3efc51c5248cfc30310e0969e051706309ef2fb3415036b245",
+  "split": "test"
+}

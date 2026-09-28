@@ -2223,8 +2223,8 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`b409d58d` since #87 added `signals`, which is also left out) covers every value, and it names
-only the bootstrap result.
+(`35bbd61b` since #87 added `signals` and #88 added `correctness`, both also left out) covers every
+value, and it names only the bootstrap result.
 
 ## Confidence signals
 
@@ -2272,6 +2272,70 @@ gpt-4o-mini, signals key `37164723`, one run per half:
 These are counts, not results: no row is labelled correct or wrong yet (#88). Many rows never
 reach an answer (18 on calib, 21 on test), mostly questions where dispatch found no course code.
 Verbalized confidence still sits at 100 on about 60% of rows.
+
+## Correctness labels
+
+`correct` on every row of a signals run comes from a person. An LLM judge makes the first call,
+and the reviewer accepts or overturns it (#88).
+
+```
+uv run --env-file .env python -m eval.scripts.judge --split calib           # the judge's first call
+uv run python -m eval.scripts.review_signals --split calib --reviewer NAME  # the human pass, resumable
+uv run python -m eval.scripts.review_signals --split calib --stats          # progress, judge vs human
+uv run python -m eval.scripts.review_signals --split calib --write-csv      # -> signals CSV
+```
+
+- **One judge prompt per bucket** (`correctness.judge_prompts`). A `fact` answer must agree with
+  `gold_answer`, and a `multihop` answer must get every hop. An `unanswerable` answer must decline
+  (its `gold_answer` is one acceptable refusal, not an empty string). An `ambiguous` answer must ask
+  which course is meant. The judge's verdict and one-line reason go to
+  `eval/runs/judge_{split}_{correctness_key}.jsonl`. They are not labels.
+- **The reviewer sees** the question, the gold answer, the system's answer, the judge's verdict
+  and reason, and a warning when the citation check discarded the draft. `a` accepts the judge's
+  call, `y`/`n` gives your own, and an overturn needs a one-line reason. Each verdict goes to the
+  append-only `eval/runs/correctness_log.jsonl` with the reviewer's name, a timestamp, the signals
+  key and the hash of the answer it judged, fsynced before the next row.
+- **`--write-csv` refuses** until every row of the signals run has a human verdict for its current
+  answer. The CSV is `eval/runs/signals_{split}_{signals_key}.csv` with columns `id, bucket, split,
+  retrieval_score, dense_top1, verbalized, self_consistency, judge_correct, correct, reviewer`.
+  Booleans are written as 1/0, and a missing value as an empty cell. The sidecar holds judge vs
+  human: accepted, overturned and no-verdict counts per bucket, and the confusion matrix.
+- **`correctness` does not move the config hash or the signals key.** It is in
+  `config.AFTER_THE_RUNS`, and the judge run is named after `config.correctness_key`: the signals
+  key plus the whole section. Under `signals`, it would have renamed the calib run it grades, and
+  that run is a random draw that cannot be redone.
+
+Judge runs on both halves of signals key `37164723` (gpt-4o-mini, correctness key `c54b1377`),
+**the judge's calls, not labels**:
+
+| bucket | calib: judge correct / rows | test: judge correct / rows |
+|---|---|---|
+| fact | 23 / 25 | 21 / 21 |
+| multihop | 0 / 12 | 2 / 12 |
+| unanswerable | 3 / 4 | 2 / 3 |
+| ambiguous | 0 / 5 | 0 / 6 |
+
+All 88 replies parsed.
+
+Labels (human pass, reviewer `eve`, every row of both halves; `signals_{split}_37164723.csv`):
+
+| bucket | calib: correct / rows | test: correct / rows |
+|---|---|---|
+| fact | 23 / 25 | 21 / 21 |
+| multihop | 0 / 12 | 2 / 12 |
+| unanswerable | 3 / 4 | 2 / 3 |
+| ambiguous | 0 / 5 | 0 / 6 |
+| all | 26 / 46 | 25 / 42 |
+
+The reviewer accepted the judge's call on all 88 rows (0 overturned), so judge × human is diagonal on
+both halves. 37 calib verdicts were carried over from the first pass. `ambiguous` has no correct row
+in either half, and `multihop` has none in calib.
+
+- **A verdict follows the answer text, not the run.** A log entry applies to a row when its `id` and
+  answer hash both match. When #87 recollected calib under `37164723`, 37 of 46 answers came back
+  word for word, despite temperature 0, and 9 did not. The 37 keep the verdicts given under
+  `40070d8d`. The 9 count as unreviewed and are shown again. The CSV sidecar counts carried-over
+  verdicts.
 
 ## Day 1 goal
 
