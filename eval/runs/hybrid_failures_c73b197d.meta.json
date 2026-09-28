@@ -1,0 +1,19 @@
+{
+  "config_hash": "c73b197d",
+  "depth": 20,
+  "failing": {
+    "fact": 1,
+    "multihop": 10
+  },
+  "k": 5,
+  "live_top5_differs": [],
+  "log": "eval/runs/hybrid_failures_c73b197d.jsonl",
+  "n": 41,
+  "run": "eval/runs/ablation_test_c73b197d.jsonl",
+  "run_sha256": "0ff000fe55fbf90c39acec58fee63d1f0a5fdb8895bec99c66e805615f0a2eb6",
+  "scored": {
+    "fact": 29,
+    "multihop": 12
+  },
+  "sha256": "0549e3a52056b7ef88bb8d9c574f41d9e8d3ea59d8ecce8e5ad69cf3612e7caf"
+}
