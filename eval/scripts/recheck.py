@@ -41,6 +41,7 @@ import json
 import random
 import sys
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple, TextIO
 
@@ -241,6 +242,39 @@ def result(ids: Sequence[str], entries: Sequence[Mapping[str, Any]]) -> Result:
     """The overturn rate over the rows of ``ids`` that have been read a second time."""
     found = overturns(ids, entries)
     return Result(len(found), len(ids), tuple(one for one in found if one.changed))
+
+
+def pace(entries: Sequence[Mapping[str, Any]], ids: Sequence[str] | None = None) -> float | None:
+    """Median seconds between consecutive judgements, or ``None`` with fewer than two.
+
+    The one number that says how a pass was made rather than what it decided, and the reason
+    #59's log carries a clock. It is a **pace, not a reading speed** -- a reviewer who stops to
+    check a course against the catalog and comes back leaves one long gap and a run of short
+    ones, so the median is the typical row and the tail is where the work went. Both are worth
+    printing: a median under a second over a hundred rows is a keystroke rate, whatever the
+    mean says.
+
+    Derived from the timestamps rather than being one, so it is stable under a re-run of the
+    report: the log is fixed, so the number is.
+
+    ``ids`` restricts it to a subset and takes each row's **last** judgement, which is how the
+    re-read's own pace is measured against the first pass's.
+    """
+    if ids is None:
+        stamps = sorted({entry["ts"] for entry in entries})
+    else:
+        asked, last = set(ids), {}
+        for entry in entries:
+            if entry["id"] in asked:
+                last[entry["id"]] = max(last.get(entry["id"], ""), entry["ts"])
+        stamps = sorted(set(last.values()))
+    if len(stamps) < 2:
+        return None
+    moments = [datetime.fromisoformat(one) for one in stamps]
+    gaps = sorted(
+        (moments[i + 1] - moments[i]).total_seconds() for i in range(len(moments) - 1)
+    )
+    return gaps[len(gaps) // 2]
 
 
 def read_sample(path: Path | None = None) -> Sample | None:

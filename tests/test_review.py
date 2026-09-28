@@ -835,12 +835,27 @@ def test_the_committed_dataset_is_the_drafts_replayed_through_the_committed_log(
     """The invariant the whole design rests on: v1.jsonl is a function, not a second copy.
 
     If this fails, either a row was edited into the dataset without going through the log -- in
-    which case the log understates what the pass changed -- or a draft moved under a verdict. Both
-    are the same repair: re-review the row.
+    which case the log understates what the pass changed -- or a draft moved under a verdict.
+    Both are the same repair: re-review the row.
+
+    **Over the annotated fields only.** ``split`` is the seventh field and it is #61's, assigned
+    by the freeze and not replayable from the drafts and the log -- neither of which knows about
+    halves. Comparing whole rows would have compared a frozen file against an unfrozen
+    promotion and failed on every row, which is what it did the first time this check came off
+    its skip: the dataset it was written against had six columns. So the six are held to the
+    replay, and carrying a half at all is asserted separately, since a file that lost its splits
+    is #61's failure and not this one's.
     """
     promotion = review.promote(committed, review.read_verdicts(LOG), corpus_doc_ids())
     assert promotion.unreviewed == []
     assert promotion.orphans == []
     assert [v for v in promotion.violations if v.level == "error"] == []
     written = [json.loads(line) for line in DATASET.read_text(encoding="utf-8").splitlines()]
-    assert written == [item.model_dump() for item in promotion.rows]
+
+    def annotated(row: dict) -> dict:
+        return {field: row[field] for field in ANNOTATED_FIELDS}
+
+    assert [annotated(one) for one in written] == [
+        annotated(item.model_dump()) for item in promotion.rows
+    ]
+    assert all(one.get("split") in {"calib", "test"} for one in written)

@@ -880,3 +880,37 @@ def test_the_packet_over_real_rows_and_the_real_corpus(
     cited = [doc_id for row in rows if row.gold_doc_ids for doc_id in row.gold_doc_ids]
     assert any(f"### `{doc_id}`" in body for doc_id in cited)
     assert "Credits:" in body
+
+
+# --- the CLI's own wiring -------------------------------------------------------------------------
+
+
+def test_the_export_cli_passes_its_stream_as_a_stream(
+    tmp_path: Path, dataset: Path, monkeypatch, pack: agreement.Packet
+):
+    """``main`` handed ``sys.stdout`` to ``texts`` for as long as this CLI could not be run.
+
+    Every other test calls :func:`eval.scripts.agreement.export` by keyword, which is exactly
+    why a positional argument in the wrong slot survived: the command needs ``v1.jsonl`` to
+    exist, and it did not until the verification pass had run. So this drives ``main`` itself.
+    """
+    monkeypatch.setattr(agreement, "packet", lambda directory=None: pack)
+    monkeypatch.setattr(agreement, "corpus_text", lambda *args, **kwargs: {})
+    assert agreement.main(["--dataset", str(dataset)]) == 0
+    assert pack.sheet.exists()
+    assert len(sheet_rows(pack.sheet)) == agreement.SAMPLE_N
+
+
+def test_the_score_cli_writes_to_the_report_path_and_not_to_stdout(
+    tmp_path: Path, dataset: Path, monkeypatch, pack: agreement.Packet, cfg
+):
+    """The same slip one argument further along: ``report`` took the stream."""
+    monkeypatch.setattr(agreement, "packet", lambda directory=None: pack)
+    monkeypatch.setattr(agreement, "corpus_text", lambda *args, **kwargs: {})
+    assert agreement.main(["--dataset", str(dataset)]) == 0
+    sample = agreement.Sample(rows=tuple(agreement.load_dataset(pack.sample)), draws=(), seed=42)
+    fill(pack, agreeing(sample))
+    written = tmp_path / "day3_agreement_test.md"
+    monkeypatch.setattr(agreement, "report_path", lambda stem, cfg: written)
+    assert agreement.main(["--score"]) == 0
+    assert written.read_text(encoding="utf-8").startswith("# Day 3 — inter-annotator agreement")

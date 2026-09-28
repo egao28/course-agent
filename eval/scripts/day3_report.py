@@ -477,7 +477,7 @@ def assisted_sentence(facts: Facts) -> str:
     found = facts.reread
     lo, hi = found.interval
     return (
-        f"{made}; {found.reread} of them were then re-read properly and "
+        f"{made}; {found.reread} of them were read a second time and "
         f"{plural(len(found.changed), 'verdict')} "
         f"{'was' if len(found.changed) == 1 else 'were'} overturned "
         f"({found.rate:.0%}, 95% CI [{lo:.0%}, {hi:.0%}])."
@@ -830,10 +830,52 @@ def render_verification(facts: Facts) -> str:
                 "so a re-run rewrites this file byte for byte."
             ),
         ]
+    parts += ["", render_pace(facts)]
     assisted = render_assistance(facts)
     if assisted:
         parts += ["", assisted]
     return "\n".join(parts)
+
+
+def render_pace(facts: Facts) -> str:
+    """How fast the verdicts were given, which is the one thing a count cannot show.
+
+    Not a judgement, and not a check that can fail -- a number and the arithmetic to read it
+    with. What a reader wants to know about a verification pass is whether the rows were read,
+    the log can only record what was decided, and the closest observable is the gap between one
+    verdict and the next. A median well under a second over a hundred rows is a keystroke rate
+    whatever else is true, and a reader who is told the counts and not this has been told the
+    half that flatters the pass.
+
+    Derived from the timestamps rather than printing any, so the report stays stable under a
+    re-run: the log is fixed, so these numbers are.
+    """
+    first = recheck.pace(facts.entries)
+    if first is None:
+        return ""
+    lines = [
+        (
+            f"**Pace.** Median {first:.1f}s between one verdict and the next over "
+            f"{plural(len(facts.verdicts), 'row')}."
+        )
+    ]
+    again = (
+        None
+        if facts.reread_sample is None
+        else recheck.pace(facts.entries, facts.reread_sample.ids)
+    )
+    if again is not None:
+        lines.append(
+            f"On the {facts.reread.reread if facts.reread else 0} rows judged a second time the "
+            f"median was {again:.1f}s."
+        )
+    lines.append(
+        "Each row's screen carries the question, the answer, three checks and every cited "
+        "catalog record in full. Read these two numbers against that, and against the "
+        "agreement rate below, before reading any count above as a measure of how hard the "
+        "rows were checked."
+    )
+    return " ".join(lines)
 
 
 def render_assistance(facts: Facts) -> str:
@@ -922,7 +964,7 @@ def render_reread(facts: Facts) -> str:
     ]
     body = [
         (
-            f"**{found.reread} of the {len(facts.verdicts)} judged rows were re-read properly**, "
+            f"**{found.reread} of the {len(facts.verdicts)} judged rows were judged twice**, "
             f"drawn stratified over bucket and verdict at seed `{drawn.seed}` "
             f"(`{rel_to_repo(facts.src.recheck)}`), including every delete a model asked for. "
             f"{plural(len(found.changed), 'verdict')} "
@@ -1185,7 +1227,7 @@ def reread_clause(facts: Facts) -> str:
         )
     lo, hi = found.interval
     return (
-        f"{found.reread} of the rows were re-read properly and "
+        f"{found.reread} of the rows were judged a second time and "
         f"{plural(len(found.changed), 'verdict')} "
         f"{'was' if len(found.changed) == 1 else 'were'} overturned, which puts the pass's "
         f"error rate at {found.rate:.0%} with a 95% interval of [{lo:.0%}, {hi:.0%}] — the "

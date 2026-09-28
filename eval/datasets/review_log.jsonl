@@ -1,0 +1,223 @@
+{"id": "v1-0001", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:27.722481Z"}
+{"id": "v1-1001", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:37.482557Z"}
+{"id": "v1-2001", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:40.232527Z"}
+{"id": "v1-3001", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:41.256253Z"}
+{"id": "v1-0002", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:42.000680Z"}
+{"id": "v1-1002", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:42.632771Z"}
+{"id": "v1-2002", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:43.370554Z"}
+{"id": "v1-3002", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:43.938387Z"}
+{"id": "v1-0003", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:44.442316Z"}
+{"id": "v1-1003", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:44.913516Z"}
+{"id": "v1-2003", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:45.528912Z"}
+{"id": "v1-3003", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:46.024386Z"}
+{"id": "v1-0004", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:46.561863Z"}
+{"id": "v1-1004", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:47.105663Z"}
+{"id": "v1-2004", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:47.601752Z"}
+{"id": "v1-3004", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:48.120470Z"}
+{"id": "v1-0005", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:48.633080Z"}
+{"id": "v1-1005", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:49.282738Z"}
+{"id": "v1-2005", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:49.994186Z"}
+{"id": "v1-3005", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:50.703756Z"}
+{"id": "v1-0006", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:00:51.297856Z"}
+{"id": "v1-1006", "verdict": "delete", "reason": "claim not supported", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:19.375837Z"}
+{"id": "v1-2006", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:22.216678Z"}
+{"id": "v1-3006", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:23.696549Z"}
+{"id": "v1-0007", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:24.457821Z"}
+{"id": "v1-1007", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:25.065969Z"}
+{"id": "v1-2007", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:25.817000Z"}
+{"id": "v1-3007", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:26.392801Z"}
+{"id": "v1-0008", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:26.953763Z"}
+{"id": "v1-1008", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:27.482496Z"}
+{"id": "v1-2008", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:28.011910Z"}
+{"id": "v1-3008", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:28.551839Z"}
+{"id": "v1-0009", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:29.107754Z"}
+{"id": "v1-1009", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:29.728527Z"}
+{"id": "v1-2009", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:30.320544Z"}
+{"id": "v1-3009", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:30.872925Z"}
+{"id": "v1-0010", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:31.457667Z"}
+{"id": "v1-1010", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:32.105127Z"}
+{"id": "v1-2010", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:32.690824Z"}
+{"id": "v1-3010", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:01:33.298125Z"}
+{"id": "v1-0011", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:01.161591Z"}
+{"id": "v1-1011", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:02.170558Z"}
+{"id": "v1-2011", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:02.920131Z"}
+{"id": "v1-3011", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:03.494966Z"}
+{"id": "v1-0012", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:04.082180Z"}
+{"id": "v1-1012", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:04.634140Z"}
+{"id": "v1-2012", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:05.282172Z"}
+{"id": "v1-3012", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:05.792897Z"}
+{"id": "v1-0013", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:16.434086Z"}
+{"id": "v1-1013", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:18.017404Z"}
+{"id": "v1-2013", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:18.682413Z"}
+{"id": "v1-3013", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:19.199510Z"}
+{"id": "v1-0014", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:19.961590Z"}
+{"id": "v1-1014", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:20.544530Z"}
+{"id": "v1-2014", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:21.086375Z"}
+{"id": "v1-3014", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:21.673988Z"}
+{"id": "v1-0015", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:22.257937Z"}
+{"id": "v1-1015", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:22.969543Z"}
+{"id": "v1-2015", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:23.594754Z"}
+{"id": "v1-3015", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:24.194523Z"}
+{"id": "v1-0016", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:32.953604Z"}
+{"id": "v1-1016", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:34.680701Z"}
+{"id": "v1-2016", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:35.690468Z"}
+{"id": "v1-3016", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:36.261351Z"}
+{"id": "v1-0017", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:36.977998Z"}
+{"id": "v1-1017", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:37.761588Z"}
+{"id": "v1-2017", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:38.624274Z"}
+{"id": "v1-3017", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:39.298856Z"}
+{"id": "v1-0018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:39.968860Z"}
+{"id": "v1-1018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:40.577379Z"}
+{"id": "v1-2018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:41.217308Z"}
+{"id": "v1-3018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:41.819748Z"}
+{"id": "v1-0019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:42.528792Z"}
+{"id": "v1-1019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:43.313742Z"}
+{"id": "v1-2019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:44.025377Z"}
+{"id": "v1-3019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:44.618129Z"}
+{"id": "v1-0020", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:45.305333Z"}
+{"id": "v1-1020", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:45.913822Z"}
+{"id": "v1-2020", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:46.623824Z"}
+{"id": "v1-3020", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:02:47.240951Z"}
+{"id": "v1-0021", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:03.465610Z"}
+{"id": "v1-1021", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:05.816763Z"}
+{"id": "v1-2021", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:06.729308Z"}
+{"id": "v1-3021", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:07.392573Z"}
+{"id": "v1-0022", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:07.970120Z"}
+{"id": "v1-1022", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:08.833056Z"}
+{"id": "v1-2022", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:09.456580Z"}
+{"id": "v1-3022", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:10.090305Z"}
+{"id": "v1-0023", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:10.671603Z"}
+{"id": "v1-1023", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:11.337270Z"}
+{"id": "v1-2023", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:11.975989Z"}
+{"id": "v1-3023", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:12.720477Z"}
+{"id": "v1-0024", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:22.769827Z"}
+{"id": "v1-1024", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:25.481766Z"}
+{"id": "v1-2024", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:26.135741Z"}
+{"id": "v1-3024", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:26.696137Z"}
+{"id": "v1-0025", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:27.280183Z"}
+{"id": "v1-1025", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:27.960730Z"}
+{"id": "v1-2025", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:28.602695Z"}
+{"id": "v1-3025", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:29.280725Z"}
+{"id": "v1-0026", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:30.000406Z"}
+{"id": "v1-3026", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:30.681786Z"}
+{"id": "v1-0027", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:31.386038Z"}
+{"id": "v1-3027", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:32.064954Z"}
+{"id": "v1-0028", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:40.827645Z"}
+{"id": "v1-3028", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:43.064372Z"}
+{"id": "v1-0029", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:43.919715Z"}
+{"id": "v1-3029", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:44.489265Z"}
+{"id": "v1-0030", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:45.007539Z"}
+{"id": "v1-3030", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:45.521040Z"}
+{"id": "v1-0031", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:46.063901Z"}
+{"id": "v1-3031", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:46.607844Z"}
+{"id": "v1-0032", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:47.177326Z"}
+{"id": "v1-3032", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:47.816201Z"}
+{"id": "v1-0033", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:03:48.360562Z"}
+{"id": "v1-3033", "verdict": "delete", "reason": "didnt clarify ambiguity", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:08.993779Z"}
+{"id": "v1-0034", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:10.985363Z"}
+{"id": "v1-3034", "verdict": "delete", "reason": "cannot be verified by the evidence", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:31.906119Z"}
+{"id": "v1-0035", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:33.351900Z"}
+{"id": "v1-3035", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:34.031634Z"}
+{"id": "v1-0036", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:34.743410Z"}
+{"id": "v1-3036", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:35.503602Z"}
+{"id": "v1-0037", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:36.215781Z"}
+{"id": "v1-3037", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:37.040036Z"}
+{"id": "v1-0038", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:37.743612Z"}
+{"id": "v1-3038", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:38.303841Z"}
+{"id": "v1-0039", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:39.111653Z"}
+{"id": "v1-3039", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:39.952085Z"}
+{"id": "v1-0040", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:40.585202Z"}
+{"id": "v1-3040", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:41.360171Z"}
+{"id": "v1-0041", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:49.319989Z"}
+{"id": "v1-3041", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:50.879962Z"}
+{"id": "v1-0042", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:51.593404Z"}
+{"id": "v1-3042", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:52.168401Z"}
+{"id": "v1-0043", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:53.001763Z"}
+{"id": "v1-3043", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:53.687666Z"}
+{"id": "v1-0044", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:54.393370Z"}
+{"id": "v1-3044", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:54.903455Z"}
+{"id": "v1-0045", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:55.439518Z"}
+{"id": "v1-3045", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:56.047523Z"}
+{"id": "v1-0046", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:56.585002Z"}
+{"id": "v1-3046", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:04:57.127586Z"}
+{"id": "v1-0047", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:06.063725Z"}
+{"id": "v1-3047", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:07.489145Z"}
+{"id": "v1-0048", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:08.080778Z"}
+{"id": "v1-3048", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:08.615733Z"}
+{"id": "v1-0049", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:18.568222Z"}
+{"id": "v1-0050", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:19.551540Z"}
+{"id": "v1-0051", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:20.231461Z"}
+{"id": "v1-0052", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:20.927635Z"}
+{"id": "v1-0053", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:21.919939Z"}
+{"id": "v1-0054", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-27T22:05:22.807691Z"}
+{"id": "v1-0055", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:04.965235Z"}
+{"id": "v1-0056", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:16.590715Z"}
+{"id": "v1-0057", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:18.903297Z"}
+{"id": "v1-0058", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:20.181852Z"}
+{"id": "v1-0059", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:21.095228Z"}
+{"id": "v1-0060", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:21.946895Z"}
+{"id": "v1-0061", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:22.736498Z"}
+{"id": "v1-0062", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:23.511567Z"}
+{"id": "v1-0063", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:24.278405Z"}
+{"id": "v1-0064", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:25.013859Z"}
+{"id": "v1-0065", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:25.815233Z"}
+{"id": "v1-0066", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:26.606802Z"}
+{"id": "v1-0067", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:39.055072Z"}
+{"id": "v1-0068", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T01:59:40.065457Z"}
+{"id": "v1-0069", "verdict": "delete", "reason": "d", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:01.477834Z"}
+{"id": "v1-3004", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:35.518593Z"}
+{"id": "v1-3005", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:38.940598Z"}
+{"id": "v1-3006", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:41.260917Z"}
+{"id": "v1-3007", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:42.750429Z"}
+{"id": "v1-3008", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:44.133122Z"}
+{"id": "v1-3009", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:45.541063Z"}
+{"id": "v1-3010", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:47.078389Z"}
+{"id": "v1-3011", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:48.572029Z"}
+{"id": "v1-3013", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:50.245631Z"}
+{"id": "v1-3015", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:52.181689Z"}
+{"id": "v1-3016", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:54.045580Z"}
+{"id": "v1-3017", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:55.565360Z"}
+{"id": "v1-3021", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:56.690850Z"}
+{"id": "v1-3022", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:57.956985Z"}
+{"id": "v1-3023", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:00:59.341951Z"}
+{"id": "v1-3032", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:00.636813Z"}
+{"id": "v1-3035", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:01.988776Z"}
+{"id": "v1-3037", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:03.275917Z"}
+{"id": "v1-3038", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:07.534247Z"}
+{"id": "v1-3040", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:09.356894Z"}
+{"id": "v1-3041", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:10.669063Z"}
+{"id": "v1-3043", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:12.349673Z"}
+{"id": "v1-3044", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:13.692480Z"}
+{"id": "v1-3045", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:14.957453Z"}
+{"id": "v1-3047", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:16.197878Z"}
+{"id": "v1-3048", "verdict": "delete", "reason": "surplus: the bucket has its 20 and this shape is covered", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:01:17.306195Z"}
+{"id": "v1-0005", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:02.701558Z"}
+{"id": "v1-1004", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:03.384032Z"}
+{"id": "v1-2001", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:03.884546Z"}
+{"id": "v1-3012", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:04.885741Z"}
+{"id": "v1-0007", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:05.658193Z"}
+{"id": "v1-1006", "verdict": "delete", "reason": "no citation to support", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:12.821950Z"}
+{"id": "v1-2003", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:15.091498Z"}
+{"id": "v1-3014", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:15.637360Z"}
+{"id": "v1-0016", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:22.093792Z"}
+{"id": "v1-1008", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:23.421162Z"}
+{"id": "v1-2018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:24.011619Z"}
+{"id": "v1-3018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:24.482211Z"}
+{"id": "v1-0018", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:25.162806Z"}
+{"id": "v1-1019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:25.725086Z"}
+{"id": "v1-2021", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:26.364363Z"}
+{"id": "v1-3027", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:26.965161Z"}
+{"id": "v1-0019", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:27.565120Z"}
+{"id": "v1-1020", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:28.205154Z"}
+{"id": "v1-2024", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:28.748805Z"}
+{"id": "v1-3030", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:29.372465Z"}
+{"id": "v1-0021", "verdict": "delete", "reason": "variable credits", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:35.108716Z"}
+{"id": "v1-3031", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:36.113720Z"}
+{"id": "v1-0030", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:02:36.658974Z"}
+{"id": "v1-3033", "verdict": "delete", "reason": "ambiguity", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:08.700141Z"}
+{"id": "v1-0046", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:09.894017Z"}
+{"id": "v1-3034", "verdict": "delete", "reason": "could not verified", "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:18.028473Z"}
+{"id": "v1-0053", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:19.210768Z"}
+{"id": "v1-3039", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:19.744096Z"}
+{"id": "v1-0054", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:20.306139Z"}
+{"id": "v1-3042", "verdict": "accept", "reason": null, "field_changed": null, "before": null, "after": null, "ts": "2026-09-28T02:05:20.875788Z"}
