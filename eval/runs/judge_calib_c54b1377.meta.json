@@ -16,7 +16,7 @@
     }
   },
   "config_hash": "c73b197d",
-  "correctness_key": "c0dfa1b6",
+  "correctness_key": "c54b1377",
   "dataset": "eval/datasets/v1.jsonl",
   "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
   "model": "gpt-4o-mini",
@@ -28,10 +28,10 @@
     "multihop": "f80a2d88ca845c077dd83a3c7af0fdce5a019b842018177707adc8a984a18236",
     "unanswerable": "77743aa6dfb4713c77f50ec3dd7e9d222c3b833df42a51ec4923b4a559255bf2"
   },
-  "run": "eval/runs/judge_calib_c0dfa1b6.jsonl",
-  "sha256": "715a0f264780f1fda8d2dd9aefa53b3573bb075c94255ae023d1cfaebe0cfb5e",
-  "signals_key": "40070d8d",
-  "signals_run": "eval/runs/signals_calib_40070d8d.jsonl",
-  "signals_run_sha256": "f39d5ebccc6f55d4fb71e8c47b6456c02c0ced28b3218214a2ac86409d464bac",
+  "run": "eval/runs/judge_calib_c54b1377.jsonl",
+  "sha256": "469b39b4fb36a93ee780e9aa79e14912f81cae8b35c990b98936c815bc635a5c",
+  "signals_key": "37164723",
+  "signals_run": "eval/runs/signals_calib_37164723.jsonl",
+  "signals_run_sha256": "cd29fdf7e551165eaf9cf372ef10cf9d8b3ff9e9e233111c822464f662a8bac3",
   "split": "calib"
 }

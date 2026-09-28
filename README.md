@@ -2305,17 +2305,23 @@ uv run python -m eval.scripts.review_signals --split calib --write-csv      # ->
   key plus the whole section. Under `signals`, it would have renamed the calib run it grades, and
   that run is a random draw that cannot be redone.
 
-Calib judge run (gpt-4o-mini, correctness key `c0dfa1b6`), **the judge's calls, not labels**:
+Judge runs on both halves of signals key `37164723` (gpt-4o-mini, correctness key `c54b1377`),
+**the judge's calls, not labels**:
 
-| bucket | judge: correct | judge: incorrect |
+| bucket | calib: judge correct / rows | test: judge correct / rows |
 |---|---|---|
-| fact | 23 | 2 |
-| multihop | 0 | 12 |
-| unanswerable | 3 | 1 |
-| ambiguous | 0 | 5 |
+| fact | 23 / 25 | 21 / 21 |
+| multihop | 0 / 12 | 2 / 12 |
+| unanswerable | 3 / 4 | 2 / 3 |
+| ambiguous | 0 / 5 | 0 / 6 |
 
-All 46 replies parsed. The human pass has not been done, so no CSV and no review log are
-committed. The test half has no signals run yet (#87), so it has nothing to judge.
+All 88 replies parsed.
+
+- **A verdict follows the answer text, not the run.** A log entry applies to a row when its `id` and
+  answer hash both match. When #87 recollected calib under `37164723`, 37 of 46 answers came back
+  word for word, despite temperature 0, and 9 did not. The 37 keep the verdicts given under
+  `40070d8d`. The 9 count as unreviewed and are shown again. The CSV sidecar counts carried-over
+  verdicts.
 
 ## Day 1 goal
 

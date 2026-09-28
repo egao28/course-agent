@@ -22,10 +22,14 @@ overturns are the evidence on whether the judge can be used without a person on 
 before the next row is shown, so a closed terminal loses at most the row on screen. Resumption is by
 ``id``: a row with a current verdict is not shown again unless ``--redo`` asks.
 
-**A verdict belongs to one answer.** Each entry records the signals key and the sha256 of the answer
-it judged. A rerun of #87 is a different random draw, with a new key and new answers, and the old
-verdicts do not carry over to it. They stay in the log and are ignored, and an entry whose answer
-hash no longer matches is reported as stale and the row is shown again.
+**A verdict belongs to one answer text, not to one run.** Each entry records the sha256 of the
+answer it judged, and the signals key of the run it was given in. A verdict applies to a row when
+the row's ``id`` and answer hash both match, whichever run it came from. A rerun of #87 changes
+some answers and not others, even at temperature 0: when #87 moved from signals key ``40070d8d``
+to ``37164723``, 37 of 46 calib answers came back word for word and 9 did not. A person's verdict
+on a text is still that person's verdict on the same text, so the 37 keep theirs. The 9 are
+reported as stale and shown again. The CSV sidecar counts how many verdicts were carried over from
+another run.
 
 **The CSV writes booleans as 1 and 0, and a missing value as an empty cell.** ``judge_correct`` is
 empty where the judge's reply could not be read. ``correct`` is never empty, because a file with an
@@ -146,12 +150,12 @@ def append_entry(path: Path, entry: Mapping[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
-def latest(entries: Sequence[Mapping[str, Any]], split: Split, key: str) -> dict[str, dict]:
-    """The latest verdict per ``id`` for one signals run. File order is judgement order."""
-    found: dict[str, dict] = {}
+def latest(entries: Sequence[Mapping[str, Any]], split: Split) -> dict[tuple[str, str], dict]:
+    """The latest verdict per ``(id, answer_sha256)`` in one half. File order is judgement order."""
+    found: dict[tuple[str, str], dict] = {}
     for entry in entries:
-        if entry["split"] == split and entry["signals_key"] == key:
-            found[entry["id"]] = dict(entry)
+        if entry["split"] == split:
+            found[entry["id"], entry["answer_sha256"]] = dict(entry)
     return found
 
 
@@ -227,17 +231,17 @@ class Status(NamedTuple):
     stale: list[str]
 
 
-def status(rows: Sequence[Row], entries: Sequence[Mapping[str, Any]], split: Split, key: str):
-    found = latest(entries, split, key)
+def status(rows: Sequence[Row], entries: Sequence[Mapping[str, Any]], split: Split) -> Status:
+    """Rows whose current answer has a verdict, and rows with verdicts only for other answers."""
+    found = latest(entries, split)
+    judged_ids = {item_id for item_id, _ in found}
     current: dict[str, dict] = {}
     stale: list[str] = []
     for row in rows:
-        entry = found.get(row.id)
-        if entry is None:
-            continue
-        if entry["answer_sha256"] == row.answer_sha256:
+        entry = found.get((row.id, row.answer_sha256))
+        if entry is not None:
             current[row.id] = entry
-        else:
+        elif row.id in judged_ids:
             stale.append(row.id)
     return Status(current, stale)
 
@@ -480,6 +484,9 @@ def write_csv(
             "review_log": rel_to_repo(log_path),
             "review_log_sha256": file_sha256(log_path),
             "n_rows": len(body),
+            "verdicts_carried_over": sum(
+                1 for row in rows if verdicts[row.id]["signals_key"] != signals_key(cfg)
+            ),
             "reviewers": dict(sorted(Counter(line["reviewer"] for line in body).items())),
             **agreement(rows, verdicts),
         },
@@ -511,7 +518,7 @@ def main(
     try:
         key = signals_key(cfg)
         rows = load_rows(args.split, cfg, args.dataset, runs_dir, known)
-        current = status(rows, read_log(log_path), args.split, key)
+        current = status(rows, read_log(log_path), args.split)
         if current.stale:
             print(
                 f"{len(current.stale)} verdict(s) are for an answer that has since changed and "
@@ -555,7 +562,7 @@ def main(
         reader(out, input_fn),
         redo=args.redo,
     )
-    done = status(rows, read_log(log_path), args.split, key)
+    done = status(rows, read_log(log_path), args.split)
     print(
         f"\nthis sitting: {sum(made.values())} verdict(s) "
         f"({', '.join(f'{n} {a}' for a, n in sorted(made.items())) or 'none'}); "

@@ -333,7 +333,7 @@ def test_the_latest_verdict_wins_and_a_changed_answer_makes_a_verdict_stale(
     review(dataset, runs, log, ["a", "a", "n", "a"], "--reviewer", "egao")
     review(dataset, runs, log, ["n", "second look", "q"], "--reviewer", "egao", "--redo")
     rows = rs.load_rows("calib", cfg, dataset, runs, KNOWN)
-    current = rs.status(rows, rs.read_log(log), "calib", signals_key(cfg))
+    current = rs.status(rows, rs.read_log(log), "calib")
     assert current.verdicts["v1-0001"]["correct"] is False
     # Rewrite one answer in place: its verdict no longer applies, and the judge's neither.
     path = run_path("calib", cfg, runs)
@@ -350,3 +350,31 @@ def test_a_log_entry_without_a_person_is_refused(tmp_path):
     log.write_text(json.dumps(entry) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="every entry is a person's verdict"):
         rs.read_log(log)
+
+
+def test_a_verdict_follows_the_answer_text_across_signals_runs(cfg, dataset, runs, tmp_path):
+    # A rerun of #87 with a new signals key: one answer changed, three came back word for word.
+    judge(cfg, dataset, runs)
+    log = tmp_path / "log.jsonl"
+    review(dataset, runs, log, ["a", "a", "n", "a"], "--reviewer", "egao")
+    entries = log_lines(log)
+    for entry in entries:
+        entry["signals_key"] = "0ldrun00"
+    log.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    path = run_path("calib", cfg, runs)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    lines[1]["answer"] = "MATH 213 [2026-sp:MATH-213], then CS 374 [2026-sp:CS-374]."
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    judge(cfg, dataset, runs)
+    rows = rs.load_rows("calib", cfg, dataset, runs, KNOWN)
+    current = rs.status(rows, rs.read_log(log), "calib")
+    assert sorted(current.verdicts) == ["v1-0001", "v1-0003", "v1-0004"]
+    assert current.stale == ["v1-0002"]
+    code, printed = review(dataset, runs, log, [], "--write-csv")
+    assert code == 1
+    _, printed = review(dataset, runs, log, ["y", "both hops now"], "--reviewer", "egao")
+    assert "[1/1] v1-0002" in printed
+    assert review(dataset, runs, log, [], "--write-csv")[0] == 0
+    csv_file = rs.csv_path("calib", cfg, runs)
+    meta = json.loads(csv_file.with_name(csv_file.name + ".meta.json").read_text(encoding="utf-8"))
+    assert meta["verdicts_carried_over"] == 3
