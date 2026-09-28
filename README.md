@@ -2223,8 +2223,8 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`35bbd61b` since #87 added `signals` and #88 added `correctness`, both also left out) covers every
-value, and it names only the bootstrap result.
+(`7910b2a9` since #87 added `signals`, #88 `correctness` and #90 `conformal`, all also left out)
+covers every value, and it names only the bootstrap result.
 
 ## Confidence signals
 
@@ -2336,6 +2336,52 @@ in either half, and `multihop` has none in calib.
   word for word, despite temperature 0, and 9 did not. The 37 keep the verdicts given under
   `40070d8d`. The 9 count as unreviewed and are shown again. The CSV sidecar counts carried-over
   verdicts.
+
+## Conformal threshold
+
+`eval/conformal.py` (#90) fits an answering threshold for each signal on the **calib half only**,
+at target error `conformal.alpha` = 0.10, and picks the one signal #91 and #92 use.
+
+```
+uv sync --extra analysis                # scikit-learn, for the AUROC that picks the signal
+uv run python -m eval.conformal         # -> eval/runs/conformal_{conformal_key}.json
+```
+
+- **The rule.** For a candidate `t`, the gate answers the calib rows with `signal >= t`: `n` rows,
+  `k` of them wrong. `t` is acceptable when `(k + 1) / (n + 1) <= alpha`. That is a finite-sample
+  corrected risk estimate, not a high-probability bound. A bound would be a Clopper–Pearson upper
+  limit, and nothing here computes one.
+- **Fixed-sequence scan.** Candidates are the signal's distinct values, strictest first, and tied
+  rows enter together. The scan stops at the first candidate that fails, and `t` is the last one
+  that passed. It does not take the loosest `t` that passes anywhere: risk zig-zags in `t`, and
+  that choice would be a selection the `+1` does not cover.
+- **Candidates too small to pass are skipped, not failed.** At alpha = 0.10 a candidate needs
+  `n >= 9` to pass even with no errors. The scan skips the strict candidates below that count,
+  because otherwise a signal with distinct top values fails on its single strictest row (at 1/2) and
+  can never be accepted. The skip reads counts, not labels. The file records how many were skipped.
+- **No acceptable `t` is a result:** `t = +inf`, answer nothing. JSON has no infinity, so the file
+  writes `"t": null, "answers_nothing": true`, and `eval.conformal.threshold()` reads it back.
+- **Null rows** (tool rows for `retrieval_score`) are left out of each signal's fit, and counted.
+- **The signal is chosen on calib AUROC** (#89's `auroc`), never on test. A tie goes to the signal
+  with more non-null rows, then to the order `retrieval_score, verbalized, self_consistency`.
+- **`conformal` does not move the config hash.** It is in `config.AFTER_THE_RUNS`, and the result
+  is named after `config.conformal_key`: the correctness key plus the whole section. Changing alpha
+  or relabelling the CSV names a new file. `cfg.hash` stays `c73b197d`. `cfg.full_hash` moved to
+  `7910b2a9`, so the bootstrap result was renamed, with its numbers unchanged.
+
+Calib, signals key `37164723`, conformal key `83496e82`: n = 46 (25 fact, 12 multihop,
+5 ambiguous, 4 unanswerable), 20 wrong. Answering everything gives `(k+1)/(n+1)` = 0.447.
+
+| signal | non-null | AUROC | t | answered | scan stopped at | lowest `(k+1)/(n+1)`, any t |
+|---|---|---|---|---|---|---|
+| retrieval_score | 10 | 0.760 | +inf | 0 | 11.06 (9 rows, 4 wrong) | 0.333 |
+| verbalized | 46 | 0.792 | +inf | 0 | 100 (28 rows, 5 wrong) | 0.207 |
+| self_consistency | 46 | 0.575 | +inf | 0 | 1 (43 rows, 17 wrong) | 0.409 |
+
+**No signal reaches alpha = 0.10 at any threshold on calib, so each answers nothing.** This is not
+a product of the scan order: the lowest `(k+1)/(n+1)` over every candidate is 0.207, twice alpha.
+`verbalized` goes to #91 and #92 on calib AUROC. `retrieval_score` is non-null on only 10 of 46
+rows, so its AUROC is on a different, much smaller sample.
 
 ## Day 1 goal
 

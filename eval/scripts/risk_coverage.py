@@ -64,10 +64,6 @@ from eval.scripts.split import read_sidecar
 #: recorded diagnostic, not a candidate signal.
 SIGNALS: tuple[str, ...] = ("retrieval_score", "verbalized", "self_consistency")
 
-#: The risk=alpha reference line. #90 owns alpha and will move it into config; until then the
-#: figure draws the plan's 0.10 and says so in the legend.
-REFERENCE_RISK = 0.10
-
 FIGURES_DIR = REPO_ROOT / "report" / "figures"
 
 #: Categorical slots 1-3 of the dataviz reference palette, validated for CVD separation on a light
@@ -291,7 +287,8 @@ def analyse(table: Table, split: Split, cfg: Config) -> dict[str, Any]:
         "n": len(table.ids),
         "buckets": {b: table.buckets.count(b) for b in sorted(set(table.buckets))},
         "answer_everything_risk": 1 - float(np.mean(table.correct)),
-        "reference_risk": REFERENCE_RISK,
+        # The risk = alpha reference line: #90's conformal.alpha, which the figure only draws.
+        "reference_risk": float(cfg["conformal"]["alpha"]),
         "n_resamples": n_resamples,
         "seed": seed,
         "ci": ci,

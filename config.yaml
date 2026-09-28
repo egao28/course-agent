@@ -267,3 +267,12 @@ correctness:
 
       Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
       saying why.
+# Day 5's conformal answering threshold (#90), fitted by eval/conformal.py on the calib half's
+# signals CSV. Like correctness, it is read after the run it calibrates on exists and changes no
+# line of it, so config.hash leaves it out (config.AFTER_THE_RUNS) and stays c73b197d; the result is
+# named after config.conformal_key: the correctness key plus this whole section.
+conformal:
+  # The target error rate among answered rows. A threshold t is acceptable when the calib rows
+  # with signal >= t give (k + 1) / (n + 1) <= alpha, so at 0.10 nothing is accepted on fewer than
+  # 9 answered rows, and 9 needs 0 errors.
+  alpha: 0.10
