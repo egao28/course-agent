@@ -147,6 +147,12 @@ class Packet(NamedTuple):
     #: Questions asked during annotation. Written once as a stub and never overwritten: they are
     #: evidence that ``GUIDELINES.md`` is incomplete, and #62 reports them.
     questions: Path
+    #: How the filled sheet came back, when that is not simply "the annotator typed it". Written
+    #: by hand, never by this module, and read into both reports **above the numbers**: a sheet
+    #: relayed second-hand, or reconstructed from a verbal account, scores exactly the same as
+    #: one somebody typed, so nothing in the arithmetic can reveal the difference. If it is not
+    #: written down beside the sheet it is not recoverable at all.
+    provenance: Path
 
     @property
     def written(self) -> tuple[Path, ...]:
@@ -169,6 +175,7 @@ def packet(directory: Path | None = None) -> Packet:
         citations=base / "agreement_citations.md",
         instructions=base / "agreement_instructions.md",
         questions=base / "agreement_questions.md",
+        provenance=base / "agreement_sheet_filled.provenance.md",
     )
 
 
@@ -1160,11 +1167,47 @@ report carries no timestamp: nothing in it changes unless the sheet or the datas
 """
 
 
+#: Above the numbers, when the sheet did not come back from the annotator's own hands. Not a
+#: footnote and not in the caveats: a reader who has already read the agreement number has
+#: already formed the view this paragraph exists to qualify.
+PROVENANCE_LEAD = """\
+## How this sheet came back
+
+> {body}
+
+Everything below is computed from the sheet as it stands. The arithmetic cannot tell a
+transcribed sheet from a typed one, which is why this section is here and above the numbers
+rather than among the caveats.
+"""
+
+
+def render_provenance(pack: Packet | None) -> str:
+    """The note beside the filled sheet, quoted, or nothing when the sheet was typed as normal.
+
+    The file's own first paragraph, blockquoted rather than summarised: whoever wrote it knew
+    what happened and this module does not, so paraphrasing it here would be this module having
+    an opinion about someone else's record.
+    """
+    if pack is None or not pack.provenance.exists():
+        return ""
+    text = pack.provenance.read_text(encoding="utf-8")
+    paragraphs = [
+        block.strip()
+        for block in text.split("\n\n")
+        if block.strip() and not block.strip().startswith("#")
+    ]
+    if not paragraphs:
+        return ""
+    body = " ".join(paragraphs[0].split())
+    return PROVENANCE_LEAD.format(body=body).rstrip()
+
+
 def render_report(
     meta: Mapping[str, Any],
     judged: Sequence[Filled],
     sample: Mapping[str, EvalItem],
     sheet: Path,
+    pack: Packet | None = None,
 ) -> str:
     """The whole report, in one string."""
     scores = [score_field(pairs_for(field, judged, sample), field) for field in FIELDS]
@@ -1178,6 +1221,7 @@ def render_report(
         )
     sections = [
         render_header(meta, judged, sheet),
+        *([one] if (one := render_provenance(pack)) else []),
         render_numbers(scores, len(judged)),
         render_confusion(pairs_for("bucket", judged, sample)),
         render_disagreements(disagreements(judged, sample), len(judged)),
@@ -1315,7 +1359,7 @@ def score(
             out.write("  " + " ".join(p for p in parts if p) + f": {problem.message}\n")
         out.write("\nNothing written: the sheet is the agreement number's denominator.\n")
         return 1
-    body = render_report(meta, judged, sample, sheet)
+    body = render_report(meta, judged, sample, sheet, pack)
     if dry_run:
         out.write(body)
         return 0

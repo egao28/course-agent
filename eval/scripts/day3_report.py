@@ -1005,6 +1005,11 @@ def render_agreement(facts: Facts) -> str:
                 "one rendering, so the two reports cannot disagree about a number."
             ),
             "",
+            *(
+                [demote(one), ""]
+                if (one := agreement.render_provenance(facts.src.packet))
+                else []
+            ),
             demote(agreement.render_numbers(scores, len(judged))),
             "",
             demote(agreement.render_confusion(agreement.pairs_for("bucket", judged, sample))),
@@ -1172,6 +1177,33 @@ def limitation_bullets(facts: Facts) -> list[str]:
             "must condition on `bucket` (#54)."
         ),
         *assistance_bullet(facts),
+        *sheet_bullet(facts),
+    ]
+
+
+def sheet_bullet(facts: Facts) -> list[str]:
+    """The limitation that the agreement sheet was not the annotator's own typing, if it was not.
+
+    Separate from the assistance bullet because it is a different failure: that one is about a
+    machine having read the rows first, this one is about the record of a person's reading being
+    second-hand. A reader who discounts one should not thereby discount the other.
+    """
+    note = facts.src.packet.provenance
+    if not note.exists():
+        return []
+    missing = [row for row in facts.judged if not row.rule]
+    return [
+        (
+            "- **The second annotator's sheet is not their own typing.** How it came back is in "
+            f"`{rel_to_repo(note)}` and is quoted above the numbers in the Agreement section. "
+            "The arithmetic cannot tell a transcribed sheet from a typed one, so the "
+            "distinction survives only because it is written down. What it costs concretely: "
+            f"{len(missing)} of the {len(facts.judged)} judged rows cite no guideline rule, so a "
+            "disagreement cannot be traced to the line of `eval/GUIDELINES.md` it came from — "
+            "which is the main thing #60 draws this sample for — and the two-pass order that "
+            "keeps `bucket` from being judged after the citations are opened is unverifiable "
+            "here. The labels are a real second reader's; the record of them is not first-hand."
+        ),
     ]
 
 
