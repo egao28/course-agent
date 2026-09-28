@@ -2383,6 +2383,52 @@ a product of the scan order: the lowest `(k+1)/(n+1)` over every candidate is 0.
 `verbalized` goes to #91 and #92 on calib AUROC. `retrieval_score` is non-null on only 10 of 46
 rows, so its AUROC is on a different, much smaller sample.
 
+## Conformal vs fixed 0.7 on test
+
+`eval/scripts/conformal_eval.py` (#91) applies #90's calib-fit thresholds, and the template's fixed
+0.7, to the **test half, once**. It reads only #88's test CSV and #90's fit.
+
+```
+uv run python -m eval.scripts.conformal_eval   # -> eval/runs/conformal_eval_{conformal_key}.json
+```
+
+- **Provenance is checked before any label is read.** The run is refused unless the test CSV
+  matches its sidecar and signals key and grades this config's judge run; the fit carries this
+  config's conformal, correctness and signals keys and alpha, and its calib CSV is unchanged; and
+  both halves' signals runs record the sha256 of the committed `eval/datasets/v1.jsonl`.
+- **Read once.** If the result file exists, the run is refused.
+- **0.7 on each signal's scale:** `verbalized / 100 >= 0.7`; `self_consistency >= 0.7`, which
+  means all 3 pairs agree; `retrieval_score >= 0.7` on raw BM25, which is unbounded.
+- **Realized error** is wrong / answered, with a 95% Clopper–Pearson interval (the
+  `eval.bootstrap.ci` level). Coverage is answered of the signal's non-null rows, as a count.
+
+Test, conformal key `83496e82`: n = 42 answered rows (21 fact, 12 multihop, 6 ambiguous,
+3 unanswerable). The 21 test rows the signals run skipped have no signals, so they are not here.
+The chosen signal is `verbalized`.
+
+| method | t | target error | realized error [95% CI] | coverage |
+|---|---|---|---|---|
+| conformal (calib-fit t) | +inf | 0.10 | - (nothing answered) | 0 / 42 |
+| fixed t = 0.7 | 70 | - (no guarantee) | 0.405 [0.256, 0.567], 17 wrong | 42 / 42 |
+| answer everything (reference) | - | - | 0.405 [0.256, 0.567], 17 wrong | 42 / 42 |
+
+| signal | method | t | realized error [95% CI] | coverage | null | test range |
+|---|---|---|---|---|---|---|
+| retrieval_score | conformal | +inf | - | 0 / 10 | 32 | 10.67–30.29 |
+| retrieval_score | fixed | 0.7 | 0.700 [0.348, 0.933], 7 wrong | 10 / 10 | 32 | 10.67–30.29 |
+| verbalized | conformal | +inf | - | 0 / 42 | 0 | 70–100 |
+| verbalized | fixed | 70 | 0.405 [0.256, 0.567], 17 wrong | 42 / 42 | 0 | 70–100 |
+| self_consistency | conformal | +inf | - | 0 / 42 | 0 | 1/3–1 |
+| self_consistency | fixed | 0.7 | 0.314 [0.169, 0.493], 11 wrong | 35 / 42 | 0 | 1/3–1 |
+
+**Conformal answers nothing on test, because #90 found no acceptable `t` on calib.** So it has no
+realized error to set against 0.10. That is the fit's result carried over, not a test finding.
+**Fixed 0.7 on `verbalized` is the same as answering everything.** The lowest verbalized score on
+test is 70, so every row clears it. On raw BM25, 0.7 also answers every non-null row. On
+`self_consistency`, 0.7 answers the 35 unanimous rows at 0.314 error, three times the target.
+`dense_top1`, a diagnostic and not a signal, peaks at 0.740 on test, so a raw 0.7 there answers
+4 of 42. The Day 2 maximum was 0.678, so "almost nothing" holds, but "nothing" does not.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
