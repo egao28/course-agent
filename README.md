@@ -37,7 +37,7 @@ course-agent/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table (→ report/day4_ablation_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
@@ -2223,7 +2223,35 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`8a1980f9`) covers every value, and it names only the bootstrap result.
+(`e5898265` since #79 added `rerank:`) covers every value, and it names only the bootstrap result.
+
+## Reranking (stretch)
+
+`eval/scripts/rerank.py` ([#79](../../issues/79)) adds a fourth row, `hybrid_rerank`. It takes
+`retrieve(q, "hybrid", k=20)`, rescores the (question, chunk text) pairs with `BAAI/bge-reranker-base`
+(`retrieval/rerank.py`, CPU, one batch per question), and keeps the top 5. It is a step after
+`retrieve()`, not a new mode, so `MODES` and what `hybrid` returns are unchanged.
+
+```bash
+uv sync --extra local                                                          # sentence-transformers
+uv run --env-file .env --extra local python -m eval.scripts.rerank --split test  # -> eval/runs/rerank_test_{rerank_key}.jsonl
+uv run python -m eval.scripts.bootstrap                                        # adds the row, same indices
+```
+
+- **Same resample indices.** The bootstrap adds the rerank vector to the same `paired_bootstrap`
+  call, so the three existing intervals do not move. It also computes `hybrid_rerank − hybrid`.
+- **The ceiling is printed.** Reranking only reorders the pool, so its Recall@5 is at most
+  hybrid's Recall@20. Each line carries `pool_recall_at_20`.
+- **Latency per question** (`pool_ms`, `rerank_ms`) is in every line, with model loading excluded.
+- **The pool is a second live draw.** Each line records whether the pool's top 5 is the committed
+  hybrid top 5 it is compared with.
+- **Not in `cfg.hash`.** `rerank` is in `config.AFTER_THE_RUNS` beside `eval.bootstrap`, and the
+  run is named after `config.rerank_key` (`cfg.hash` + the `rerank` section). The model is pinned
+  by Hugging Face revision.
+
+Test half, n = 41: Recall@5 0.846 [0.748, 0.931], MRR@5 0.868 [0.774, 0.945]. rerank − hybrid is
+−0.020 [−0.104, 0.061] on Recall@5 and +0.065 [−0.059, 0.186] on MRR@5, and neither interval
+excludes 0. The hybrid@20 ceiling is 0.949, and the median rerank cost is 724 ms per question on CPU.
 
 ## Day 4 report
 
