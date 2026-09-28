@@ -1870,6 +1870,50 @@ end to end; what it needs is a person, and nothing here writes a verdict on thei
 `tests/test_review.py` holds both artifacts the moment they land, including the invariant that
 `v1.jsonl` is exactly the drafts replayed through the log.
 
+## Model-assisted triage
+
+`eval/scripts/triage.py` shortens the verification pass without replacing it. One model call per
+drafted row answers the same questions the reviewer answers — against `eval/GUIDELINES.md` and
+the cited chunk text — and `review --triage` shows the result under each row while a person still
+types the verdict.
+
+```bash
+uv run --env-file .env python -m eval.scripts.triage      # read every unread row
+uv run python -m eval.scripts.review --triage             # the pass, with the suggestions shown
+```
+
+**It is not the review log, and no reader can confuse the two.** The suggestions go to
+`eval/datasets/triage.jsonl`, whose rows carry neither a `verdict` nor a `ts`; `read_triage`
+refuses a file with either, `review.read_entries` refuses a triage row by name on the first line,
+and `--promote` cannot see this file at all. A machine's opinion about a row is not evidence that
+the row was checked, and the only file that is has to stay the one a person wrote into.
+
+**The suggestion is derived, not asked for.** The model answers four questions — is the answer
+right, do the citations support it, which bucket is this, and does the row belong in the set at
+all — and `suggest()` maps those to accept / edit / delete. The first three are #59's checks and
+#60's fields in their own words, so a triage answer and an annotator's are comparable values
+rather than two vocabularies; the fourth exists because *"this row should be deleted"* is a
+verdict the other three cannot express (a row can be correct in every way and still be one
+`GUIDELINES.md` rule 2 deletes). Asking the guidelines' own questions and computing the verdict
+means the mapping is a function a test pins with no model in the loop, and a reviewer who
+disagrees can see **which** answer they disagree with.
+
+**A third model.** The rows were drafted by `gpt-4o-mini` and `gpt-4.1-mini`, so the default here
+is `gpt-4.1` — neither of them. A drafting model asked to check its own question is being asked
+whether it made a mistake. `--model` overrides it, every row records who read it, and none of
+this touches `config.yaml`.
+
+**It anchors the reviewer, and that is the price.** A person shown `accept` accepts more often
+than one shown nothing. Three things follow, all deliberate: the suggestion is rendered **last**,
+after the three checks and after every cited record, so the reading happens before the opinion
+arrives; `--triage` is opt-in, and the pass without it is the pass #59 shipped; and
+[#62](../../issues/62)'s report **discloses** the assistance whenever the file exists — which
+model, against which guidelines digest — and measures it, by printing how often the reviewer
+agreed with the suggestion as a 3×3 table. That rate is an upper bound on the influence rather
+than a measurement of it: what an unassisted reader would have decided is not recoverable
+afterwards, and the off-diagonal cells are the only direct evidence in the report that the
+reading happened.
+
 ## Second annotator
 
 Fifteen rows, one other person, the same `eval/GUIDELINES.md` and no conversation

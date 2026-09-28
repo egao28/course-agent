@@ -47,7 +47,7 @@ import pytest
 
 from config import load_config, rel_to_repo
 from eval.schema import BUCKETS, RULES, EvalItem, item_id, row_json
-from eval.scripts import agreement, build_multihop, build_unanswerable, review, split
+from eval.scripts import agreement, build_multihop, build_unanswerable, review, split, triage
 from eval.scripts import day3_report as report
 from eval.scripts.draft_items import ID_BLOCKS
 from eval.scripts.draft_items import PROVENANCE_KEYS as DRAFTED_KEYS
@@ -294,7 +294,16 @@ def src(tmp_path: Path, cfg, known: frozenset[str], doc_ids: list[str]) -> repor
     texts = {one: f"{one} — a course record." for row in promotion.rows for one in row.gold_doc_ids}
     assert agreement.export(cfg, dataset, 42, pack, texts=texts, out=StringIO()) == 0
     fill_sheet(pack, {item.id: item for item in agreement.load_dataset(pack.sample)})
-    return report.Sources(dataset=dataset, drafts=drafts, log=log, packet=pack)
+    return report.Sources(
+        dataset=dataset,
+        drafts=drafts,
+        log=log,
+        packet=pack,
+        # Named, and pointed at a file that does not exist: the default is the committed
+        # eval/datasets/triage.jsonl, and a fixture that fell through to it would report on a
+        # real model-assisted pass and fail the moment one happened.
+        triage=datasets / "triage.jsonl",
+    )
 
 
 @pytest.fixture
@@ -317,6 +326,7 @@ def test_check_lists_every_input_and_what_produces_it(cfg, tmp_path: Path):
         drafts=tmp_path / "drafts",
         log=tmp_path / "review_log.jsonl",
         packet=agreement.packet(tmp_path),
+        advisory=tmp_path / "triage.jsonl",
     )
     out = StringIO()
     assert report.render_check(cfg, empty, out) == 1
@@ -445,6 +455,75 @@ def test_limitations_are_computed_and_not_recited(facts: report.Facts, body: str
     assert "`fact` 3 rows ±" in section
     assert "2026-sp" in section and "4,502 courses" in section
     assert "must condition on `bucket`" in section
+
+
+def test_an_unassisted_pass_gets_no_assistance_section_or_bullet(body: str):
+    """The caveat has to be absent exactly when it does not apply."""
+    assert "model-assisted" not in body
+    assert body.split("## Limitations", 1)[1].count("\n- **") == 6
+
+
+@pytest.fixture
+def assisted(src: report.Sources, cfg) -> report.Facts:
+    """The same pass, with a machine's suggestion recorded for every row it judged.
+
+    Two of them disagree with the verdict the fixture's log holds, so the agreement rate is a
+    number and not 100%.
+    """
+    verdicts = review.read_verdicts(src.log)
+    for n, (row_id, _) in enumerate(sorted(verdicts.items())):
+        triage.append_triage(
+            src.triage,
+            triage.Triage(
+                id=row_id,
+                suggested="accept" if n % 7 else "delete",
+                reason="the chunk settles it.",
+                checks={
+                    "answer_correct": "yes",
+                    "citations_support": "yes",
+                    "bucket": "fact",
+                    "belongs": "yes",
+                },
+                model="gpt-4.1",
+                guidelines_sha256="a" * 64,
+                config_hash=cfg.hash,
+            ),
+        )
+    return report.read_facts(cfg, src)
+
+
+def test_an_assisted_pass_is_disclosed_and_measured(assisted: report.Facts):
+    """#62 may not report an accept rate from an assisted pass without saying it was one."""
+    body = report.render_report(assisted)
+    assert "**The pass was model-assisted.**" in body
+    assert "`gpt-4.1`" in body
+    assert "| suggested ↓ / judged → | accept | edit | delete |" in body
+    assert "upper bound" in body
+    section = body.split("## Limitations", 1)[1]
+    assert section.count("\n- **") == 7
+    assert "anchors a" in section
+    assert "no suggestion reached the review log" in section
+
+
+def test_the_agreement_rate_counts_the_rows_both_judged(assisted: report.Facts):
+    """Every judged row has a suggestion in this fixture, and two of them disagree."""
+    pairs = [
+        (assisted.advisory[one].suggested, verdict.verdict)
+        for one, verdict in assisted.verdicts.items()
+        if one in assisted.advisory
+    ]
+    agreed = sum(1 for a, b in pairs if a == b)
+    body = report.render_report(assisted)
+    assert f"They agreed on {agreed} of {len(pairs)} rows" in body
+    assert agreed < len(pairs), "the fixture is meant to disagree somewhere"
+
+
+def test_the_advisory_file_is_an_optional_input(cfg, src: report.Sources):
+    """--check lists it, and its absence does not stop the report."""
+    out = StringIO()
+    assert report.render_check(cfg, src, out) == 0
+    assert "machine triage" in out.getvalue()
+    assert not any(one.required for one in report.inputs(src) if one.name == "machine triage")
 
 
 # --- the agreement section is #60's own -----------------------------------------------------------
