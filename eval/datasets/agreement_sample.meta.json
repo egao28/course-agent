@@ -1,0 +1,61 @@
+{
+  "allocation": {
+    "ambiguous": 3,
+    "fact": 6,
+    "multihop": 3,
+    "unanswerable": 3
+  },
+  "config_hash": "c73b197d",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_rows": 127,
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "draws": [
+    {
+      "bucket": "fact",
+      "got": 6,
+      "ids": [
+        "v1-0007",
+        "v1-0018",
+        "v1-0029",
+        "v1-0043",
+        "v1-0058",
+        "v1-0059"
+      ],
+      "wanted": 6
+    },
+    {
+      "bucket": "multihop",
+      "got": 3,
+      "ids": [
+        "v1-1002",
+        "v1-1003",
+        "v1-1018"
+      ],
+      "wanted": 3
+    },
+    {
+      "bucket": "unanswerable",
+      "got": 3,
+      "ids": [
+        "v1-2005",
+        "v1-2016",
+        "v1-2018"
+      ],
+      "wanted": 3
+    },
+    {
+      "bucket": "ambiguous",
+      "got": 3,
+      "ids": [
+        "v1-3014",
+        "v1-3031",
+        "v1-3046"
+      ],
+      "wanted": 3
+    }
+  ],
+  "guidelines_sha256": "75ec993375ada0e19db41a648cc1d34a3f73a9110bd289a3d4431b12c9719b62",
+  "sample_n": 15,
+  "seed": 42,
+  "target_n": 15
+}

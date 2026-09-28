@@ -1374,9 +1374,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     pack = packet()
     try:
         if args.score:
-            return score(cfg, pack, args.sheet, args.dry_run, sys.stdout)
+            return score(cfg, pack, args.sheet, args.dry_run, out=sys.stdout)
         seed = cfg["seed"] if args.seed is None else args.seed
-        return export(cfg, args.dataset, seed, pack, args.force, args.allow_short, sys.stdout)
+        return export(
+            cfg, args.dataset, seed, pack, args.force, args.allow_short, out=sys.stdout
+        )
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 2

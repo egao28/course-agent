@@ -666,12 +666,15 @@ def rechecked(assisted: report.Facts, cfg) -> report.Facts:
     sample = recheck.draw(assisted.candidates, judged, seed=42, n=8)
     write_json(src.recheck, recheck.sidecar(sample, cfg, judged))
     moved = next(one for one in sample.ids if judged[one].verdict == "accept")
-    for one in sample.ids:
+    for n, one in enumerate(sample.ids):
         held = judged[one]
         verdict = "delete" if one == moved else held.verdict
         reason = "wrong on re-read" if one == moved else held.reason
+        # A distinct timestamp per row, twenty seconds apart: the pace is computed from the gaps
+        # between them, and a re-read recorded at one instant has no pace to report.
         review.append_verdict(
-            src.log, review.Verdict(one, verdict, reason, "2026-09-28T09:00:00.000000Z")
+            src.log,
+            review.Verdict(one, verdict, reason, f"2026-09-28T09:{n // 3:02d}:{n * 20 % 60:02d}Z"),
         )
     return report.read_facts(cfg, src)
 
@@ -681,8 +684,7 @@ def test_the_re_read_is_reported_with_its_interval(rechecked: report.Facts):
     found = rechecked.reread
     assert found is not None and found.reread == 8
     body = report.render_report(rechecked)
-    assert "of the 8 judged rows were re-read properly" not in body  # it is 8 of 152, not of 8
-    assert "were re-read properly" in body or "was re-read properly" in body
+    assert "judged rows were judged twice" in body
     assert "95% CI [" in body
     assert "| bucket | verdict | judged | re-read |" in body
     assert f"seed `{rechecked.reread_sample.seed}`" in body
@@ -714,5 +716,12 @@ def test_the_headline_stops_claiming_by_hand_when_the_pass_was_assisted(assisted
 
 def test_the_re_read_number_reaches_the_limitations(rechecked: report.Facts):
     section = report.render_report(rechecked).split("## Limitations", 1)[1]
-    assert "were re-read properly" in section or "was re-read properly" in section
+    assert "judged a second time" in section
     assert "covered by that interval and by" in section
+
+
+def test_the_report_still_has_no_timestamp_in_it(rechecked: report.Facts):
+    """#59's log is the one artifact carrying timestamps, and none of them reach this file."""
+    body = report.render_report(rechecked)
+    assert not re.search(r"\d{4}-\d\d-\d\dT\d\d:\d\d", body)
+    assert report.render_report(rechecked) == body

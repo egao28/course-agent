@@ -477,7 +477,7 @@ def assisted_sentence(facts: Facts) -> str:
     found = facts.reread
     lo, hi = found.interval
     return (
-        f"{made}; {found.reread} of them were then re-read properly and "
+        f"{made}; {found.reread} of them were read a second time and "
         f"{plural(len(found.changed), 'verdict')} "
         f"{'was' if len(found.changed) == 1 else 'were'} overturned "
         f"({found.rate:.0%}, 95% CI [{lo:.0%}, {hi:.0%}])."
@@ -922,7 +922,7 @@ def render_reread(facts: Facts) -> str:
     ]
     body = [
         (
-            f"**{found.reread} of the {len(facts.verdicts)} judged rows were re-read properly**, "
+            f"**{found.reread} of the {len(facts.verdicts)} judged rows were judged twice**, "
             f"drawn stratified over bucket and verdict at seed `{drawn.seed}` "
             f"(`{rel_to_repo(facts.src.recheck)}`), including every delete a model asked for. "
             f"{plural(len(found.changed), 'verdict')} "
@@ -1185,7 +1185,7 @@ def reread_clause(facts: Facts) -> str:
         )
     lo, hi = found.interval
     return (
-        f"{found.reread} of the rows were re-read properly and "
+        f"{found.reread} of the rows were judged a second time and "
         f"{plural(len(found.changed), 'verdict')} "
         f"{'was' if len(found.changed) == 1 else 'were'} overturned, which puts the pass's "
         f"error rate at {found.rate:.0%} with a 95% interval of [{lo:.0%}, {hi:.0%}] — the "
