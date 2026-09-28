@@ -132,6 +132,13 @@ def test_a_one_class_resample_is_skipped_and_counted():
     assert (lo, hi) == (1.0, 1.0)
 
 
+def test_a_resample_that_draws_none_of_a_signals_rows_is_skipped():
+    # Two non-null rows out of 6: a draw misses both with probability (4/6)^6 = 0.088.
+    signal = [0.9, 0.1, None, None, None, None]
+    boot = rc.bootstrap_auroc({"a": signal}, [1, 0, 1, 0, 1, 0], 2_000, seed=2)
+    assert np.isnan(boot.aurocs["a"]).sum() > 0.088 * 2_000
+
+
 def test_every_resample_skipped_is_an_error():
     with pytest.raises(ValueError, match="every resample"):
         rc.percentile_interval(np.full(5, np.nan), 0.95)

@@ -34,7 +34,8 @@ constant on the sample, or a sample with one class only, has no AUROC and is ref
 signals (Day 4's :func:`eval.scripts.bootstrap.resample_indices`, and its ``eval.bootstrap``
 settings: B, seed, ci). Each signal then keeps the drawn rows it is non-null on, so the three
 intervals, and each pairwise difference, come from the same resampled questions. A resample in
-which a signal's rows are all correct or all incorrect has no AUROC. It is skipped and counted,
+which a signal's rows are all correct or all incorrect, or that drew none of its non-null rows,
+has no AUROC. It is skipped and counted,
 not scored 0.5, and the count is reported. At n of about 63 the intervals are wide, and the table
 shows them as they are.
 """
@@ -167,7 +168,8 @@ def bootstrap_auroc(
         for b, idx in enumerate(indices):
             idx = idx[present[idx]]
             yb = y[idx]
-            if yb.min() != yb.max():
+            # No non-null rows drawn at all is skipped the same way as one class.
+            if len(yb) and yb.min() != yb.max():
                 out[b] = roc_auc_score(yb, s[idx])
         aurocs[name] = out
     return Resampled(indices, aurocs)
