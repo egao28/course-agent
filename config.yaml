@@ -2,7 +2,8 @@
 #
 # Every artifact this repo produces (Chroma collection, BM25 pickle, report, retrieve() result)
 # is tagged with the config hash: sha256 of the canonical dump of this file, first 8 hex chars.
-# Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash;
+# Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash, except
+# eval.bootstrap, which only the bootstrap's own result is named after (config.AFTER_THE_RUNS);
 # reordering keys does not. Print the current hash with:  uv run python config.py
 
 seed: 42
@@ -106,3 +107,13 @@ eval:
   # froze it: a constant with no tuning story, because a seed re-rolled after Day 4 has seen the
   # test half is not a split, it is a fit.
   split_seed: 61
+  # The paired bootstrap over questions (#76). One draw of `n_resamples` index vectors is shared by
+  # every mode, so each resample asks all three retrievers the same questions; `ci` is the
+  # percentile interval. 76 is the issue, for the same reason 61 is above: a constant with no
+  # tuning story. These three are read after every run file is written and cannot change a line of
+  # one, so config.hash leaves this block out (config.AFTER_THE_RUNS) and it stays c73b197d; only
+  # eval/runs/bootstrap_{full_hash}.json is named after it.
+  bootstrap:
+    n_resamples: 10000
+    seed: 76
+    ci: 0.95

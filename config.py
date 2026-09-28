@@ -9,11 +9,19 @@ Usage::
 
 The hash is sha256 over a canonical JSON dump of the config (sorted keys, no whitespace),
 truncated to 8 hex chars. Changing any value, including ``seed`` and the ``data.source_sha256``
-pin, changes it; reordering keys does not. List order is significant (``chunk.fields`` order
-defines the chunk template). ``Config`` is immutable, so the hash cannot drift between two helper
-calls inside one build; to derive a variant (an ablation), copy and rebuild::
+pin, changes it -- except the settings in :data:`AFTER_THE_RUNS`; reordering keys does not.
+List order is significant (``chunk.fields`` order defines the chunk template). ``Config`` is
+immutable, so the hash cannot drift between two helper calls inside one build; to derive a
+variant (an ablation), copy and rebuild::
 
     variant = Config({**cfg.to_dict(), "seed": 43})
+
+**What the hash leaves out.** ``eval.bootstrap`` (#76) is read only after every other artifact
+exists: it resamples committed run files and cannot change a chunk, a draft, a split or a ranking.
+Hashing it would rename all of those after a setting none of them saw -- and the test half's run
+cannot be redone to follow, since it is read once and the dense side does not reproduce. So
+``cfg.hash`` leaves it out, and ``cfg.full_hash`` (every value, no exceptions) names the one
+artifact it does decide: the bootstrap's own result.
 
 Artifacts are named with a hash so results from different settings never mix::
 
@@ -92,14 +100,44 @@ def canonical_dump(cfg: Mapping[str, Any]) -> str:
     return json.dumps(_to_plain(cfg), sort_keys=True, separators=(",", ":"), default=str)
 
 
+#: ``(section, key)`` pairs read only after every other artifact exists, and so left out of
+#: :func:`config_hash` -- see "What the hash leaves out" above. :func:`full_hash` keeps them.
+AFTER_THE_RUNS = (("eval", "bootstrap"),)
+
+
+def _digest(cfg: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_dump(cfg).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def _without_after_the_runs(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """A plain copy with :data:`AFTER_THE_RUNS` removed, and a section they emptied dropped."""
+    plain = _to_plain(cfg)
+    for section, key in AFTER_THE_RUNS:
+        inner = plain.get(section)
+        if isinstance(inner, dict) and key in inner:
+            kept = {k: v for k, v in inner.items() if k != key}
+            if kept:
+                plain[section] = kept
+            else:
+                del plain[section]
+    return plain
+
+
 def config_hash(cfg: Mapping[str, Any]) -> str:
-    """First ``HASH_LEN`` hex chars of ``sha256(canonical_dump(cfg))``.
+    """First ``HASH_LEN`` hex chars of the sha256 of the canonical dump, minus AFTER_THE_RUNS.
 
     For a :class:`Config` this returns the hash frozen at load time.
     """
     if isinstance(cfg, Config):
         return cfg.hash
-    return hashlib.sha256(canonical_dump(cfg).encode("utf-8")).hexdigest()[:HASH_LEN]
+    return _digest(_without_after_the_runs(cfg))
+
+
+def full_hash(cfg: Mapping[str, Any]) -> str:
+    """:func:`config_hash` over every value, AFTER_THE_RUNS included."""
+    if isinstance(cfg, Config):
+        return cfg.full_hash
+    return _digest(_to_plain(cfg))
 
 
 class Config(Mapping[str, Any]):
@@ -109,7 +147,7 @@ class Config(Mapping[str, Any]):
     ``TypeError`` instead of silently changing what a later ``config_hash()`` call would see.
     """
 
-    __slots__ = ("_data", "_hash", "path")
+    __slots__ = ("_data", "_full_hash", "_hash", "path")
 
     def __init__(self, data: Mapping[str, Any], path: Path | None = None) -> None:
         if not isinstance(data, Mapping):
@@ -117,11 +155,16 @@ class Config(Mapping[str, Any]):
         plain = _to_plain(data)
         self._data = _freeze(plain)
         self._hash = config_hash(plain)
+        self._full_hash = full_hash(plain)
         self.path = path
 
     @property
     def hash(self) -> str:
         return self._hash
+
+    @property
+    def full_hash(self) -> str:
+        return self._full_hash
 
     def to_dict(self) -> dict[str, Any]:
         """Mutable deep copy, e.g. to build an ablation variant."""
