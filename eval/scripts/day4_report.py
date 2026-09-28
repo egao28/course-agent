@@ -37,6 +37,7 @@ from typing import Any, NamedTuple, TextIO
 from config import Config, file_sha256, load_config, rel_to_repo, report_path
 from eval.schema import BUCKETS
 from eval.scripts import bootstrap as bs
+from eval.scripts import hybrid_failures as hf
 from eval.scripts.ablation import RUNS_DIR, K, run_path
 from eval.scripts.agreement import md_table
 from eval.scripts.review import DATASET_PATH
@@ -89,6 +90,13 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
             "uv run python -m eval.scripts.bootstrap",
         )
     )
+    found.append(
+        Input(
+            "failure log",
+            hf.failures_path(cfg, src.runs_dir),
+            "uv run --env-file .env python -m eval.scripts.hybrid_failures",
+        )
+    )
     return found
 
 
@@ -131,6 +139,8 @@ class Facts(NamedTuple):
     bucket_n: dict[str, int]
     #: How many test rows carry more than one gold id, per bucket.
     multi_gold: dict[str, int]
+    #: #78's failure-log sidecar: hybrid's misses on the same test run, by bucket.
+    failures: dict[str, Any]
 
 
 def read_facts(cfg: Config, src: Sources) -> Facts:
@@ -163,6 +173,10 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
         problems.append(f"{rel_to_repo(path)} names a different dataset digest")
     if result.get("n", {}).get("test") != len(test.ids):
         problems.append(f"{rel_to_repo(path)}'s test n is not the test run's")
+    try:
+        failures = hf.load_failures(cfg, test.path, src.runs_dir)
+    except ValueError as exc:
+        problems.append(str(exc))
     if problems:
         raise ValueError("refusing to write the report:\n  " + "\n  ".join(problems))
 
@@ -184,7 +198,7 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
             mode: {m: sum(lines[i, mode][m] for i in ids) / len(ids) for m in bs.METRICS}
             for mode in MODES
         }
-    return Facts(cfg, src, result, test, by_bucket, bucket_n, dict(multi_gold))
+    return Facts(cfg, src, result, test, by_bucket, bucket_n, dict(multi_gold), failures)
 
 
 # --- saying it ------------------------------------------------------------------------------------
@@ -351,6 +365,33 @@ def render_buckets(facts: Facts) -> str:
     )
 
 
+def render_failures(facts: Facts) -> str:
+    f = facts.failures
+    total = sum(f["failing"].values())
+    counts = ", ".join(f"{f['failing'][b]} of {f['scored'][b]} `{b}`" for b in f["scored"])
+    drifted = f["live_top5_differs"]
+    return "\n".join(
+        [
+            "## Where hybrid misses (for Day 6)",
+            "",
+            (
+                f"Hybrid leaves at least one gold id out of its top {f['k']} on {total} of "
+                f"{f['n']} test rows: {counts}. Each is logged in `{f['log']}` with the ids it "
+                f"missed, the {f['k']} it returned, and the rank each missing id has in "
+                f"`dense@{f['depth']}`, `bm25@{f['depth']}` and `hybrid@{f['depth']}`."
+            ),
+            "",
+            (
+                f"The failing rows are read from `{f['run']}`. The ranks at depth come from a "
+                "second, live pass over those rows only, and its top "
+                f"{f['k']} differs from the run's on {len(drifted)} of {total}"
+                + (f" ({', '.join(drifted)})" if drifted else "")
+                + ". The log does not sort the misses by cause. That is Day 6."
+            ),
+        ]
+    )
+
+
 def render_definitions(facts: Facts) -> str:
     multi = ", ".join(f"{facts.multi_gold[b]} of {facts.bucket_n[b]} `{b}`" for b in facts.bucket_n)
     return "\n".join(
@@ -380,14 +421,16 @@ REPRODUCTION = """\
 uv run --env-file .env python -m eval.scripts.ablation --split calib
 uv run --env-file .env python -m eval.scripts.ablation --split test
 uv run python -m eval.scripts.bootstrap
+uv run --env-file .env python -m eval.scripts.hybrid_failures
 uv run python -m eval.scripts.day4_report
 ```
 
 This file is a function of the two committed run files, the bootstrap result computed from them,
-the dataset, and `config.yaml`. It has no timestamp, so re-running the last command over unchanged
-inputs rewrites it byte for byte. Re-running the first two does not reproduce the run files: the
-embeddings API returns slightly different query vectors from call to call, and two live calib runs
-differed in 1 of 41 dense lines. The committed run files are the sample this table describes.
+the failure log's sidecar, the dataset, and `config.yaml`. It has no timestamp, so re-running the
+last command over unchanged inputs rewrites it byte for byte. Re-running the first two does not
+reproduce the run files: the embeddings API returns slightly different query vectors from call to
+call, and two live calib runs differed in 1 of 41 dense lines. The committed run files are the
+sample this table describes.
 """
 
 
@@ -397,6 +440,7 @@ def render_report(facts: Facts) -> str:
         render_table(facts),
         render_strongest(facts),
         render_buckets(facts),
+        render_failures(facts),
         render_definitions(facts),
         REPRODUCTION.rstrip(),
     ]

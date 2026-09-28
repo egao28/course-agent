@@ -18,6 +18,7 @@ from config import file_sha256, load_config, report_path
 from eval.scripts import ablation as ab
 from eval.scripts import bootstrap as bs
 from eval.scripts import day4_report as report
+from eval.scripts import hybrid_failures as hf
 from eval.scripts.draft_items import write_json
 from retrieval import MODES
 
@@ -94,7 +95,30 @@ def day4(cfg, tmp_path):
     write_run(cfg, tmp_path, "calib", CALIB, sha)
     write_run(cfg, tmp_path, "test", TEST, sha)
     bs.bootstrap(cfg, StringIO(), tmp_path)
+    write_failures(cfg, tmp_path)
     return report.Sources(dataset, tmp_path)
+
+
+def write_failures(cfg, runs_dir):
+    """#78's log in the shape its sidecar has, read off the test run above: 2 fact, 2 multihop."""
+    path = hf.failures_path(cfg, runs_dir)
+    path.write_text('{"id": "v1-test-00"}\n', encoding="utf-8")
+    write_json(
+        path.with_suffix(".meta.json"),
+        {
+            "log": "eval/runs/" + path.name,
+            "sha256": file_sha256(path),
+            "config_hash": cfg.hash,
+            "run": "eval/runs/" + ab.run_path("test", cfg, runs_dir).name,
+            "run_sha256": file_sha256(ab.run_path("test", cfg, runs_dir)),
+            "k": 5,
+            "depth": 20,
+            "n": len(TEST),
+            "scored": {"fact": 3, "multihop": 2},
+            "failing": {"fact": 0, "multihop": 2},
+            "live_top5_differs": [],
+        },
+    )
 
 
 def numbers(text: str) -> list[float]:
@@ -145,6 +169,21 @@ def test_the_report_names_n_split_digest_hash_b_and_seed(cfg, day4):
         "fractional on multi-gold rows",
     ):
         assert text in body
+
+
+def test_the_failure_count_is_stated_by_bucket_with_a_pointer_to_the_log(cfg, day4):
+    body = report.render_report(report.read_facts(cfg, day4))
+    assert "on 2 of 5 test rows: 0 of 3 `fact`, 2 of 2 `multihop`" in body
+    assert f"`eval/runs/hybrid_failures_{cfg.hash}.jsonl`" in body
+    assert "differs from the run's on 0 of 2." in body
+
+
+def test_a_failure_log_from_another_test_run_is_refused(cfg, day4):
+    rows = [TEST[0], *TEST[1:-1], TEST[0]]  # another draw of the test half
+    write_run(cfg, day4.runs_dir, "test", rows, file_sha256(day4.dataset))
+    bs.bootstrap(cfg, StringIO(), day4.runs_dir)
+    with pytest.raises(ValueError, match="not read from the test run on disk"):
+        report.read_facts(cfg, day4)
 
 
 def test_a_rerun_is_byte_identical_and_carries_no_clock_or_local_path(cfg, day4):

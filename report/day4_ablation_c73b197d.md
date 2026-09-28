@@ -39,6 +39,12 @@ Chosen per metric on `calib`, then tested on `test`. Choosing it on the test row
 
 No intervals here, on purpose. At n = 12 one `multihop` question moves a mean by up to 1/12 = 0.083, so an interval on this split is too wide to be read as a finding. The split describes where the rows in the main table come from. It is not a second test.
 
+## Where hybrid misses (for Day 6)
+
+Hybrid leaves at least one gold id out of its top 5 on 11 of 41 test rows: 1 of 29 `fact`, 10 of 12 `multihop`. Each is logged in `eval/runs/hybrid_failures_c73b197d.jsonl` with the ids it missed, the 5 it returned, and the rank each missing id has in `dense@20`, `bm25@20` and `hybrid@20`.
+
+The failing rows are read from `eval/runs/ablation_test_c73b197d.jsonl`. The ranks at depth come from a second, live pass over those rows only, and its top 5 differs from the run's on 0 of 11. The log does not sort the misses by cause. That is Day 6.
+
 ## Definitions
 
 - **MRR is MRR@5.** 1 / rank of the first gold id in the top 5, and 0 if none is there (`eval/metrics.py`, #74).
@@ -51,11 +57,13 @@ No intervals here, on purpose. At n = 12 one `multihop` question moves a mean by
 uv run --env-file .env python -m eval.scripts.ablation --split calib
 uv run --env-file .env python -m eval.scripts.ablation --split test
 uv run python -m eval.scripts.bootstrap
+uv run --env-file .env python -m eval.scripts.hybrid_failures
 uv run python -m eval.scripts.day4_report
 ```
 
 This file is a function of the two committed run files, the bootstrap result computed from them,
-the dataset, and `config.yaml`. It has no timestamp, so re-running the last command over unchanged
-inputs rewrites it byte for byte. Re-running the first two does not reproduce the run files: the
-embeddings API returns slightly different query vectors from call to call, and two live calib runs
-differed in 1 of 41 dense lines. The committed run files are the sample this table describes.
+the failure log's sidecar, the dataset, and `config.yaml`. It has no timestamp, so re-running the
+last command over unchanged inputs rewrites it byte for byte. Re-running the first two does not
+reproduce the run files: the embeddings API returns slightly different query vectors from call to
+call, and two live calib runs differed in 1 of 41 dense lines. The committed run files are the
+sample this table describes.
