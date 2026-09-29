@@ -2463,6 +2463,92 @@ the report adds is what those tables cannot say on their own. `retrieval_score`'
 paired differences rank different rows (10 vs 42), so they do not show it orders the same answers
 better.
 
+## End-to-end run
+
+`eval/scripts/e2e.py` ([#103](../../issues/103)) is the shipped system over one half, **gate on**,
+once: `eval/runs/e2e_{split}_{config_hash}.jsonl` (committed: `e2e_test_c73b197d.jsonl`) with a
+sidecar. Day 5's signal run bypassed the gate, so it cannot stand in for this one.
+
+```bash
+uv run --env-file .env python -m eval.scripts.e2e --split test
+```
+
+- **Every row gets a line, refusals included.** 63 test rows, 63 lines: `id, bucket, split,
+  question, intent, exit, answer, draft, citations, citations_unknown, evidence_doc_ids,
+  evidence_source, top_score, gate_ok, error`. The exit counts in the sidecar add up to the half.
+- **`answer` is what the user would have seen** — the answer node's text on the `answer` exit, and
+  otherwise the fixed hand-off or out-of-scope message. `draft` holds the answer node's text only
+  when the citation check discarded it, and is the one thing in the file a rerun could not
+  recover.
+- **`evidence_doc_ids` is every block the answer node was given**, not the cited ones, so #105 can
+  tell a retrieval failure from an evidence misread. `evidence_source` says which id space they
+  are in: retrieval returns `{term}:{SUBJ}-{NUM}` chunk ids, a tool returns a course code.
+- **`gate_ok` and `top_score` are the gate's own verdict and number.** `top_score` is null on a
+  tool row, which passes without a threshold, and on a row that never reached the gate. A
+  `refuse_handoff` row with `gate_ok` true is one the citation check discarded, not one the gate
+  refused.
+- **Run once.** The script refuses to run if the file exists, as `conformal_eval.py` does. Nothing
+  in the agent or the config changes after the run: a failure it turns up goes to #105 and the
+  report, not into a fix and a rerun. A row whose chat call failed keeps its line with `exit` null
+  and the reason in `error`, and the printout says a run with a failed row is not the final run.
+  The committed run had none.
+- **The conformal gate is not a second row.** `evidence.method` is `top_score`, and #92's gate is
+  dormant at this config — its fit accepted no threshold, so it answers nothing, which #91 already
+  measured on test.
+
+The committed run (`gpt-4o-mini`, config `c73b197d`, 63 rows, 57 s, 0 errors):
+
+| exit | rows | fact | multihop | unanswerable | ambiguous |
+|---|---|---|---|---|---|
+| `answer` | 37 | 21 | 12 | 3 | 1 |
+| `refuse_handoff` | 20 | 8 | — | 3 | 9 |
+| `out_of_scope` | 6 | — | — | 6 | — |
+| all | 63 | 29 | 12 | 12 | 10 |
+
+Of the 20 hand-offs, 15 had no evidence to judge (an empty retrieval, or a tool that produced
+nothing) and 5 scored under the 15.0 bm25 threshold; the citation check discarded no draft. 32 of
+the 37 answered rows are tool rows, where `top_score` is null.
+
+## End-to-end labels
+
+`eval/scripts/e2e_labels.py` ([#103](../../issues/103)) labels the **answered** rows of that run
+with #88's pass, unchanged: the same per-bucket judge prompts, the same parser, and a person's
+verdict as the only label.
+
+```bash
+uv run --env-file .env python -m eval.scripts.e2e_labels --split test --judge
+uv run python -m eval.scripts.e2e_labels --split test --review --reviewer NAME  # resumable
+uv run python -m eval.scripts.e2e_labels --split test --stats
+uv run python -m eval.scripts.e2e_labels --split test --write-csv
+```
+
+- **Only the `answer` exit is labelled.** The other two exits are fixed sentences, and judging a
+  constant would put the judge's agreement rate at the mercy of how often the gate fired. Whether
+  a refusal was the right call is #104's question, and it reads the exits off the run file.
+- **A verdict carries over on `(id, answer_sha256)`.** An end-to-end answer that came back
+  byte-identical to the one #88 reviewed keeps the verdict a person already gave it; the rest are
+  shown again. Both logs are read for the carry-over and only
+  `eval/runs/e2e_correctness_log.jsonl` is appended to, so #88's log — hashed into a committed
+  CSV's sidecar — is left as it was. Each entry adds the run and config hash it was given on.
+- **`--write-csv` refuses** until every answered row has a human verdict for its current answer.
+  The CSV is `eval/runs/e2e_{split}_{config_hash}.csv` with columns `id, bucket, split, intent,
+  exit, top_score, gate_ok, judge_correct, correct, reviewer`.
+
+The judge's first call on the 37 answered rows (`e2e_judge_test_c73b197d.jsonl`, all 37 replies
+parsed) — **not labels**:
+
+| bucket | judge correct / answered |
+|---|---|
+| fact | 21 / 21 |
+| multihop | 2 / 12 |
+| unanswerable | 2 / 3 |
+| ambiguous | 0 / 1 |
+
+**The human pass is not finished, and nothing here finishes it.** 32 of the 37 answered rows
+carry a verdict over from #88; five multihop answers changed (`v1-1002`, `v1-1003`, `v1-1017`,
+`v1-1018`, `v1-1023`) and count as unreviewed, so `e2e_test_c73b197d.csv` does not exist yet and
+`--write-csv` names those five and exits 1. #104 is blocked until a reviewer types them.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
