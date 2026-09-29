@@ -130,8 +130,61 @@ Not illustrations — the eight calls that were actually hard, two per bucket, w
   No clarification closes this: what is missing is a transcript, a standing and a future term's
   schedule — *"which major?"* would only yield a plan the catalog cannot certify.
 
+## Intent
+
+Added for Day 6 ([#102](../../../issues/102)). The above labels a row's *bucket*. This labels
+what the question *asks for*, in the router's five labels (`INTENTS` in `agent/state.py`), so
+intent accuracy has something to be scored against. It goes in the sidecar
+`eval/datasets/v1_intents.jsonl`, one row per **test** id: `{"id", "gold_intents", "note"}`.
+`v1.jsonl` is frozen and is not touched.
+
+The labels mean what the router is told they mean (`ROUTER_GLOSSES`, `agent/prompts.py`):
+`course_fact` is one course and one attribute, `prereq_chain` is what has to come before a course,
+`degree_requirement` is progress against a program, `compare_recommend` is a choice among courses,
+and `out_of_scope` is not about catalog courses at all.
+
+1. **Label the question, not the answer.** Whether the catalog can answer it, and which bucket
+   the row is in, do not decide the intent. A refusal is made later, by whichever step looked and
+   came back empty.
+2. **A set, not one label.** `gold_intents` holds every label whose gloss the question, read
+   literally, falls under. The router is right if its label is in the set. Most rows get one
+   label. Two needs a `note` saying why, and three or more means the row is unclear, not generous.
+3. **A course's prerequisites are both.** *"What are the prerequisites for X?"* →
+   `["course_fact", "prereq_chain"]`, because X's own chunk prints the sentence (**F1**). Asking
+   for a chain, or whether one course leads to another, is `["prereq_chain"]` only.
+4. **One course against one requirement is both.** *"Does X satisfy Composition I?"* →
+   `["course_fact", "degree_requirement"]`. *"What is left for the major?"* is
+   `["degree_requirement"]` only.
+5. **`out_of_scope` is never the default for a refusal.** A question about a course the catalog
+   lacks, or a field it does not carry, is still about courses.
+
+Label from the question text and this file only. Do not open `eval/runs/signals_test_*.jsonl`
+(the router's own predictions), and do not run the router or the agent.
+
+### ambiguous
+
+- **IA1.** *"what are the prerequisites for 440?"* → `["course_fact", "prereq_chain"]`.
+  The missing referent does not change what is asked. A question that names no course is still a
+  prerequisite question (router rule 3), so it gets the set rule 3 above gives a named course.
+- **IA2.** *"which course is intended for science and science-oriented students?"* →
+  `["course_fact", "compare_recommend"]`.
+  It reads as a lookup of one course by an attribute, or as a choice among the courses that could
+  be it. Neither reading is wrong, and `out_of_scope` is.
+
+### unanswerable
+
+- **IU1.** *"who teaches CS 225?"* → `["course_fact"]`.
+  Instructors are outside the knowledge base, but the question asks for one attribute of one
+  course. The refusal belongs to the evidence gate, not the router (rule 5 above).
+- **IU2.** *"what time does the dining hall close on Sundays?"* → `["out_of_scope"]`.
+  This is not about courses at all. Neither is tuition: a question about the university that a
+  course catalog does not answer is `out_of_scope` (router rule 4).
+
+All four are calib questions. The labelled half is test, and no test question is quoted here.
+
 ## Amending this file
 
 A rule agreed verbally is a rule that does not exist, because this file is the whole instruction to
 the second annotator. Amend it, and record in the Day 3 report ([#62](../../../issues/62)) what
-changed and which rows were re-judged under it.
+changed and which rows were re-judged under it. An amendment to the Intent section goes in the
+Day 6 report ([#106](../../../issues/106)) instead.

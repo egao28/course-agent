@@ -13,14 +13,16 @@ it is a rule applied to the wrong facts for however long it takes someone to re-
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
 
+from agent.state import INTENTS
 from agent.tools.courses import CourseDetail
 from agent.tools.prereqs import load_prereqs
 from config import REPO_ROOT, load_config
-from eval.schema import BUCKETS
+from eval.schema import BUCKETS, normalize_question
 from eval.validate import corpus_doc_ids
 from ingest.chunk import load_courses
 
@@ -30,11 +32,19 @@ GUIDELINES = REPO_ROOT / "eval" / "GUIDELINES.md"
 #: criterion in #55 is "one page", and a document that has grown a third again is not one.
 MAX_WORDS = 1400
 
+#: The Intent section (#102) is counted apart: it labels a different thing, a sidecar and not a
+#: bucket, and folding it into the page cap would have meant cutting a Day 3 rule to make room.
+MAX_INTENT_WORDS = 550
+
 #: ``2026-sp:CS-374``: the form a gold id takes, and the only form this document should use.
 DOC_ID_RE = re.compile(r"\b\d{4}-[a-z]{2}:[A-Z]+-\d+\b")
 
 #: ``CS 374``: the form a course code takes in prose, with the space the catalog uses.
 CODE_RE = re.compile(r"\b[A-Z]{2,4} \d{3}\b")
+
+#: ``- **IA1.** *"question"* → `["course_fact", ...]`.``: an Intent boundary case, whose label
+#: list may wrap onto the next line.
+INTENT_CASE_RE = re.compile(r'^- \*\*I[AU]\d\.\*\* \*"(.+?)"\* →\s+`(\[[^\]]+\])`', re.MULTILINE)
 
 
 @pytest.fixture(scope="module")
@@ -60,6 +70,33 @@ def cases(text: str) -> dict[str, list[str]]:
 
 
 @pytest.fixture(scope="module")
+def intent_section(text: str) -> str:
+    """``## Intent`` up to the next ``## `` heading: #102's addition, labelled on its own."""
+    _, found, tail = text.partition("\n## Intent\n")
+    assert found, "#102's labels need their rules committed before any row is labelled"
+    section, _, _ = tail.partition("\n## ")
+    return section
+
+
+@pytest.fixture(scope="module")
+def intent_cases(intent_section: str) -> dict[str, list[tuple[str, list[str]]]]:
+    """The Intent boundary cases, as ``{bucket: [(question, gold_intents), ...]}``."""
+    out: dict[str, list[tuple[str, list[str]]]] = {}
+    for block in intent_section.split("\n### ")[1:]:
+        heading, _, body = block.partition("\n")
+        found = INTENT_CASE_RE.findall(body)
+        out[heading.strip()] = [(q, json.loads(labels)) for q, labels in found]
+    return out
+
+
+@pytest.fixture(scope="module")
+def v1_by_question() -> dict[str, dict]:
+    with (REPO_ROOT / "eval" / "datasets" / "v1.jsonl").open(encoding="utf-8") as f:
+        rows = [json.loads(line) for line in f if line.strip()]
+    return {normalize_question(r["question"]): r for r in rows}
+
+
+@pytest.fixture(scope="module")
 def by_code() -> dict[str, dict]:
     return {c["code"]: c for c in load_courses()}
 
@@ -68,11 +105,16 @@ def test_the_guidelines_are_in_the_tree():
     assert GUIDELINES.exists(), "#59 cannot start against a spec that is not committed"
 
 
-def test_the_document_is_still_one_page(text: str):
-    words = len(text.split())
+def test_the_document_is_still_one_page(text: str, intent_section: str):
+    words = len(text.split()) - len(intent_section.split())
     assert words <= MAX_WORDS, (
         f"{words} words; a criterion that does not fit a page is not decidable"
     )
+
+
+def test_the_intent_section_is_its_own_half_page(intent_section: str):
+    words = len(intent_section.split())
+    assert words <= MAX_INTENT_WORDS, f"{words} words in the Intent section"
 
 
 def test_the_buckets_are_the_schema_s_four(cases: dict[str, list[str]]):
@@ -154,3 +196,41 @@ def test_the_field_no_chunk_carries_is_reachable_by_a_tool_and_not_by_a_citation
     assert "section_count" in CourseDetail.model_fields
     fields = load_config()["chunk"]["fields"]
     assert not {"sectionCount", "partOfTerm", "types"} & set(fields)
+
+
+# --- the Intent section (#102) --------------------------------------------------------------------
+
+
+def test_the_intent_section_comes_before_the_amendment_rule(text: str):
+    assert text.index("\n## Intent\n") < text.index("\n## Amending this file\n")
+
+
+def test_two_intent_boundary_cases_for_each_bucket_with_no_obvious_intent(intent_cases):
+    assert {b: len(c) for b, c in intent_cases.items()} == {"ambiguous": 2, "unanswerable": 2}
+
+
+def test_every_intent_it_names_is_one_of_the_router_s_five(intent_section: str, intent_cases):
+    for bucket, cases in intent_cases.items():
+        for question, labels in cases:
+            assert labels and len(set(labels)) == len(labels), f"{bucket}: {question}"
+            assert set(labels) <= set(INTENTS), f"{bucket}: {question} -> {labels}"
+    named = set(re.findall(r"`([a-z]+_[a-z_]+)`", intent_section))
+    assert named - {"gold_intents"} <= set(INTENTS)
+
+
+def test_the_intent_boundary_cases_are_calib_questions_in_their_own_bucket(
+    intent_cases, v1_by_question
+):
+    """Quoting a test question here would label it before the labeller sees it."""
+    for bucket, cases in intent_cases.items():
+        for question, _ in cases:
+            row = v1_by_question.get(normalize_question(question))
+            assert row is not None, f"{question!r} is not a v1 row"
+            assert row["split"] == "calib", f"{question!r} is a {row['split']} row"
+            assert row["bucket"] == bucket, f"{question!r} is {row['bucket']}, not {bucket}"
+
+
+def test_no_test_question_is_quoted_anywhere_in_the_intent_section(intent_section, v1_by_question):
+    quoted = {normalize_question(q) for q in re.findall(r'\*"(.+?)"\*', intent_section)}
+    tests = {q for q, row in v1_by_question.items() if row["split"] == "test"}
+    assert not quoted & tests
