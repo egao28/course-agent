@@ -1,0 +1,63 @@
+{"id": "v1-0002", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0004", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0009", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0010", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0012", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0015", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0017", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0018", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0020", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0022", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0023", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0025", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0026", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0029", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0032", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0034", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0035", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0038", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0039", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0040", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0042", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0043", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0044", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0045", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0046", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0054", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0055", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-0059", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-0064", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-1001", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1002", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1003", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1008", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1010", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1011", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1016", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1017", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1018", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1019", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1020", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-1023", "gold_intents": ["prereq_chain"], "note": ""}
+{"id": "v1-2006", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2007", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2008", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-2010", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2015", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2016", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2017", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2018", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2019", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-2020", "gold_intents": ["out_of_scope"], "note": ""}
+{"id": "v1-2022", "gold_intents": ["out_of_scope"], "note": ""}
+{"id": "v1-2024", "gold_intents": ["out_of_scope"], "note": ""}
+{"id": "v1-3002", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-3012", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-3018", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-3026", "gold_intents": ["course_fact"], "note": ""}
+{"id": "v1-3027", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-3028", "gold_intents": ["course_fact", "compare_recommend"], "note": "也可读成在几门候选课之间做选择"}
+{"id": "v1-3031", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-3036", "gold_intents": ["course_fact", "prereq_chain"], "note": "课程自己的 chunk 里印着先修句，两种读法都成立"}
+{"id": "v1-3042", "gold_intents": ["course_fact", "compare_recommend"], "note": "也可读成在几门候选课之间做选择"}
+{"id": "v1-3046", "gold_intents": ["course_fact"], "note": ""}

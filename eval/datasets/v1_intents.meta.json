@@ -1,0 +1,20 @@
+{
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "guidelines_intent_sha256": "8cb8c989b06012026a8433db888bb0e75e691d81ef913560708acb84364043f0",
+  "labeller": "eve",
+  "predictions_in_tree": [
+    "signals_test_37164723.jsonl"
+  ],
+  "rows": 63,
+  "rows_with_label": {
+    "compare_recommend": 2,
+    "course_fact": 48,
+    "degree_requirement": 0,
+    "out_of_scope": 3,
+    "prereq_chain": 33
+  },
+  "rows_with_more_than_one_label": 23,
+  "sha256": "6a43562535c458378405e47f9196981dfeb9c76f29b75c1d3532597029b387cc",
+  "sidecar": "eval/datasets/v1_intents.jsonl"
+}
