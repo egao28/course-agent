@@ -2560,6 +2560,85 @@ reviewer accepted the judge's call on all 37 rows (0 overturned), so judge × hu
 this run too. The other 26 test rows were never answered and carry no verdict: what an exit means
 for correctness is #104's question, and it reads the exits off the run file.
 
+## End-to-end metrics
+
+`eval/scripts/e2e_metrics.py` ([#104](../../issues/104)) turns that run and its labels into four
+numbers, each with its n and a 95% Clopper–Pearson interval —
+`eval/runs/e2e_metrics_{config_hash}.json` (committed: `e2e_metrics_c73b197d.json`).
+
+```bash
+uv sync --extra analysis     # scipy, for the interval
+uv run python -m eval.scripts.e2e_metrics
+```
+
+It calls no model and reads no label #103 did not already read, so unlike `conformal_eval.py` it
+does not refuse a second run: delete the JSON, change nothing, and the same numbers come back.
+There is no `--split` — the gold intents are labelled for the test half alone.
+
+| metric | numerator / denominator | test n |
+|---|---|---|
+| intent accuracy | the router's `intent` is in the row's `gold_intents` (#102) | 63 |
+| end-to-end correctness | the outcome is right for the row's bucket | 63 |
+| false release | a `should_abstain` row that answered anyway | 22 |
+| false block | a `should_abstain = false` row that did not answer | 41 |
+
+- **Correct per bucket**, as #88's judge prompts put it: a `fact` or `multihop` row is correct
+  when a person judged its answer correct, an `unanswerable` row when the system declined, and an
+  `ambiguous` row when it asked which course was meant. So a row that did not answer is correct
+  exactly when its exit is one `eval.schema.RULES` accepts for its bucket, and a row that
+  answered is correct exactly when a person said so.
+- **There is no clarify exit**, so an abstaining row that was handled well can still leave through
+  `answer`. Correctness and false release are therefore reported two ways — *exit-only* (an
+  abstaining row that answered released, whatever it said) and *verdict-backed* (it released
+  unless the person who read the text said it declined or asked). Nothing else differs between
+  them.
+- **Every number carries its rows.** Each block holds the ids behind its numerator and (at the
+  metric level) its denominator, so any figure in the report traces back to the run file.
+- **Per bucket the same k and n are point estimates with no interval**: at n = 10 to 12 an exact
+  interval spans most of the unit interval, and printing one invites a comparison the half cannot
+  support.
+- **A run with an errored row is refused**, as is a CSV that labels another copy of the run, a
+  gold-intent sidecar that does not pass `python -m eval.intents`, and a run file that is not what
+  its own sidecar describes.
+
+The committed result (config `c73b197d`, 63 test rows, 95% Clopper–Pearson):
+
+| metric | k / n | rate [95% CI] |
+|---|---|---|
+| intent accuracy | 59 / 63 | 0.937 [0.845, 0.982] |
+| end-to-end correctness (verdict-backed) | 43 / 63 | 0.683 [0.553, 0.794] |
+| end-to-end correctness (exit-only) | 41 / 63 | 0.651 [0.520, 0.767] |
+| false release (verdict-backed) | 2 / 22 | 0.091 [0.011, 0.292] |
+| false release (exit-only) | 4 / 22 | 0.182 [0.052, 0.403] |
+| false block | 8 / 41 | 0.195 [0.088, 0.349] |
+
+| bucket | n | intent acc | correct (verdict) | correct (exit) | false release | false block |
+|---|---|---|---|---|---|---|
+| fact | 29 | 29/29 | 21/29 | 21/29 | — | 8/29 |
+| multihop | 12 | 12/12 | 2/12 | 2/12 | — | 0/12 |
+| unanswerable | 12 | 8/12 | 11/12 | 9/12 | 1/12 | — |
+| ambiguous | 10 | 10/10 | 9/10 | 9/10 | 1/10 | — |
+
+Four things the tables do not say on their own:
+
+- **The exits overstate the release rate by a factor of two.** Four abstaining rows left through
+  `answer`; on two of them (`v1-2015`, `v1-2019`) the text declined and the person who read it
+  said so. Counting exits alone would have called those failures.
+- **All four intent misses are unanswerable rows the router sent to `out_of_scope` or
+  `compare_recommend` while the labeller wrote `course_fact`, and all four came out right
+  anyway** — three through `out_of_scope`, and `v1-2019` through `answer` with a text the
+  reviewer read as a decline. An intent error is not an outcome error here, which is what #105
+  attributes.
+- **The ambiguous bucket's 9/10 is an upper bound.** Nine of its ten rows ended in
+  `refuse_handoff`, which `RULES` accepts, and nobody read those nine — `e2e_labels.py` labels
+  answered rows only. The hand-off is fixed text and #88's ambiguous prompt calls a reply that
+  declines without asking incorrect; some of the nine do point at what is missing ("name it by
+  code"), others only report a score under a threshold. If none of them counted, end-to-end
+  correctness would be 34 / 63 (0.540 [0.409, 0.666]) instead of 43 / 63. The JSON carries the
+  nine ids and both numbers, and #106 reports the range.
+- **No test row is labelled `degree_requirement`**, so the half carries no sample of that intent
+  and the report says so rather than reporting a rate of 0.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
