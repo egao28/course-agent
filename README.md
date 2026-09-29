@@ -2544,10 +2544,21 @@ parsed) — **not labels**:
 | unanswerable | 2 / 3 |
 | ambiguous | 0 / 1 |
 
-**The human pass is not finished, and nothing here finishes it.** 32 of the 37 answered rows
-carry a verdict over from #88; five multihop answers changed (`v1-1002`, `v1-1003`, `v1-1017`,
-`v1-1018`, `v1-1023`) and count as unreviewed, so `e2e_test_c73b197d.csv` does not exist yet and
-`--write-csv` names those five and exits 1. #104 is blocked until a reviewer types them.
+Labels (human pass, reviewer `eve`, every answered row; `e2e_test_c73b197d.csv`):
+
+| bucket | correct / answered |
+|---|---|
+| fact | 21 / 21 |
+| multihop | 2 / 12 |
+| unanswerable | 2 / 3 |
+| ambiguous | 0 / 1 |
+| all | 25 / 37 |
+
+32 of the 37 verdicts were carried over from #88 on a byte-identical answer; five multihop answers
+had changed (`v1-1002`, `v1-1003`, `v1-1017`, `v1-1018`, `v1-1023`) and were reviewed again. The
+reviewer accepted the judge's call on all 37 rows (0 overturned), so judge × human is diagonal on
+this run too. The other 26 test rows were never answered and carry no verdict: what an exit means
+for correctness is #104's question, and it reads the exits off the run file.
 
 ## Day 1 goal
 
