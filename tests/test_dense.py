@@ -33,22 +33,18 @@ CHUNKS = [
     {
         "doc_id": "2026-sp:CS-446",
         "text": "CS 446 - Machine Learning\nDescription: machine learning machine learning",
-        "metadata": {
-            "code": "CS 446",
-            "credits": 3.0,
-            "prereq_codes": "CS 374|CS 361",
-            "gened_ids": "",
-        },
+        # Stored the way `chroma_metadata` stores it: lists as lists, an empty one left out.
+        "metadata": {"code": "CS 446", "credits": 3.0, "prereq_codes": ["CS 374", "CS 361"]},
     },
     {
         "doc_id": "2026-sp:CS-374",
         "text": "CS 374 - Algorithms\nDescription: algorithm algorithm",
-        "metadata": {"code": "CS 374", "credits": 4.0, "prereq_codes": "CS 173", "gened_ids": ""},
+        "metadata": {"code": "CS 374", "credits": 4.0, "prereq_codes": ["CS 173"]},
     },
     {
         "doc_id": "2026-sp:ENGL-104",
         "text": "ENGL 104 - Poetry\nDescription: poetry poetry",
-        "metadata": {"code": "ENGL 104", "credits": 3.0, "prereq_codes": "", "gened_ids": "humlit"},
+        "metadata": {"code": "ENGL 104", "credits": 3.0, "gened_ids": ["humlit"]},
     },
 ]
 
@@ -147,7 +143,7 @@ def test_to_hits_ranks_from_one_and_decodes_the_metadata():
     result = {
         "ids": [["2026-sp:CS-446", "2026-sp:CS-374"]],
         "documents": [["CS 446 - Machine Learning", "CS 374 - Algorithms"]],
-        "metadatas": [[{"prereq_codes": "CS 374|CS 361"}, {"prereq_codes": ""}]],
+        "metadatas": [[{"prereq_codes": ["CS 374", "CS 361"]}, {}]],
         "distances": [[0.1, 0.4]],
     }
     hits = dense.to_hits(result)
@@ -155,9 +151,10 @@ def test_to_hits_ranks_from_one_and_decodes_the_metadata():
     assert [h.rank for h in hits] == [1, 2]
     assert [h.doc_id for h in hits] == ["2026-sp:CS-446", "2026-sp:CS-374"]
     assert hits[0].score == pytest.approx(0.9)
-    # The lists BM25 will return as lists, so a Hit means one thing whoever produced it.
+    # BM25 returns both list fields always, so a Hit means one thing whoever produced it --
+    # including the keys Chroma could not store because they were empty.
     assert hits[0].metadata["prereq_codes"] == ["CS 374", "CS 361"]
-    assert hits[1].metadata["prereq_codes"] == []
+    assert hits[1].metadata == {"prereq_codes": [], "gened_ids": []}
 
 
 def test_to_hits_of_an_empty_result_is_an_empty_list():

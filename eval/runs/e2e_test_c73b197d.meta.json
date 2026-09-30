@@ -1,0 +1,141 @@
+{
+  "bm25_key": "877a6610",
+  "by_bucket": {
+    "ambiguous": 10,
+    "fact": 29,
+    "multihop": 12,
+    "unanswerable": 12
+  },
+  "citation_discarded": {},
+  "config_hash": "c73b197d",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "dense_key": "094143d8",
+  "embedding_model": "text-embedding-3-small",
+  "error_rows": [],
+  "errors": 0,
+  "evidence": {
+    "method": "top_score",
+    "thresholds": {
+      "bm25": 15.0,
+      "dense": 0.46,
+      "hybrid": 0.025
+    }
+  },
+  "exits": {
+    "answer": 37,
+    "out_of_scope": 6,
+    "refuse_handoff": 20
+  },
+  "exits_by_bucket": {
+    "answer": {
+      "ambiguous": 1,
+      "fact": 21,
+      "multihop": 12,
+      "unanswerable": 3
+    },
+    "out_of_scope": {
+      "unanswerable": 6
+    },
+    "refuse_handoff": {
+      "ambiguous": 9,
+      "fact": 8,
+      "unanswerable": 3
+    }
+  },
+  "gate": "on: the live check_evidence node, as config.yaml has it -- not #87's bypass. The conformal gate (#92) is dormant at this config and was not run as a second row",
+  "gate_refused": {
+    "ambiguous": 9,
+    "fact": 8,
+    "unanswerable": 3
+  },
+  "gate_refused_reasons": {
+    "no_evidence": 15,
+    "under_threshold": 5
+  },
+  "ids": [
+    "v1-0002",
+    "v1-0004",
+    "v1-0009",
+    "v1-0010",
+    "v1-0012",
+    "v1-0015",
+    "v1-0017",
+    "v1-0018",
+    "v1-0020",
+    "v1-0022",
+    "v1-0023",
+    "v1-0025",
+    "v1-0026",
+    "v1-0029",
+    "v1-0032",
+    "v1-0034",
+    "v1-0035",
+    "v1-0038",
+    "v1-0039",
+    "v1-0040",
+    "v1-0042",
+    "v1-0043",
+    "v1-0044",
+    "v1-0045",
+    "v1-0046",
+    "v1-0054",
+    "v1-0055",
+    "v1-0059",
+    "v1-0064",
+    "v1-1001",
+    "v1-1002",
+    "v1-1003",
+    "v1-1008",
+    "v1-1010",
+    "v1-1011",
+    "v1-1016",
+    "v1-1017",
+    "v1-1018",
+    "v1-1019",
+    "v1-1020",
+    "v1-1023",
+    "v1-2006",
+    "v1-2007",
+    "v1-2008",
+    "v1-2010",
+    "v1-2015",
+    "v1-2016",
+    "v1-2017",
+    "v1-2018",
+    "v1-2019",
+    "v1-2020",
+    "v1-2022",
+    "v1-2024",
+    "v1-3002",
+    "v1-3012",
+    "v1-3018",
+    "v1-3026",
+    "v1-3027",
+    "v1-3028",
+    "v1-3031",
+    "v1-3036",
+    "v1-3042",
+    "v1-3046"
+  ],
+  "model": "gpt-4o-mini",
+  "n_lines": 63,
+  "n_rows": 63,
+  "prompts_sha256": {
+    "answer_v1": "6de696d3d0873e19b40a0655edc57705330b696ea331038b3f8e62792fa4a65c",
+    "router_v2": "3314cfc1f5e97a274115ed026fc1b42b34787d96ff1fc0387cb334fe680ac204"
+  },
+  "retrieval_mode": "bm25",
+  "run": "eval/runs/e2e_test_c73b197d.jsonl",
+  "sha256": "482074c878a487a8154a205fdc6c78080bef3a5a672df82861e51c31a43a1c18",
+  "split": "test",
+  "timeouts": {
+    "chat": 60.0,
+    "embedding": 120.0
+  },
+  "tool_rows": {
+    "fact": 19,
+    "multihop": 12,
+    "unanswerable": 1
+  }
+}

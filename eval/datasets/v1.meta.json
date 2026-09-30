@@ -1,0 +1,34 @@
+{
+  "buckets": {
+    "ambiguous": {
+      "calib": 10,
+      "test": 10
+    },
+    "fact": {
+      "calib": 29,
+      "test": 29
+    },
+    "multihop": {
+      "calib": 12,
+      "test": 12
+    },
+    "unanswerable": {
+      "calib": 13,
+      "test": 12
+    }
+  },
+  "config_hash": "c73b197d",
+  "conformal": {
+    "alpha_floor": 0.015384615384615385,
+    "coverage_ceiling": 0.9846153846153847,
+    "n_calib": 64
+  },
+  "dataset": "eval/datasets/v1.jsonl",
+  "rows": 127,
+  "seed": 61,
+  "sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "totals": {
+    "calib": 64,
+    "test": 63
+  }
+}

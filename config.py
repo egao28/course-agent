@@ -9,16 +9,63 @@ Usage::
 
 The hash is sha256 over a canonical JSON dump of the config (sorted keys, no whitespace),
 truncated to 8 hex chars. Changing any value, including ``seed`` and the ``data.source_sha256``
-pin, changes it; reordering keys does not. List order is significant (``chunk.fields`` order
-defines the chunk template). ``Config`` is immutable, so the hash cannot drift between two helper
-calls inside one build; to derive a variant (an ablation), copy and rebuild::
+pin, changes it -- except the settings in :data:`AFTER_THE_RUNS`; reordering keys does not.
+List order is significant (``chunk.fields`` order defines the chunk template). ``Config`` is
+immutable, so the hash cannot drift between two helper calls inside one build; to derive a
+variant (an ablation), copy and rebuild::
 
     variant = Config({**cfg.to_dict(), "seed": 43})
+
+**What the hash leaves out.** ``eval.bootstrap`` (#76) is read only after every other artifact
+exists: it resamples committed run files and cannot change a chunk, a draft, a split or a ranking.
+Hashing it would rename all of those after a setting none of them saw -- and the test half's run
+cannot be redone to follow, since it is read once and the dense side does not reproduce. So
+``cfg.hash`` leaves it out, and the bootstrap's own result is named after :func:`bootstrap_key`:
+``cfg.hash``, the ``eval.bootstrap`` section and the ``rerank`` section, the three things a
+resample reads. It was named after ``cfg.full_hash`` until #114 -- but the full hash sees *every*
+section ``cfg.hash`` leaves out, so ``signals``, ``correctness`` and ``conformal`` renamed this
+result each time one of them landed, for Day 5 settings that cannot move a resample of Day 4's
+committed run files. ``cfg.full_hash`` now names no artifact; it is what a report prints to say
+which config, sections and all, it was written under.
+
+``rerank`` (#79) is left out for the same reason. It is a step after ``retrieve()`` that no earlier
+artifact ran, so it cannot change a line of one either; its own run is named after
+:func:`rerank_key` -- ``cfg.hash`` plus the ``rerank`` section -- and the bootstrap, which reads
+that run beside the ablation runs, hashes the same section into :func:`bootstrap_key`.
+
+``signals`` (#87) is left out too. Day 5's signal collection is a run of its own over the frozen
+set, and its sampling settings and prompts reach no chunk, index, draft, split or Day 4 run file;
+hashing them would rename every one of those -- and orphan the Day 4 run files, which are looked up
+by ``cfg.hash`` and cannot be redone -- after a setting none of them saw. Its run is named after
+:func:`signals_key` instead: ``cfg.hash`` plus the whole ``signals`` section, so the prompts and
+the sampling settings still name the file they produced.
+
+``correctness`` (#88) is left out for the same reason, one step later: its judge prompts grade a
+signals run that already exists, and hashing them into :func:`signals_key` would rename that run
+file -- which cannot be redone, because its samples are a random draw. The judge's output is named
+after :func:`correctness_key` instead: the signals key plus the whole ``correctness`` section.
+
+``conformal`` (#90) is the next step down the same chain: its alpha picks a threshold from a
+labelled signals run that already exists. It is named after :func:`conformal_key`, the correctness
+key plus the whole ``conformal`` section, and left out of ``cfg.hash``.
+
+``evidence.conformal`` (#92) is left out **only while it is dormant**, that is while
+``evidence.method`` is not ``conformal``. It is the gate a report would run under the calibrated
+method -- which signal, its threshold, the fit it came from -- and the agent does not read a word of
+it until the method names it. Hashing it while dormant would move ``cfg.hash``, and with it every
+signals, judge and conformal name keyed off that hash, for a setting no run used. Set
+``method: conformal`` and the block is hashed like any other agent setting: the hash moves, and
+changing the signal or the threshold moves it again. See :data:`DORMANT`.
 
 Artifacts are named with a hash so results from different settings never mix::
 
     Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
     BM25 index          <repo>/indexes/bm25_{bm25_key}.pkl    bm25_path(cfg, chunk_key)
+    rerank run          eval/runs/rerank_{split}_{rerank_key}.jsonl    rerank_key(cfg)
+    signals run         eval/runs/signals_{split}_{signals_key}.jsonl    signals_key(cfg)
+    judge run           eval/runs/judge_{split}_{correctness_key}.jsonl  correctness_key(cfg)
+    conformal fit       eval/runs/conformal_{conformal_key}.json         conformal_key(cfg)
+    bootstrap result    eval/runs/bootstrap_{bootstrap_key}.json         bootstrap_key(cfg)
     reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
 The two indexes are *not* named after the full hash; only the reports are. An index is a function
@@ -92,14 +139,67 @@ def canonical_dump(cfg: Mapping[str, Any]) -> str:
     return json.dumps(_to_plain(cfg), sort_keys=True, separators=(",", ":"), default=str)
 
 
+#: ``(section, key)`` pairs read only after every other artifact exists, and so left out of
+#: :func:`config_hash` -- see "What the hash leaves out" above. :func:`full_hash` keeps them.
+#: A key of ``None`` is the whole section.
+AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (
+    ("eval", "bootstrap"),
+    ("rerank", None),
+    ("signals", None),
+    ("correctness", None),
+    ("conformal", None),
+)
+
+
+#: ``(section, key, switch, value)``: ``section.key`` is left out of :func:`config_hash` unless
+#: ``section.switch == value`` -- a setting the agent reads only when another one selects it. See
+#: "What the hash leaves out" above. :func:`full_hash` keeps it either way.
+DORMANT: tuple[tuple[str, str, str, str], ...] = (("evidence", "conformal", "method", "conformal"),)
+
+
+def _digest(cfg: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_dump(cfg).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def _without_after_the_runs(cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """A plain copy with :data:`AFTER_THE_RUNS` and dormant :data:`DORMANT` keys removed.
+
+    A section that :data:`AFTER_THE_RUNS` emptied is dropped.
+    """
+    plain = _to_plain(cfg)
+    for section, key in AFTER_THE_RUNS:
+        if key is None:
+            plain.pop(section, None)
+            continue
+        inner = plain.get(section)
+        if isinstance(inner, dict) and key in inner:
+            kept = {k: v for k, v in inner.items() if k != key}
+            if kept:
+                plain[section] = kept
+            else:
+                del plain[section]
+    for section, key, switch, value in DORMANT:
+        inner = plain.get(section)
+        if isinstance(inner, dict) and key in inner and inner.get(switch) != value:
+            plain[section] = {k: v for k, v in inner.items() if k != key}
+    return plain
+
+
 def config_hash(cfg: Mapping[str, Any]) -> str:
-    """First ``HASH_LEN`` hex chars of ``sha256(canonical_dump(cfg))``.
+    """First ``HASH_LEN`` hex chars of the sha256 of the canonical dump, minus AFTER_THE_RUNS.
 
     For a :class:`Config` this returns the hash frozen at load time.
     """
     if isinstance(cfg, Config):
         return cfg.hash
-    return hashlib.sha256(canonical_dump(cfg).encode("utf-8")).hexdigest()[:HASH_LEN]
+    return _digest(_without_after_the_runs(cfg))
+
+
+def full_hash(cfg: Mapping[str, Any]) -> str:
+    """:func:`config_hash` over every value, AFTER_THE_RUNS included."""
+    if isinstance(cfg, Config):
+        return cfg.full_hash
+    return _digest(_to_plain(cfg))
 
 
 class Config(Mapping[str, Any]):
@@ -109,7 +209,7 @@ class Config(Mapping[str, Any]):
     ``TypeError`` instead of silently changing what a later ``config_hash()`` call would see.
     """
 
-    __slots__ = ("_data", "_hash", "path")
+    __slots__ = ("_data", "_full_hash", "_hash", "path")
 
     def __init__(self, data: Mapping[str, Any], path: Path | None = None) -> None:
         if not isinstance(data, Mapping):
@@ -117,11 +217,16 @@ class Config(Mapping[str, Any]):
         plain = _to_plain(data)
         self._data = _freeze(plain)
         self._hash = config_hash(plain)
+        self._full_hash = full_hash(plain)
         self.path = path
 
     @property
     def hash(self) -> str:
         return self._hash
+
+    @property
+    def full_hash(self) -> str:
+        return self._full_hash
 
     def to_dict(self) -> dict[str, Any]:
         """Mutable deep copy, e.g. to build an ablation variant."""
@@ -250,6 +355,97 @@ def bm25_key(cfg: Mapping[str, Any], chunk_key: str) -> str:
             "(see config.yaml) -- all of them are hashed into the BM25 index name"
         )
     content = {"chunk_key": chunk_key, "bm25": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def rerank_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a reranked list: the pool's settings, and the ``rerank`` section.
+
+    The pool is ``retrieve(q, "hybrid", k=pool)``, a function of everything :func:`config_hash`
+    sees, so that hash goes in whole; the section goes in whole for the reason :func:`bm25_key`
+    gives. ``rerank`` is left out of ``cfg.hash`` (:data:`AFTER_THE_RUNS`), so this is the only
+    name that moves when the model, its revision or the pool depth does.
+    """
+    section = cfg.get("rerank")
+    if not section:
+        raise ValueError("config has no `rerank` section; see config.yaml for the one #79 added")
+    content = {"config_hash": config_hash(cfg), "rerank": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def bootstrap_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a resample: the runs it reads, and its own three settings.
+
+    ``cfg.hash`` names the ablation run files the resample draws from, and the ``rerank`` section
+    names the stretch row read beside them, so both go in whole next to ``eval.bootstrap`` -- B,
+    the seed and the interval width. None of the three moves ``cfg.hash``
+    (:data:`AFTER_THE_RUNS`), so this is the only name that moves when a resample changes.
+
+    Replaces ``cfg.full_hash`` as the bootstrap's name (#114); see "What the hash leaves out".
+
+    Unlike :func:`correctness_key` and :func:`conformal_key`, which chain through the key of the
+    run they read, this does not call :func:`rerank_key`: the rerank run is optional here
+    (``eval.scripts.bootstrap`` adds its row only when ``config.yaml`` has the section, and
+    :func:`rerank_key` raises without one), so the section goes in as ``None`` when absent. A
+    config that has one hashes exactly what :func:`rerank_key` does, one level in.
+    """
+    section = (cfg.get("eval") or {}).get("bootstrap")
+    if not section:
+        raise ValueError(
+            "config has no `eval.bootstrap` section; see config.yaml for the one #76 added"
+        )
+    rerank = cfg.get("rerank")
+    content = {
+        "config_hash": config_hash(cfg),
+        "bootstrap": _to_plain(section),
+        "rerank": _to_plain(rerank) if rerank else None,
+    }
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def signals_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a signals run: the agent's settings, and the ``signals`` section.
+
+    The run goes through the whole agent -- router, dispatch, answer -- which is a function of
+    everything :func:`config_hash` sees, so that hash goes in whole; the section goes in whole for
+    the reason :func:`bm25_key` gives. ``signals`` is left out of ``cfg.hash``
+    (:data:`AFTER_THE_RUNS`), so this is the only name that moves when a prompt, the sample count or
+    the sampling temperature does.
+    """
+    section = cfg.get("signals")
+    if not section:
+        raise ValueError("config has no `signals` section; see config.yaml for the one #87 added")
+    content = {"config_hash": config_hash(cfg), "signals": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def correctness_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a judge run: the signals run it grades, and its own prompts.
+
+    :func:`signals_key` goes in whole -- a verdict is about one run's answers -- and the
+    ``correctness`` section goes in whole, so a changed word in any bucket's prompt names a new
+    file. Neither section moves ``cfg.hash`` (:data:`AFTER_THE_RUNS`).
+    """
+    section = cfg.get("correctness")
+    if not section:
+        raise ValueError(
+            "config has no `correctness` section; see config.yaml for the one #88 added"
+        )
+    content = {"signals_key": signals_key(cfg), "correctness": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def conformal_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a conformal fit: the labels it fits on, and its own alpha.
+
+    :func:`correctness_key` goes in whole -- the fit reads the calib CSV whose ``correct`` column
+    grades that judge run -- and the ``conformal`` section goes in whole. Neither moves
+    ``cfg.hash`` (:data:`AFTER_THE_RUNS`).
+    """
+    section = cfg.get("conformal")
+    if not section:
+        raise ValueError("config has no `conformal` section; see config.yaml for the one #90 added")
+    content = {"correctness_key": correctness_key(cfg), "conformal": _to_plain(section)}
     return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 

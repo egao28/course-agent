@@ -1,0 +1,193 @@
+{
+  "answer_everything_risk": 0.40476190476190477,
+  "buckets": {
+    "ambiguous": 6,
+    "fact": 21,
+    "multihop": 12,
+    "unanswerable": 3
+  },
+  "ci": 0.95,
+  "config_hash": "c73b197d",
+  "csv": "eval/runs/signals_test_37164723.csv",
+  "csv_sha256": "8db35639f2ba1f139631c8b5bcbce7507da99e95e29e72a175f2b9d84fc93afe",
+  "differences": {
+    "retrieval_score - self_consistency": {
+      "hi": 0.46352941176470586,
+      "lo": 0.2222222222222222,
+      "point": 0.3482352941176471,
+      "significant": true,
+      "skipped_resamples": 454
+    },
+    "retrieval_score - verbalized": {
+      "hi": 0.27823123612840356,
+      "lo": 0.04774535809018565,
+      "point": 0.15294117647058825,
+      "significant": true,
+      "skipped_resamples": 454
+    },
+    "verbalized - self_consistency": {
+      "hi": 0.3458869144880174,
+      "lo": 0.03528315893665167,
+      "point": 0.19529411764705884,
+      "significant": true,
+      "skipped_resamples": 0
+    }
+  },
+  "figure": "report/figures/risk_coverage_test_37164723.png",
+  "figure_sha256": "b1ac83a34f3942cf61d28d18d95a5d4f4c49278e890dbb534549030d71eb3441",
+  "n": 42,
+  "n_resamples": 10000,
+  "reference_risk": 0.1,
+  "seed": 76,
+  "signals": {
+    "retrieval_score": {
+      "aurc": 0.37130952380952387,
+      "auroc": {
+        "hi": 1.0,
+        "lo": 1.0,
+        "point": 1.0,
+        "skipped_resamples": 454
+      },
+      "n": 10,
+      "n_null": 32,
+      "points": [
+        {
+          "answered": 1,
+          "coverage": 0.1,
+          "risk": 0.0,
+          "threshold": 30.289613027602474
+        },
+        {
+          "answered": 2,
+          "coverage": 0.2,
+          "risk": 0.0,
+          "threshold": 27.803464022651088
+        },
+        {
+          "answered": 3,
+          "coverage": 0.3,
+          "risk": 0.0,
+          "threshold": 21.27253695209206
+        },
+        {
+          "answered": 4,
+          "coverage": 0.4,
+          "risk": 0.25,
+          "threshold": 20.756743072854796
+        },
+        {
+          "answered": 5,
+          "coverage": 0.5,
+          "risk": 0.4,
+          "threshold": 17.165397834162825
+        },
+        {
+          "answered": 6,
+          "coverage": 0.6,
+          "risk": 0.5,
+          "threshold": 14.985651292457108
+        },
+        {
+          "answered": 7,
+          "coverage": 0.7,
+          "risk": 0.5714285714285714,
+          "threshold": 14.807600032526485
+        },
+        {
+          "answered": 8,
+          "coverage": 0.8,
+          "risk": 0.625,
+          "threshold": 13.849599992661608
+        },
+        {
+          "answered": 9,
+          "coverage": 0.9,
+          "risk": 0.6666666666666667,
+          "threshold": 10.799996378483085
+        },
+        {
+          "answered": 10,
+          "coverage": 1.0,
+          "risk": 0.7,
+          "threshold": 10.667901141328084
+        }
+      ]
+    },
+    "self_consistency": {
+      "aurc": 0.32744636316064885,
+      "auroc": {
+        "hi": 0.7777777777777778,
+        "lo": 0.5357142857142858,
+        "point": 0.6517647058823529,
+        "skipped_resamples": 0
+      },
+      "n": 42,
+      "n_null": 0,
+      "points": [
+        {
+          "answered": 35,
+          "coverage": 0.8333333333333334,
+          "risk": 0.3142857142857143,
+          "threshold": 1.0
+        },
+        {
+          "answered": 39,
+          "coverage": 0.9285714285714286,
+          "risk": 0.3846153846153846,
+          "threshold": 0.6666666666666666
+        },
+        {
+          "answered": 42,
+          "coverage": 1.0,
+          "risk": 0.40476190476190477,
+          "threshold": 0.3333333333333333
+        }
+      ]
+    },
+    "verbalized": {
+      "aurc": 0.21872637944066517,
+      "auroc": {
+        "hi": 0.9530864903805407,
+        "lo": 0.7223496732026143,
+        "point": 0.8470588235294118,
+        "skipped_resamples": 0
+      },
+      "n": 42,
+      "n_null": 0,
+      "points": [
+        {
+          "answered": 26,
+          "coverage": 0.6190476190476191,
+          "risk": 0.15384615384615385,
+          "threshold": 100.0
+        },
+        {
+          "answered": 35,
+          "coverage": 0.8333333333333334,
+          "risk": 0.2857142857142857,
+          "threshold": 90.0
+        },
+        {
+          "answered": 36,
+          "coverage": 0.8571428571428571,
+          "risk": 0.3055555555555556,
+          "threshold": 85.0
+        },
+        {
+          "answered": 40,
+          "coverage": 0.9523809523809523,
+          "risk": 0.375,
+          "threshold": 80.0
+        },
+        {
+          "answered": 42,
+          "coverage": 1.0,
+          "risk": 0.40476190476190477,
+          "threshold": 70.0
+        }
+      ]
+    }
+  },
+  "signals_key": "37164723",
+  "split": "test"
+}

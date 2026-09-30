@@ -21,13 +21,17 @@ from config import (
     Config,
     bm25_key,
     bm25_path,
+    bootstrap_key,
     chroma_path,
     collection_name,
     config_hash,
     dense_key,
+    full_hash,
     load_config,
     rel_to_repo,
     report_path,
+    rerank_key,
+    signals_key,
     source_path,
     verify_source,
 )
@@ -35,7 +39,19 @@ from config import (
 FIXTURE = Path(__file__).parent / "fixtures" / "config_fixture.yaml"
 HEX8 = re.compile(r"^[0-9a-f]{8}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-REQUIRED_SECTIONS = {"seed", "data", "chunk", "embedding", "bm25", "fusion"}
+REQUIRED_SECTIONS = {
+    "seed",
+    "data",
+    "chunk",
+    "embedding",
+    "bm25",
+    "fusion",
+    "llm",
+    "agent",
+    "evidence",
+    # #61: eval.split_seed, the provenance of the frozen calibration/test split.
+    "eval",
+}
 
 
 @pytest.fixture
@@ -240,6 +256,34 @@ def test_the_two_index_keys_do_not_move_each_other(cfg):
     assert bm25_key(remodelled, "c0ffee00") == bm25_key(cfg, "c0ffee00")
 
 
+def test_a_new_section_moves_the_config_hash_and_neither_index_key(cfg):
+    # Day 2 adds `llm:` to config.yaml, which is the general case: a section that no index is a
+    # function of must rename the reports and leave both indexes answering to the names they
+    # already have -- otherwise arriving at Day 2 orphans a dense index that cost money to build.
+    with_llm = Config(
+        {**cfg.to_dict(), "llm": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0}}
+    )
+    assert with_llm.hash != cfg.hash
+    assert collection_name(with_llm, "c0ffee00") == collection_name(cfg, "c0ffee00")
+    assert bm25_key(with_llm, "c0ffee00") == bm25_key(cfg, "c0ffee00")
+
+
+def test_the_eval_section_moves_the_hash_and_leaves_all_three_index_keys_alone():
+    # #61 adds `eval: {split_seed: ...}` to the live file -- the second instance of the general
+    # case above, and the claim the PR makes about the artifacts already in the tree: the reports
+    # are renamed, the two indexes answer to the names they have. Over config.yaml itself rather
+    # than the fixture, because that is the file whose hash moved.
+    live = load_config()
+    assert isinstance(live["eval"]["split_seed"], int)
+    without = Config({k: v for k, v in live.to_dict().items() if k != "eval"})
+    assert live.hash != without.hash
+    assert collection_name(live, "c0ffee00") == collection_name(without, "c0ffee00")
+    assert bm25_key(live, "c0ffee00") == bm25_key(without, "c0ffee00")
+    reseeded = Config({**live.to_dict(), "eval": {"split_seed": live["eval"]["split_seed"] + 1}})
+    assert reseeded.hash != live.hash
+    assert bm25_key(reseeded, "c0ffee00") == bm25_key(live, "c0ffee00")
+
+
 def test_bm25_key_says_so_when_there_is_no_section_to_hash(cfg):
     without = {k: v for k, v in cfg.to_dict().items() if k != "bm25"}
     with pytest.raises(ValueError, match="no `bm25` section"):
@@ -415,3 +459,119 @@ def test_cli_source_digest(raw, tmp_path, capsys):
     cfg_file.write_text(yaml.safe_dump(raw))
     config.main([str(cfg_file), "--source-digest"])
     assert capsys.readouterr().out.strip() == hashlib.sha256(b"x").hexdigest()
+
+
+def test_the_bootstrap_settings_move_only_the_full_hash_and_their_own_key():
+    # #76: eval.bootstrap is read after every run file exists, so it must not rename a single
+    # artifact made before it -- config.yaml's hash stays where #61 left it. The full hash sees
+    # it, and so does bootstrap_key (#114), which is what names the bootstrap's own result.
+    live = load_config()
+    assert "bootstrap" in live["eval"]
+    assert live.hash == "c73b197d"
+    assert live.full_hash != live.hash
+    data = live.to_dict()
+    without = {
+        **{
+            k: v
+            for k, v in data.items()
+            if k not in {"rerank", "signals", "correctness", "conformal"}
+        },
+        "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"},
+        "evidence": {k: v for k, v in data["evidence"].items() if k != "conformal"},
+    }
+    assert Config(without).hash == Config(without).full_hash == live.hash
+    reseeded = {**data, "eval": {**data["eval"], "bootstrap": {"n_resamples": 10, "seed": 1}}}
+    assert Config(reseeded).hash == live.hash
+    assert Config(reseeded).full_hash != live.full_hash
+    # Anything a run does see still moves both.
+    moved = {**data, "eval": {**data["eval"], "split_seed": 62}}
+    assert Config(moved).hash != live.hash and Config(moved).full_hash != live.full_hash
+    # A plain mapping hashes the same way as the Config built from it.
+    assert config_hash(data) == live.hash and full_hash(data) == live.full_hash
+    # An eval section holding nothing but bootstrap hashes as if it were absent.
+    only = {**without, "eval": {"bootstrap": data["eval"]["bootstrap"]}}
+    bare = {k: v for k, v in without.items() if k != "eval"}
+    assert config_hash(only) == config_hash(bare)
+
+
+def test_only_what_a_resample_reads_moves_the_bootstrap_key():
+    # #114: the result used to be named after cfg.full_hash, which sees every section cfg.hash
+    # leaves out -- so landing signals, correctness and conformal renamed, three times over, a
+    # resample of Day 4 run files that none of them can change a number in. bootstrap_key sees
+    # only the three things the resample reads.
+    live = load_config()
+    data = live.to_dict()
+    assert bootstrap_key(live) == "baa560e9"
+    day5 = {
+        "signals": {**data["signals"], "samples": 9},
+        "correctness": {"judge_prompts": {}},
+        "conformal": {"alpha": 0.2},
+    }
+    for section, edited in day5.items():
+        moved = Config({**data, section: edited})
+        assert moved.hash == live.hash
+        assert moved.full_hash != live.full_hash  # the old name moved here, and should not have
+        assert bootstrap_key(moved) == bootstrap_key(live)
+    # What it does read moves it: its own three settings, the rerank row, and cfg.hash itself.
+    bootstrap = {**data["eval"]["bootstrap"], "seed": 1}
+    assert bootstrap_key(Config({**data, "eval": {**data["eval"], "bootstrap": bootstrap}})) != (
+        bootstrap_key(live)
+    )
+    assert bootstrap_key(Config({**data, "rerank": {**data["rerank"], "pool": 30}})) != (
+        bootstrap_key(live)
+    )
+    upstream = Config({**data, "fusion": {**data["fusion"], "rrf_k": 61}})
+    assert upstream.hash != live.hash and bootstrap_key(upstream) != bootstrap_key(live)
+    # #76's three-mode procedure runs without a rerank section, so it still has a name there.
+    bare = Config({k: v for k, v in data.items() if k != "rerank"})
+    assert bootstrap_key(bare) != bootstrap_key(live)
+    # Its own settings are the one section it cannot do without.
+    no_bootstrap = {k: v for k, v in data["eval"].items() if k != "bootstrap"}
+    with pytest.raises(ValueError, match="no `eval.bootstrap` section"):
+        bootstrap_key(Config({**data, "eval": no_bootstrap}))
+
+
+def test_the_rerank_section_moves_the_full_hash_and_the_rerank_key_only():
+    # #79: the reranker runs after every three-mode artifact exists and none of them reads it, so
+    # config.hash stays c73b197d. The full hash (the bootstrap, which reads the rerank run) and the
+    # rerank key (the rerank run itself) both see it; neither index key does.
+    live = load_config()
+    data = live.to_dict()
+    key = "0" * 8  # any chunk key: only whether the index keys move is asked
+    bare = Config({k: v for k, v in data.items() if k != "rerank"})
+    assert bare.hash == live.hash == "c73b197d"
+    assert bare.full_hash != live.full_hash
+    moved = Config({**data, "rerank": {**data["rerank"], "pool": 30}})
+    assert moved.hash == live.hash and moved.full_hash != live.full_hash
+    assert rerank_key(moved) != rerank_key(live)
+    for other in (bare, moved):
+        assert dense_key(other, key) == dense_key(live, key)
+        assert bm25_key(other, key) == bm25_key(live, key)
+    # The rerank key follows everything the pool is built from, too.
+    refused = Config({**data, "fusion": {**data["fusion"], "rrf_k": 61}})
+    assert refused.hash != live.hash and rerank_key(refused) != rerank_key(live)
+    with pytest.raises(ValueError, match="no `rerank` section"):
+        rerank_key(bare)
+
+
+def test_the_signals_section_moves_only_its_own_key_and_the_full_hash():
+    # #87: Day 5's sampling settings and prompts reach nothing made before the signals run, so
+    # cfg.hash stays where #61 left it -- the Day 4 run files are found by it -- and the run is
+    # named after signals_key, which does see every word of both prompts.
+    live = load_config()
+    assert "signals" in live
+    assert live.hash == "c73b197d"
+    data = live.to_dict()
+    assert Config({k: v for k, v in data.items() if k != "signals"}).hash == live.hash
+    edited = {
+        **data,
+        "signals": {**data["signals"], "judge_prompt": data["signals"]["judge_prompt"] + "!"},
+    }
+    assert Config(edited).hash == live.hash
+    assert Config(edited).full_hash != live.full_hash
+    assert signals_key(Config(edited)) != signals_key(live)
+    # And a setting the agent does see moves the signals key too, through cfg.hash.
+    moved = {**data, "agent": {"retrieval_mode": "dense"}}
+    assert signals_key(Config(moved)) != signals_key(live)
+    with pytest.raises(ValueError, match="no `signals` section"):
+        signals_key(Config({k: v for k, v in data.items() if k != "signals"}))

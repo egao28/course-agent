@@ -10,11 +10,6 @@ into tmp_path: no test can read the live 3 MB corpus by accident, and none can o
 
 ``token_stats`` is always driven with a fake tokenizer; the real ``cl100k_base`` vocabulary is a
 download, and none of the properties tested here depend on which tokenizer counted.
-
-Both shipped templates are golden-tested. The cross-reference cases ``v2`` has to survive that the
-2026-sp corpus does not contain -- a chain, a mutual pair, a source whose own description carries a
-requirements block -- are built as literal course dicts: the renderers are pure functions over
-mappings, and adding rows to the fixture CSV would move every count in ``test_export_almabot``.
 """
 
 from __future__ import annotations
@@ -43,59 +38,17 @@ ECE 374. Prerequisite: One of CS 173, MATH 213; CS 225.
 Prerequisites: One of CS 173, MATH 213; CS 225.
 Degree Attributes: None"""
 
-#: The same course under ``v2``: the requirements block the catalog repeats at the end of the
-#: description is gone from the ``Description:`` line and kept only under ``Prerequisites:``.
-CS374_CHUNK_V2 = """CS 374 — Introduction to Algorithms & Models
-Credits: 4
-Term: 2026-sp
-Description: Analysis of algorithms, major paradigms of algorithm design including recursive \
-algorithms, divide-and-conquer algorithms, dynamic programming, greedy algorithms, and graph \
-algorithms. Formal models of computation including finite automata and Turing machines. Same as \
-ECE 374.
-Prerequisites: One of CS 173, MATH 213; CS 225.
-Degree Attributes: None"""
-
-#: A cross-reference-only description under ``v1``: a pointer, and nothing to embed.
-XREF101_CHUNK_V1 = """XREF 101 — Cross Listed Course
-Credits: 3
-Term: 2026-sp
-Description: Same as HIST 200. See HIST 200.
-Prerequisites: None listed
-Degree Attributes: None"""
-
-#: ...and under ``v2``, which follows the pointer and labels what it borrowed.
-XREF101_CHUNK_V2 = """XREF 101 — Cross Listed Course
-Credits: 3
-Term: 2026-sp
-Description: Same as HIST 200. See HIST 200.
-Description of HIST 200: Survey of global history.
-Prerequisites: None listed
-Degree Attributes: None"""
-
 #: ...and for one that fills none of the optional ones.
 CWL593_CHUNK = """CWL 593 — Directed Research
-Credits: 1 to 5
+Credits: 1
 Term: 2026-sp
 Description:
 Prerequisites: None listed
 Degree Attributes: None"""
 
-#: How a template renders a field whose value is not the bare string, keyed by template and then
-#: by course field, so the coverage test can be derived from TEMPLATE_FIELDS instead of listing
-#: fields by hand. The two templates read the same seven fields and differ on one of them.
-FIELD_AS_RENDERED = {
-    "v1": {"credits": lambda c: ch.format_credits(c["credits"])},
-    "v2": {
-        "credits": lambda c: ch.format_credits(c["credits"]),
-        "desc": lambda c: ch.strip_requirements(c["desc"], c["prereqRaw"]),
-    },
-}
-
-
-def as_rendered(course: dict, field: str, template: str) -> str:
-    """The exact substring ``template`` should put in the chunk for ``course[field]``."""
-    render = FIELD_AS_RENDERED[template].get(field)
-    return render(course) if render is not None else str(course[field])
+#: How ``v1`` renders a field whose value is not the bare string. Keyed by course field, so the
+#: coverage test can be derived from TEMPLATE_FIELDS instead of listing fields by hand.
+FIELD_AS_RENDERED = {"credits": ch.format_credits}
 
 
 @pytest.fixture(autouse=True)
@@ -124,16 +77,6 @@ def cfg() -> Config:
         "fields": list(ch.TEMPLATE_FIELDS["v1"]),
     }
     return Config(raw)
-
-
-@pytest.fixture
-def cfg_v2(cfg) -> Config:
-    """The same config with ``template_version`` flipped -- the whole of the ablation switch.
-
-    Both templates read the same field list, so nothing else in the ``chunk`` section moves; that
-    ``check_chunk_config`` accepts this is its own test below.
-    """
-    return Config({**cfg.to_dict(), "chunk": {**cfg["chunk"], "template_version": "v2"}})
 
 
 @pytest.fixture
@@ -190,19 +133,17 @@ def test_render_chunk_v1_labels_absent_fields(by_code):
     assert "Description:\n" in CWL593_CHUNK  # bare label, not a trailing space
 
 
-@pytest.mark.parametrize("template", sorted(ch.RENDERERS))
-def test_render_chunk_covers_every_configured_field(courses, by_code, template):
+def test_render_chunk_covers_every_configured_field(courses):
     # Derived from TEMPLATE_FIELDS, not from a hand-written list: adding a field to the hashed
-    # field set and forgetting it in the renderer must fail here. check_chunk_config only
-    # compares the config against the constant, so this is the only check that a template
-    # actually renders what its hashed field list claims.
-    for field in ch.TEMPLATE_FIELDS[template]:
+    # field set and forgetting it in _render_v1 must fail here. check_chunk_config only compares
+    # the config against the constant, so this is the only check that the template renders them.
+    for field in ch.TEMPLATE_FIELDS["v1"]:
         # A course that actually fills the field -- an empty value would assert nothing, and no
         # single fixture course fills all seven (none has both a prereq block and attributes).
         course = next((c for c in courses if c[field]), None)
         assert course is not None, f"no fixture course fills {field}"
-        rendered = as_rendered(course, field, template)
-        assert rendered in ch.render_chunk(course, template, by_code), field
+        rendered = FIELD_AS_RENDERED.get(field, str)(course[field])
+        assert rendered in ch.render_chunk(course, "v1"), field
 
 
 def test_render_chunk_labels_attrs_as_the_catalog_does(by_code):
@@ -213,204 +154,17 @@ def test_render_chunk_labels_attrs_as_the_catalog_does(by_code):
     assert "Gen Ed" not in text
 
 
-def test_render_chunk_v2_drops_the_duplicated_requirements_block(by_code):
-    # The catalog runs the block to the end of desc, so v1 embeds it twice. Golden, like v1: this
-    # exact string is what a v2 index holds.
-    assert ch.render_chunk(by_code["CS 374"], "v2", by_code) == CS374_CHUNK_V2
-    assert CS374_CHUNK_V2.count("One of CS 173, MATH 213; CS 225.") == 1
-    assert "Prerequisite:" not in CS374_CHUNK_V2.split("\n")[3]  # label gone with the block
-
-
-def test_render_chunk_v2_follows_a_cross_reference(by_code):
-    assert ch.render_chunk(by_code["XREF 101"], "v1", by_code) == XREF101_CHUNK_V1
-    assert ch.render_chunk(by_code["XREF 101"], "v2", by_code) == XREF101_CHUNK_V2
-
-
-def test_render_chunk_v2_keeps_the_pointer_it_resolved(by_code):
-    # The "Same as ..." sentence is the only place the sibling codes appear, so following the
-    # reference adds a line rather than replacing one.
-    text = ch.render_chunk(by_code["XREF 101"], "v2", by_code)
-    assert "Description: Same as HIST 200. See HIST 200." in text
-    assert "Description of HIST 200: Survey of global history." in text
-
-
-def test_render_chunk_v2_changes_nothing_else(courses, by_code):
-    # A course with neither a requirements block nor a cross-reference renders identically under
-    # both templates: v2 is those two changes and no others, including the attrs label.
-    plain = [c for c in courses if not c["prereqRaw"] and not ch.cross_reference(c)]
-    assert plain, "fixture has no course that neither template changes"
-    for course in plain:
-        assert ch.render_chunk(course, "v2", by_code) == ch.render_chunk(course, "v1", by_code)
-
-
-def test_render_chunk_v2_without_a_corpus_leaves_the_reference_alone(by_code):
-    # Same outcome as a reference that does not resolve, by the same code path: the course as the
-    # catalog wrote it. build_chunks always passes the corpus, so this is a direct-call default.
-    assert ch.render_chunk(by_code["XREF 101"], "v2") == XREF101_CHUNK_V1
-
-
 def test_render_chunk_rejects_an_unknown_template(by_code):
     with pytest.raises(ValueError, match="unknown chunk.template_version 'v9'"):
         ch.render_chunk(by_code["CS 374"], "v9")
 
 
-# --- what v2 does to a description ---------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
-    ("desc", "raw", "expected"),
-    [
-        # The label goes with the block it opens, and both spellings the catalog uses are cut.
-        ("Data structures. Prerequisite: CS 125.", "CS 125.", "Data structures."),
-        ("Data structures. Prerequisites: CS 125.", "CS 125.", "Data structures."),
-        # The whole block, not the first sentence of it.
-        (
-            "Supervised study. Prerequisite: CS 173. May not be taken concurrently with CS 225.",
-            "CS 173. May not be taken concurrently with CS 225.",
-            "Supervised study.",
-        ),
-        # No block at all.
-        ("Introduction to microeconomics.", "", "Introduction to microeconomics."),
-        # A course whose description is only the block keeps an empty description, not a stub.
-        ("Prerequisite: CS 125.", "CS 125.", ""),
-    ],
+    ("credits", "expected"),
+    [(3.0, "3"), (4.0, "4"), (1.5, "1.5"), (0.5, "0.5"), (0.0, "0")],
 )
-def test_strip_requirements_cuts_the_block_and_its_label(desc, raw, expected):
-    assert ch.strip_requirements(desc, raw) == expected
-
-
-def test_strip_requirements_leaves_a_block_that_is_not_a_suffix(courses):
-    # True of all 2,732 courses that have one today, but the block is parsed out of prose:
-    # cutting on a partial match could truncate a real description, so a mismatch is left alone.
-    assert ch.strip_requirements("Data structures. Prerequisite: CS 125.", "CS 225.") == (
-        "Data structures. Prerequisite: CS 125."
-    )
-    for course in courses:
-        if course["prereqRaw"]:
-            assert course["desc"].endswith(course["prereqRaw"]), course["code"]
-
-
-def test_strip_requirements_is_what_the_prereqs_line_still_carries(by_code):
-    # The block is moved, not dropped: it leaves the Description line and stays under
-    # Prerequisites, so the chunk holds it exactly once.
-    course = by_code["ANTH 390"]
-    text = ch.render_chunk(course, "v2", by_code)
-    assert "Description: Supervised study." in text
-    assert f"Prerequisites: {course['prereqRaw']}" in text
-
-
-# --- following a cross-reference ------------------------------------------------------------------
-
-
-def test_cross_reference_reads_the_see_clause(by_code):
-    assert ch.cross_reference(by_code["XREF 101"]) == "HIST 200"
-    # A real description is not a cross-reference, even when it mentions a sibling course.
-    assert ch.cross_reference(by_code["CS 374"]) is None
-    assert "Same as ECE 374." in by_code["CS 374"]["desc"]
-
-
-@pytest.mark.parametrize(
-    ("desc", "expected"),
-    [
-        ("Same as HIST 283. See HIST 283.", "HIST 283"),
-        # The "Same as" clause names up to seven siblings; the "See" clause names the one course
-        # the catalog files the text under, and that is the one to follow.
-        ("Same as AFRO 201, LLS 201, and PS 201. See PS 201.", "PS 201"),
-        # SAME 514 in the live corpus: the export's upper-case CODE_RE misses this one.
-        ("Same as REL 514. See Rel 514.", "REL 514"),
-        ("Same as GGIS 205. See GGIS205.", "GGIS 205"),
-        # Shaped like a cross-reference but naming no course: nothing to follow.
-        ("Same as the honors section. See your advisor.", None),
-    ],
-)
-def test_cross_reference_handles_the_shapes_the_catalog_writes(desc, expected):
-    assert ch.cross_reference({"desc": desc}) == expected
-
-
-def test_inherited_desc_borrows_the_text_and_names_its_source(by_code):
-    assert ch.inherited_desc(by_code["XREF 101"], by_code) == (
-        "HIST 200",
-        "Survey of global history.",
-    )
-    assert ch.inherited_desc(by_code["CS 374"], by_code) is None
-
-
-def test_inherited_desc_skips_a_target_that_is_not_offered(by_code):
-    # BADM 205 -> GGIS 205 in the live corpus: the only one of the 497 that does not resolve.
-    orphan = {**by_code["XREF 101"], "desc": "Same as GGIS 205. See GGIS 205."}
-    assert ch.inherited_desc(orphan, by_code) is None
-
-
-def test_inherited_desc_does_not_borrow_a_pointer(by_code):
-    # A target that is itself a cross-reference would only pass the pointer along. The same check
-    # is what makes a chain or a mutual pair terminate without recursion.
-    second = {**by_code["XREF 101"], "code": "XREF 102", "desc": "Same as XREF 101. See XREF 101."}
-    corpus = {**by_code, "XREF 102": second}
-    assert ch.inherited_desc(second, corpus) is None
-    mutual = {**by_code["XREF 101"], "desc": "Same as XREF 102. See XREF 102."}
-    assert ch.inherited_desc(mutual, {**corpus, "XREF 101": mutual}) is None
-
-
-def test_inherited_desc_skips_a_target_with_no_description(by_code):
-    pointer = {**by_code["XREF 101"], "desc": "Same as CWL 593. See CWL 593."}
-    assert ch.inherited_desc(pointer, by_code) is None
-
-
-def test_inherited_desc_leaves_the_sources_requirements_behind(by_code):
-    # 274 of the live sources carry a requirements block. It describes the *source*; this course
-    # has none of its own and an empty metadata.prereq_codes, so inheriting the text would have
-    # the chunk contradict its own metadata.
-    source = by_code["ANTH 390"]
-    borrower = {**by_code["XREF 101"], "desc": "Same as ANTH 390. See ANTH 390."}
-    assert ch.inherited_desc(borrower, by_code) == ("ANTH 390", "Supervised study.")
-    assert source["prereqRaw"] not in ch.render_chunk(borrower, "v2", by_code)
-
-
-def test_crossref_counts_reports_what_a_template_could_resolve(courses):
-    # 497 / 496 on the live corpus; one fixture cross-reference, which resolves.
-    assert ch.crossref_counts(courses) == (1, 1)
-    orphaned = [c for c in courses if c["code"] != "HIST 200"]
-    assert ch.crossref_counts(orphaned) == (1, 0)
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("3 hours.", "3"),
-        ("4 hours.", "4"),
-        ("1.5 hours.", "1.5"),
-        ("0.5 hours.", "0.5"),
-        ("0 hours.", "0"),  # a real value, rendered as written
-    ],
-)
-def test_format_credits_renders_a_fixed_value_without_a_trailing_zero(raw, expected):
-    assert ch.format_credits(raw) == expected
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("3 OR 4 hours.", "3 or 4"),
-        ("1 TO 5 hours.", "1 to 5"),
-        ("0 TO 16 hours.", "0 to 16"),
-        ("0 OR 1 hours.", "0 or 1"),
-    ],
-)
-def test_format_credits_renders_the_whole_range(raw, expected):
-    # Not one end of it: "Credits: 3" on a "3 OR 4" course is a number the catalog never gives,
-    # and it is the number an agent quotes back (#17). The catalog's connector is kept, because
-    # "3 or 4" and "1 to 5" are different claims about what the course can be taken for.
-    assert ch.format_credits(raw) == expected
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [("hours to be arranged.", "hours to be arranged."), ("", "not listed"), (None, "not listed")],
-)
-def test_format_credits_never_invents_a_number(raw, expected):
-    # A string the parser cannot read is quoted verbatim rather than flattened to 0 -- the
-    # export refuses to ship one, so this is the belt to that braces.
-    assert ch.format_credits(raw) == expected
+def test_format_credits_drops_a_trailing_zero(credits, expected):
+    assert ch.format_credits(credits) == expected
 
 
 # --- doc_id -------------------------------------------------------------------------------------
@@ -442,42 +196,14 @@ def test_metadata_carries_exactly_the_filterable_fields(by_code, categories):
     assert meta == {
         "code": "CS 374",
         "subject": "CS",
-        "number": "374",
-        "credits_min": 4.0,
-        "credits_max": 4.0,
+        "number": 374,
+        "level": 300,
+        "credits": 4.0,
         "term": "2026-sp",
         # Unfiltered: MATH 213 is not offered this term but stays visible in the metadata.
         "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
         "gened_ids": [],
     }
-
-
-def test_metadata_carries_a_variable_credit_course_as_two_bounds(by_code, categories):
-    meta = ch.chunk_metadata(by_code["CS 173"], categories)
-    assert (meta["credits_min"], meta["credits_max"]) == (3.0, 4.0)
-    assert "credits" not in meta  # the flattened value is gone, and held 3.0 for this course
-
-
-def test_metadata_answers_which_courses_can_be_taken_for_four_credits(courses, categories):
-    # The filter #17 asks for, run over the metadata a store would hold.
-    metas = [ch.chunk_metadata(c, categories) for c in courses]
-    four = sorted(m["code"] for m in metas if m["credits_min"] <= 4 <= m["credits_max"])
-    assert four == [
-        "ANTH 390",
-        "BADM 537",
-        "CS 173",
-        "CS 225",
-        "CS 233",
-        "CS 374",
-        "CS 421",
-        "CWL 593",
-        "ECON 102",
-        "PHYS 211",
-        "STAT 425",
-    ]
-    # ...and the chunk text agrees with the metadata, so an agent reading either gets the range.
-    cs173 = next(c for c in courses if c["code"] == "CS 173")
-    assert "Credits: 3 or 4" in ch.render_chunk(cs173, "v1")
 
 
 def test_gened_ids_follow_the_exported_rules(by_code, categories):
@@ -494,12 +220,33 @@ def test_gened_ids_read_the_file_the_corpus_came_with(corpus, by_code):
     assert ch.gened_ids(by_code["STAT 100"], ch.load_gened_categories()) == []
 
 
-def test_chroma_metadata_flattens_lists_into_scalars(by_code, categories):
-    flat = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
-    assert flat["prereq_codes"] == "CS 173|CS 225|MATH 213"
-    assert flat["gened_ids"] == ""
-    assert flat["credits_min"] == 4.0  # scalars are left alone
-    assert all(isinstance(v, (str, int, float, bool)) for v in flat.values())
+def test_catalog_number_is_an_int_and_level_rounds_it_down(by_code, categories):
+    # Chroma compares numbers, not numeric strings: "400-level" has to be an int to be filterable.
+    meta = ch.chunk_metadata(by_code["STAT 100"], categories)
+    assert (meta["number"], meta["level"]) == (100, 100)
+
+
+def test_catalog_number_refuses_a_number_that_is_not_digits(by_code, categories):
+    # The export copies the Number column verbatim; one string among the ints would be skipped by
+    # every range filter without saying so.
+    odd = {**by_code["CS 374"], "number": "374X"}
+    with pytest.raises(ValueError, match="not digits"):
+        ch.chunk_metadata(odd, categories)
+
+
+def test_chroma_metadata_keeps_the_lists_as_lists(by_code, categories):
+    # Chroma 1.5.9 stores a non-empty list and filters it with $contains; joining the values into
+    # one string left them matchable only in full.
+    stored = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
+    assert stored["prereq_codes"] == ["CS 173", "CS 225", "MATH 213"]
+    assert stored["credits"] == 4.0  # scalars are left alone
+
+
+def test_chroma_metadata_drops_an_empty_list_because_chroma_refuses_one(by_code, categories):
+    # "Expected metadata list value ... to be non-empty in add" -- CS 374 satisfies no Gen Ed.
+    stored = ch.chroma_metadata(ch.chunk_metadata(by_code["CS 374"], categories))
+    assert "gened_ids" not in stored
+    assert all(v != [] for v in stored.values())
 
 
 def test_chroma_metadata_round_trips_through_the_decoder(by_code, categories):
@@ -508,13 +255,21 @@ def test_chroma_metadata_round_trips_through_the_decoder(by_code, categories):
     assert ch.decode_chroma_metadata(ch.chroma_metadata(metadata)) == metadata
 
 
-def test_decode_chroma_metadata_reads_an_empty_field_as_an_empty_list():
-    assert ch.decode_chroma_metadata({"gened_ids": ""})["gened_ids"] == []
+def test_decode_chroma_metadata_restores_a_dropped_field_as_an_empty_list():
+    decoded = ch.decode_chroma_metadata({"code": "CS 374", "prereq_codes": ["CS 173"]})
+    assert decoded == {"code": "CS 374", "prereq_codes": ["CS 173"], "gened_ids": []}
 
 
 def test_decode_chroma_metadata_leaves_scalars_alone():
-    decoded = ch.decode_chroma_metadata({"code": "CS 374", "credits": 4.0, "number": "374"})
-    assert decoded == {"code": "CS 374", "credits": 4.0, "number": "374"}
+    # The two list fields are restored; every scalar comes back as it went in, the int included.
+    decoded = ch.decode_chroma_metadata({"code": "CS 374", "credits": 4.0, "number": 374})
+    assert decoded == {
+        "code": "CS 374",
+        "credits": 4.0,
+        "number": 374,
+        "prereq_codes": [],
+        "gened_ids": [],
+    }
 
 
 def test_chroma_metadata_refuses_a_list_field_the_decoder_could_not_restore():
@@ -534,14 +289,6 @@ def test_the_shipped_config_is_one_this_module_can_build_from():
     # The live config.yaml, not a fixture: its chunk section names the strategy, template and
     # field list this module implements, and all three are hashed into the index names.
     assert ch.check_chunk_config(load_config()) in ch.RENDERERS
-
-
-def test_check_chunk_config_accepts_v2_as_a_one_line_flip(cfg, cfg_v2):
-    # The ablation switch: template_version moves and nothing else has to, because both
-    # templates read the same field list. A second line to keep in sync would be a second thing
-    # to get wrong.
-    assert ch.check_chunk_config(cfg_v2) == "v2"
-    assert cfg_v2["chunk"]["fields"] == cfg["chunk"]["fields"]
 
 
 def test_check_chunk_config_rejects_another_strategy(cfg):
@@ -679,42 +426,6 @@ def test_chunk_records_the_config_hash_alongside_the_corpus(cfg, corpus):
     assert meta["tokens"]["limit"] == ch.EMBEDDING_TOKEN_LIMIT
 
 
-def test_chunk_builds_either_template_from_the_same_corpus(cfg, cfg_v2, corpus, courses):
-    # Both templates retrievable: one config value, one rebuild, a different chunk_key -- so the
-    # two corpora can never end up sharing an index.
-    v1 = {c["doc_id"]: c["text"] for c in ch.chunk(cfg, encode=fake_encode)["chunks"]}
-    result = ch.chunk(cfg_v2, encode=fake_encode)
-    v2 = {c["doc_id"]: c["text"] for c in result["chunks"]}
-
-    assert v1.keys() == v2.keys()
-    assert v1["2026-sp:XREF-101"] == XREF101_CHUNK_V1
-    assert v2["2026-sp:XREF-101"] == XREF101_CHUNK_V2
-    assert v2["2026-sp:CS-374"] == CS374_CHUNK_V2
-    meta = json.loads(corpus["CHUNKS_META_PATH"].read_text(encoding="utf-8"))
-    assert meta["template_version"] == "v2"
-    assert meta["chunk_key"] == ch.chunk_key(cfg_v2) != ch.chunk_key(cfg)
-
-
-def test_chunk_resolves_references_against_the_corpus_being_chunked(cfg_v2, corpus, courses):
-    # build_chunks derives the {code: course} view from its own argument, so a cross-reference
-    # can only ever resolve against the courses going into this index.
-    ex.write_json(corpus["COURSES_PATH"], [c for c in courses if c["code"] != "HIST 200"])
-    texts = {c["doc_id"]: c["text"] for c in ch.chunk(cfg_v2, encode=fake_encode)["chunks"]}
-    assert texts["2026-sp:XREF-101"] == XREF101_CHUNK_V1  # nothing to borrow, left as written
-
-
-@pytest.mark.parametrize(
-    ("template", "expected"),
-    [("v1", "not followed by template v1"), ("v2", "1 resolved, 0 left as written")],
-)
-def test_summarize_says_what_the_template_did_with_the_cross_references(
-    cfg, corpus, template, expected
-):
-    variant = Config({**cfg.to_dict(), "chunk": {**cfg["chunk"], "template_version": template}})
-    report = "\n".join(ch.summarize(ch.chunk(variant, encode=fake_encode)))
-    assert f"cross-reference descs  1  ({expected})" in report
-
-
 def test_chunk_refuses_a_corpus_that_does_not_match_the_config(cfg, corpus, courses):
     ex.write_json(corpus["COURSES_PATH"], [{**c, "term": "2025-fa"} for c in courses])
     with pytest.raises(ValueError, match="data.term"):
@@ -761,9 +472,7 @@ def test_chunk_key_moves_with_the_term(cfg):
     assert ch.chunk_key(other) != ch.chunk_key(cfg)
 
 
-def test_chunk_key_moves_with_the_template(cfg, cfg_v2):
-    # The two templates render different text out of the same field list, so the key has to move
-    # on the version alone -- otherwise the two corpora would share an index name.
-    assert ch.TEMPLATE_FIELDS["v2"] == ch.TEMPLATE_FIELDS["v1"]
-    assert ch.chunk_key(cfg_v2) != ch.chunk_key(cfg)
-    assert cfg_v2.hash != cfg.hash
+def test_chunk_key_moves_with_the_template(cfg, monkeypatch):
+    monkeypatch.setitem(ch.TEMPLATE_FIELDS, "v2", ("code", "desc"))
+    v2 = Config({**cfg.to_dict(), "chunk": {**cfg["chunk"], "template_version": "v2"}})
+    assert ch.chunk_key(v2) != ch.chunk_key(cfg)

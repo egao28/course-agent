@@ -4,8 +4,7 @@
 built for a React UI: ``desc`` is truncated to 240 chars, ``attrs`` to 160, and there is no term
 field. Dense and BM25 both index the full description, so this exporter re-reads the **CSV** and
 reuses only the *logic* from ``almabot-web/scripts/build_data.py`` (section de-duplication,
-``parse_prereq``, ``CODE_RE``), keeping every field untruncated -- and replacing its lossy
-``parse_credits`` with :func:`parse_credit_hours`, which keeps both ends of a credit range.
+``parse_credits``, ``parse_prereq``, ``CODE_RE``), keeping every field untruncated.
 
 Run from the repo root::
 
@@ -21,15 +20,14 @@ Outputs
     One record per course, sorted by (subject, number). ``prereqRaw`` is the *whole* requirements
     block -- the catalog runs it from the ``Prerequisite:`` label to the end of the description --
     and ``prereqCodes`` / ``coreqCodes`` hold the course codes it names, resolved or not.
-    ``creditsRaw`` is the ``Credit Hours`` column verbatim, with ``creditsMin`` / ``creditsMax``
-    as the bounds to filter on: a third of the catalog is variable-credit.
 ``data/prereqs.json``
     The prerequisite edge list, filtered to codes that exist in this catalog (the filter
     ``dag.ts::prereqs()`` applies at read time). Courses with no surviving edge are omitted.
 ``data/requirements.json``
     The 13 campus Gen Ed categories from ``almabot-web/src/lib/gened.ts``, as declarative
-    ``Degree Attributes`` substring rules. Major requirements are not in the CSV: ``majors`` is an
-    empty placeholder.
+    ``Degree Attributes`` substring rules, and the two degree programs hand-transcribed into
+    ``ingest/majors.json`` -- major requirements are not in the CSV, which lists sections, so that
+    file is their source and this export only checks and measures them (see :mod:`ingest.majors`).
 """
 
 from __future__ import annotations
@@ -47,6 +45,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from config import REPO_ROOT, Config, load_config, rel_to_repo, verify_source
+from ingest.majors import build_majors, check_coverage
 
 DATA_DIR = REPO_ROOT / "data"
 COURSES_PATH = DATA_DIR / "courses.json"
@@ -59,12 +58,6 @@ CODE_RE = re.compile(r"\b([A-Z]{2,4})\s?(\d{3})\b")
 PREREQ_HEAD_RE = re.compile(r"Prerequisite[s]?:\s*")
 # Descriptions that carry no content of their own: "Same as HIST 283. See HIST 283."
 CROSS_REF_RE = re.compile(r"^Same as [^.]*\.\s*See [^.]*\.$")
-# A "Credit Hours" value: "3 hours.", "3 OR 4 hours.", "1 TO 5 hours.". All 67 distinct strings
-# in the pinned CSV match; check_credits() refuses a corpus where one does not, rather than
-# exporting a course with no credit bounds for a filter to skip silently.
-CREDIT_HOURS_RE = re.compile(
-    r"^(\d+(?:\.\d+)?)(?:\s+(TO|OR)\s+(\d+(?:\.\d+)?))?\s+hours?\.?$", re.IGNORECASE
-)
 
 # Sentence boundary: a stop followed by something that starts a new sentence. Splitting on ". "
 # alone would cut "Ph.D. standing in BADM" down to "Ph.D" -- the abbreviations below are never
@@ -101,13 +94,7 @@ TERM_ABBR = {"spring": "sp", "summer": "su", "fall": "fa", "winter": "wi"}
 # requirements.json can carry it verbatim and :func:`matches_attrs` can evaluate it straight
 # from the file: a course matches when attrs contains ANY of `any` and NONE of `none`.
 #   - qr1 replaces the lookahead /Quantitative Reasoning I(?!I)/ with an explicit `none`.
-# The catalog writes a sub-category as "<group> - <name>" ("Social & Beh Sci - Soc Sci course."),
-# so every sub-category rule matches on the separator too. The bare labels gened.ts tests are not
-# safe substrings of that shape: "Beh Sci" is also inside the *group* "Social & Beh Sci", which
-# made socbeh match all 118 Soc Sci courses on top of its own 24 (#14). Anchoring is what makes
-# the rules disjoint; it changes no other category's membership on the 2026-sp catalog, and it
-# lets cultwest drop the second spelling the TS ORs in ("Western course" only ever occurs as the
-# tail of "Cultural Studies - Western course").
+#   - cultwest keeps both spellings the TS matcher ORs together.
 # fmt: off -- one line per category, aligned for review against the TS source
 GENED: tuple[dict[str, Any], ...] = (
     {
@@ -142,63 +129,69 @@ GENED: tuple[dict[str, Any], ...] = (
         "id": "natphys",
         "label": "Physical Sciences",
         "group": "Natural Sciences & Tech",
-        "match": {"field": "attrs", "any": ["- Phys Sciences"], "none": []},
+        "match": {"field": "attrs", "any": ["Phys Sciences"], "none": []},
     },
     {
         "id": "natlife",
         "label": "Life Sciences",
         "group": "Natural Sciences & Tech",
-        "match": {"field": "attrs", "any": ["- Life Sciences"], "none": []},
+        "match": {"field": "attrs", "any": ["Life Sciences"], "none": []},
     },
     {
         "id": "humhist",
         "label": "Historical & Philosophical",
         "group": "Humanities & the Arts",
-        "match": {"field": "attrs", "any": ["- Hist & Phil"], "none": []},
+        "match": {"field": "attrs", "any": ["Hist & Phil"], "none": []},
     },
     {
         "id": "humlit",
         "label": "Literature & the Arts",
         "group": "Humanities & the Arts",
-        "match": {"field": "attrs", "any": ["- Lit & Arts"], "none": []},
+        "match": {"field": "attrs", "any": ["Lit & Arts"], "none": []},
     },
     {
         "id": "socsoc",
         "label": "Social Sciences",
         "group": "Social & Behavioral Sci",
-        "match": {"field": "attrs", "any": ["- Soc Sci"], "none": []},
+        "match": {"field": "attrs", "any": ["Soc Sci"], "none": []},
     },
     {
         "id": "socbeh",
         "label": "Behavioral Sciences",
         "group": "Social & Behavioral Sci",
-        "match": {"field": "attrs", "any": ["- Beh Sci"], "none": []},
+        "match": {"field": "attrs", "any": ["Beh Sci"], "none": []},
     },
     {
         "id": "cultwest",
         "label": "Western/Comparative Cultures",
         "group": "Cultural Studies",
-        "match": {"field": "attrs", "any": ["- Western"], "none": []},
+        "match": {
+            "field": "attrs",
+            "any": ["Cultural Studies - Western", "Western course"],
+            "none": [],
+        },
     },
     {
         "id": "cultnonwest",
         "label": "Non-Western Cultures",
         "group": "Cultural Studies",
-        "match": {"field": "attrs", "any": ["- Non-West"], "none": []},
+        "match": {"field": "attrs", "any": ["Non-West"], "none": []},
     },
     {
         "id": "cultus",
         "label": "US Minority Cultures",
         "group": "Cultural Studies",
-        "match": {"field": "attrs", "any": ["- US Minority"], "none": []},
+        "match": {"field": "attrs", "any": ["US Minority"], "none": []},
     },
 )
 # fmt: on
 
 MAJORS_NOTE = (
     "Major and degree requirements are not present in course-catalog.csv, which lists sections "
-    "only. A separate source (catalog.illinois.edu program pages, or a department-provided plan) "
-    "has to be scraped before this can be filled in."
+    "only. The programs in `majors` were transcribed by hand from the catalog.illinois.edu "
+    "program pages each one names, for the catalog year in force for this term; they are two of "
+    "the roughly 250 the campus offers. Requirements a course list cannot decide -- credit hours, "
+    "GPA, placement, approved lists -- are marked kind 'advising' and are never counted as met."
 )
 CULTURAL_STUDIES_NOTE = (
     "Each campus Gen Ed category needs at least one course; Cultural Studies needs all three of "
@@ -210,41 +203,16 @@ CULTURAL_STUDIES_NOTE = (
 # --- field parsing (ported from almabot-web/scripts/build_data.py) --------------------------------
 
 
-class CreditHours(NamedTuple):
-    """The ``Credit Hours`` column kept whole, plus the bounds a filter can compare against.
+def parse_credits(raw: str | None) -> float:
+    """Credit hours from strings like ``"3 hours."`` or ``"0 TO 4 hours."``.
 
-    ``raw`` is the column verbatim -- the only lossless form, and what the chunk renders.
-    ``low`` / ``high`` are inclusive and equal for a fixed-credit course; both are ``None`` for a
-    string :data:`CREDIT_HOURS_RE` cannot read, which :func:`check_credits` refuses to export.
+    The first number, unless it is zero -- a "0 TO 4" course is worth up to 4.
     """
-
-    raw: str
-    low: float | None
-    high: float | None
-    #: ``"TO"``, ``"OR"``, or ``""`` for a single value -- how the catalog joins the two bounds.
-    #: They do not mean the same thing (a "3 OR 4" course is worth one of the two, a "1 TO 5"
-    #: course anything between), so the renderer keeps whichever the catalog wrote.
-    connector: str
-
-
-def parse_credit_hours(raw: str | None) -> CreditHours:
-    """``"3 OR 4 hours."`` -> the string, the 3 and the 4.
-
-    Replaces ``build_data.py``'s ``parse_credits``, which reduced the column to one float: the
-    first number, or the largest when the first was 0. 1,415 of the 4,502 courses (31%) carry a
-    range -- 834 written ``X TO Y``, 581 ``X OR Y`` -- so that single number reported 1,211
-    courses at the bottom of their range and 204 at the top, with nothing to say which (#17).
-
-    Bounds come back ordered, because that is what the field names promise; the catalog never
-    writes them the other way round (verified: 0 of 1,415 ranges are descending).
-    """
-    text = (raw or "").strip()
-    m = CREDIT_HOURS_RE.match(text)
-    if m is None:
-        return CreditHours(text, None, None, "")
-    first = float(m.group(1))
-    second = float(m.group(3)) if m.group(3) else first
-    return CreditHours(text, min(first, second), max(first, second), (m.group(2) or "").upper())
+    nums = re.findall(r"\d+(?:\.\d+)?", raw or "")
+    if not nums:
+        return 0.0
+    first = float(nums[0])
+    return first if first > 0 else max(float(n) for n in nums)
 
 
 def parse_prereq(desc: str | None) -> str:
@@ -382,16 +350,13 @@ def read_courses(csv_path: Path) -> Catalog:
             if course is None:
                 desc = clean(row.get("Description"))
                 prereq_raw = parse_prereq(desc)
-                credits = parse_credit_hours(row.get("Credit Hours"))
                 courses[code] = {
                     "code": code,
                     "subject": subject,
                     "number": number,
                     "name": clean(row.get("Name")),
                     "term": row_term(row),
-                    "creditsRaw": credits.raw,
-                    "creditsMin": credits.low,
-                    "creditsMax": credits.high,
+                    "credits": parse_credits(row.get("Credit Hours")),
                     "desc": desc,
                     "attrs": clean(row.get("Degree Attributes")),
                     "prereqRaw": prereq_raw,
@@ -438,30 +403,6 @@ def check_terms(catalog: Catalog, cfg: Mapping[str, Any]) -> None:
         )
 
 
-def check_credits(catalog: Catalog) -> None:
-    """Fail unless every course's ``Credit Hours`` string yielded numeric bounds.
-
-    ``creditsMin`` / ``creditsMax`` are what a "can I take this for 4 credits" filter compares
-    against, so a course that parsed to ``null`` bounds would not be *missing* from such a filter
-    so much as invisible to it -- the same silent-wrong-answer this issue started as. Asserted
-    rather than counted in the stats: an unreadable value means the column has a shape
-    :data:`CREDIT_HOURS_RE` has never seen, which can only come from a new CSV, and the
-    ``data.source_sha256`` pin already forces a fresh config hash for that.
-    """
-    unreadable = [
-        f"{c['code']} ({c['creditsRaw']!r})" for c in catalog.courses if c["creditsMin"] is None
-    ]
-    if not unreadable:
-        return
-    listed = ", ".join(unreadable[:5])
-    more = "" if len(unreadable) <= 5 else f" (+{len(unreadable) - 5} more)"
-    raise ValueError(
-        f"{len(unreadable)} course(s) have a Credit Hours value this export cannot read: "
-        f"{listed}{more}; teach CREDIT_HOURS_RE the new shape -- exporting them would leave "
-        "creditsMin/creditsMax null, which every credit filter skips without saying so"
-    )
-
-
 def build_prereqs(courses: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Prerequisite edge list, keeping only references to courses in this catalog.
 
@@ -502,10 +443,13 @@ def matches_attrs(category: Mapping[str, Any], attrs: str) -> bool:
 
 
 def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, Any]) -> dict:
-    """Gen Ed rules plus the placeholder for major requirements.
+    """Gen Ed rules and the hand-encoded degree programs, both measured against this export.
 
     ``courseCount`` is how many courses in *this* export satisfy each category -- derived from the
-    same CSV in the same run, so it is a sanity check on the rules, not an independent source.
+    same CSV in the same run, so it is a sanity check on the rules, not an independent source. The
+    same field on a major's requirement group means the same thing, and
+    :func:`~ingest.majors.build_majors` adds the program page and catalog year each group was read
+    off, so an audit can cite the source of every line it reports.
     """
     categories = []
     for category in GENED:
@@ -519,12 +463,12 @@ def build_requirements(courses: Sequence[Mapping[str, Any]], cfg: Mapping[str, A
     return {
         "term": cfg["data"]["term"],
         "source": (
-            "almabot-web/src/lib/gened.ts (GENED), matched against the catalog's "
-            "'Degree Attributes' column, with sub-category rules anchored on the "
-            "'<group> - <name>' separator the TS matchers ignore (#14)"
+            "genEd: almabot-web/src/lib/gened.ts (GENED), matched against the catalog's "
+            "'Degree Attributes' column. majors: ingest/majors.json, hand-transcribed from the "
+            "catalog.illinois.edu program page each one names"
         ),
         "genEd": categories,
-        "majors": [],
+        "majors": build_majors(courses),
         "notes": {"majors": MAJORS_NOTE, "culturalStudies": CULTURAL_STUDIES_NOTE},
     }
 
@@ -558,9 +502,6 @@ def summarize(
     coreq_courses = sum(1 for e in prereqs if e["coreqs"])
     with_attrs = sum(1 for c in courses if c["attrs"])
     untruncated = sum(1 for n in lengths if n > 240)
-    connectors = Counter(parse_credit_hours(c["creditsRaw"]).connector for c in courses)
-    variable = connectors["TO"] + connectors["OR"]
-    shapes = f"{connectors['TO']} 'X TO Y', {connectors['OR']} 'X OR Y'"
 
     lines = [
         f"section rows read      {catalog.section_rows}",
@@ -579,11 +520,21 @@ def summarize(
         f"  resolved in catalog  {resolved}  over {prereq_courses} courses",
         f"  dangling (dropped)   {mentioned - resolved}",
         f"corequisite edges      {coreq_resolved}  over {coreq_courses} courses",
-        f"credit hours fixed     {connectors['']}",
-        f"  variable             {variable}  ({shapes})",
         f"courses with attrs     {with_attrs}",
     ]
     lines += [f"  {c['id']:<12} {c['courseCount']:>4}  {c['label']}" for c in requirements["genEd"]]
+    for major in requirements["majors"]:
+        checked = [g for g in major["groups"] if g["rule"]["kind"] != "advising"]
+        absent = sorted({code for g in major["groups"] for code in g["notOffered"]})
+        advising = len(major["groups"]) - len(checked)
+        lines += [
+            f"{major['label']}  ({major['catalogYear']} catalog)",
+            (
+                f"  requirement groups   {len(major['groups'])}  ({len(checked)} checked against "
+                f"a course list, {advising} needing an advisor)"
+            ),
+            f"  named, not this term {len(absent)}" + (f"  {absent}" if absent else ""),
+        ]
     return lines
 
 
@@ -594,9 +545,9 @@ def export(cfg: Config) -> dict[str, Any]:
     if not catalog.courses:
         raise ValueError(f"{rel_to_repo(csv_path)} yielded no courses; is it the catalog export?")
     check_terms(catalog, cfg)
-    check_credits(catalog)
     prereqs = build_prereqs(catalog.courses)
     requirements = build_requirements(catalog.courses, cfg)
+    check_coverage(requirements["majors"], rel_to_repo(REQUIREMENTS_PATH))
     write_json(COURSES_PATH, catalog.courses)
     write_json(PREREQS_PATH, prereqs)
     write_json(REQUIREMENTS_PATH, requirements)

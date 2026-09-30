@@ -12,10 +12,10 @@ files and the indexes built from them always belong to the same CSV. After repla
 
 | File | Source | Status |
 |---|---|---|
-| `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 3.2 MB, term `2026-sp` |
+| `courses.json` | `~/Downloads/course-catalog.csv` (12,823 section rows → 4,502 courses) via `ingest/export_almabot.py` | done — 2.9 MB, term `2026-sp` |
 | `prereqs.json` | Same source; `prereqCodes` / `coreqCodes` filtered to courses in the catalog | done — 2,086 prerequisite + 34 corequisite edges |
-| `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; major requirements are not in the CSV, source TBD | done — 13 Gen Ed categories, `majors: []` |
-| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.2 MB, **not committed** (rebuildable, see below) |
+| `requirements.json` | Gen Ed rules from `almabot-web/src/lib/gened.ts`; degree requirements hand-transcribed into `ingest/majors.json` from the 2025-2026 catalog program pages | done — 13 Gen Ed categories, 2 degree programs |
+| `chunks.jsonl` | `ingest/chunk.py`, one chunk per course, with `doc_id` | done — 4,502 chunks, 3.1 MB, **not committed** (rebuildable, see below) |
 
 Note: `almabot-web/public/courses.json` truncates `desc` to 240 chars and `attrs` to 160, and has no
 term field. **Do not copy it over.** Re-export the full text from the CSV.
@@ -36,8 +36,7 @@ each code wins.
 | `code`, `subject`, `number` | `"CS 374"`, `"CS"`, `"374"` |
 | `name` | HTML entities decoded |
 | `term` | From `YearTerm`, falling back to `Year` + `Term`; checked against `data.term` |
-| `creditsRaw` | The `Credit Hours` column **verbatim** (`"3 OR 4 hours."`) — the only lossless form |
-| `creditsMin`, `creditsMax` | Inclusive bounds parsed from it (3.0 / 4.0), equal for a fixed-credit course |
+| `credits` | First number in `Credit Hours`, or the maximum when the first is 0 (`"0 TO 4 hours."` → 4.0) |
 | `desc` | **Full** description, untruncated (p50 366 chars, max 2,429) |
 | `attrs` | Full `Degree Attributes` |
 | `prereqRaw` | The **whole** requirements block: from the `Prerequisite:` label to the end of the description |
@@ -60,24 +59,93 @@ reference are omitted entirely.
 (DANC 498 ↔ DANC 499, MACS 480 ↔ MACS 481) that folding them in would turn correct data into
 cycles.
 
+**That is necessary and not sufficient: `prereqs` alone is not acyclic, so every walk needs a
+visited set.** Seven strongly-connected components over 19 courses, no self-loops:
+
+| cycle | |
+|---|---|
+| `THEA 375 → 376 → 377 → 378 →` | 4-cycle |
+| `THEA 475 → 476 → 477 → 478 →` | 4-cycle |
+| `CS 225 → CS 374 → MATH 412 → CS 225` | 3-cycle |
+| `ACCY 301 ↔ ACCY 302`, `CHEM 204 ↔ CHEM 205`, `MCB 581 ↔ MCB 582`, `SE 311 ↔ SE 312` | mutual pairs |
+
+16 of those 19 are corequisites after all, stated *inside* the prerequisite sentence ("SE 310;
+concurrent registration in SE 312."), where `coreq_codes` cannot reach them — it only reads a
+continuation sentence. The other three are disjunction members: `MATH 412` is one alternative in
+`CS 225`'s "One of CS 173, CS 413, MATH 213, MATH 314, MATH 347, MATH 412", and `MATH 412` lists
+`CS 374`, which requires `CS 225`.
+
+Walking the graph from each of the 1,135 records: the deepest chain is 9 levels by shortest
+distance (`CEE 560`, `ECE 454`, `ECE 575`, `ECE 585`, `ME 547`) and 13 courses along the longest
+cycle-free path (`SE 495`); the largest transitive closure is 47 courses (`IS 557`), the median 4;
+165 of the 1,135 closures contain one of the cycles above. `agent/tools/prereqs.py` is the walk.
+
 ## requirements.json
 
 The 13 campus Gen Ed categories as declarative rules: a course matches when its `attrs` contains
 **any** of `match.any` and **none** of `match.none`. `courseCount` is how many courses in this
 export match, derived in the same run.
 
-**Sub-category rules match on the `- ` separator**, not on the bare label: the catalog writes a
-sub-category as `"<group> - <name>"` (`"Social & Beh Sci - Soc Sci course."`), and the bare labels
-`gened.ts` tests are not safe substrings of that shape — `"Beh Sci"` also occurs inside the *group*
-name `Social & Beh Sci`, so `socbeh` used to claim all 118 Soc Sci courses on top of its own 24
-(#14). Anchoring is what keeps the 13 rules disjoint; it left the other 12 categories' membership
-unchanged, and it made the second spelling `gened.ts` ORs into `cultwest` (`"Western course"`)
-redundant, since that string only ever occurs as the tail of `"Cultural Studies - Western course"`.
-`almabot-web/src/lib/gened.ts` still carries the unanchored rules.
+572 courses carry a `Degree Attributes` string but only **570 satisfy a category**: `ACE 436` and
+`CMN 361` are labelled `Global Classroom course.`, which is a designation and not a Gen Ed. 299 of
+the 570 satisfy more than one category (244 once #14 lands), because a course can carry a Gen Ed
+area and a Cultural Studies designation at the same time.
 
-`majors` is an empty placeholder: major and degree requirements are not in `course-catalog.csv`,
-which lists sections only. Filling it in needs a separate source (catalog.illinois.edu program
-pages, or a department plan).
+### majors — the degree requirements, and where they come from
+
+`course-catalog.csv` has 27 columns of section data and not one of them is a degree requirement, so
+`majors` cannot be derived from it. It is written by hand in **`ingest/majors.json`**, transcribed
+from the catalog program pages one row per row of the catalog's own course lists, and the exporter
+copies it into `requirements.json` after checking and measuring it (`ingest/majors.py`).
+
+| | Computer Science, BS | Statistics, BSLAS |
+|---|---|---|
+| College | Grainger Engineering | Liberal Arts & Sciences |
+| Requirement groups | 17 | 12 |
+| Checked against a course list | 9 | 6 |
+| Reported as needing an advisor | 8 | 6 |
+| Source | [program page](https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/engineering/computer-science-bs/) | [program page](https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/undergraduate/las/statistics-bslas/) |
+
+Two programs out of roughly 250, chosen because the demo queries touch them: this makes the
+`degree_requirement` intent real, it does not make the agent a degree auditor. The **catalog year is
+2025-2026**, not the newest edition (2026-2027), because that is the year in force for the `2026-sp`
+courses this corpus holds — a student is audited against the year they are under. Every group
+carries its `source` and `catalogYear`, so an answer can cite the line it reports.
+
+Four rule kinds, and the fourth is the one that keeps this honest:
+
+| `rule.kind` | Means | Example |
+|---|---|---|
+| `all_of` | every course in the list | the 11-course CS technical core |
+| `n_of` | any `n` of the list | `MATH 257` \| `MATH 415` \| `MATH 416` |
+| `n_of_matching` | any `n` courses matching a code pattern (`subjects`, `numberMin`/`numberMax`, `include`, `exclude`) | six CS 400-level technical electives |
+| `advising` | **not evaluated at all** — reported with the catalog's own text | 128 hours, a 2.0 technical GPA, the language requirement |
+
+A degree is more than its course lists: hours, GPA, placement, an approved science-elective list
+nobody exported. Those rows are `advising`, come back in `check_requirement()`'s `not_checked`, and
+are never counted as satisfied — an audit that dropped them would read as "you are done" to a
+student who is not.
+
+**Requirements are matched by course code, not against this catalog.** The corpus is one term and
+degree requirements are not: 8 of the codes these two programs name are not offered in `2026-sp` —
+`CS 428`, `CS 429`, `CS 465`, `CS 467` (team-project electives), `ENG 300` (the transfer orientation
+seminar), `MATH 221`, `STAT 424`, `STAT 480`. A student who took `MATH 221` is credited for Calculus
+I; resolving requirements through `courses.json` would instead tell them to take it again. Each
+group records the codes it names that this term lacks in `notOffered`, and the audit repeats them in
+its `message`.
+
+What **does** raise is a group this catalog has no course for *at all* (`ingest.majors.
+check_coverage`, run by the exporter): that is the shape a renumbered program takes — `CS 125`
+became `CS 124` and `CS 128` in 2021 and no field in the data announced it — and it is the failure
+this encoding is most likely to have. Per-code absence is recorded, per-group absence stops the
+export. `check_majors()` is stricter still and runs on both the source and the exported copy: an
+unknown rule kind, an `n` no transcript can satisfy, a code spelled outside the catalog's own form
+(`CS374`), an `advising` row with nothing to say, two programs answering to one name.
+
+To add a program: copy a block in `ingest/majors.json`, transcribe the program page row by row,
+`uv run python -m ingest.export_almabot`, and add its shape to `tests/test_majors.py`. Scraping the
+catalog instead (#32's option 2) is a different piece of work: 250 prose pages, a parser to test,
+and a new source to pin.
 
 ## chunks.jsonl
 
@@ -90,17 +158,56 @@ uv run python -m ingest.chunk --show CS 374  # print one rendered chunk and exit
 
 ```json
 {"doc_id": "2026-sp:CS-374", "text": "CS 374 — Introduction to Algorithms...",
- "metadata": {"code": "CS 374", "subject": "CS", "number": "374", "credits_min": 4.0,
-              "credits_max": 4.0, "term": "2026-sp",
-              "prereq_codes": ["CS 173", "CS 225", "MATH 213"], "gened_ids": []}}
+ "metadata": {"code": "CS 374", "subject": "CS", "number": 374, "level": 300, "credits": 4.0,
+              "term": "2026-sp", "prereq_codes": ["CS 173", "CS 225", "MATH 213"],
+              "gened_ids": []}}
 ```
 
 `doc_id` is `{term}:{SUBJ}-{NUM}` — readable in a ranked list, and term-scoped so a second term can
 join the same collection without colliding. `text` is rendered by `render_chunk()` alone, under the
-template named by `chunk.template_version` (`v1` renders the catalog fields as they stand, `v2`
-de-duplicates the requirements block and follows cross-references); see [the chunking section of
-the top-level README](../README.md#templates). `prereq_codes` is the **unfiltered** list, so a reference to a
+template named by `chunk.template_version`; see [the chunking section of the top-level
+README](../README.md#chunking). `prereq_codes` is the **unfiltered** list, so a reference to a
 course not offered this term stays visible in metadata even though `prereqs.json` drops it.
+
+### Metadata: what each field is good for
+
+Every field below is *displayable* — it comes back on a `Hit` from either retriever. The
+**Filter with** column is what Chroma's `where` can do with it once the dense index holds it;
+`chroma_metadata()` in `ingest/chunk.py` owns the encoding and `decode_chroma_metadata()` reverses
+it, so a BM25 hit (which reads this file) and a dense hit (which reads Chroma) agree.
+
+| Field | In Chroma | Filter with | Notes |
+| --- | --- | --- | --- |
+| `code` | `str` | `$eq`, `$in`, `$ne` | The display form, and the only one that keeps the catalog's zero padding (`MUS 090`) |
+| `subject` | `str` | `$eq`, `$in`, `$ne` | |
+| `number` | `int` | `$eq`, `$in`, `$gte`/`$gt`/`$lte`/`$lt` | 90–799 here. An int because Chroma compares numbers, not numeric strings |
+| `level` | `int` | `$eq`, `$in`, ranges | `number` rounded down to the hundred, so "400-level" is one clause. `MUS 090` is level `0` |
+| `credits` | `float` | `$eq`, `$in`, ranges | |
+| `term` | `str` | `$eq`, `$in`, `$ne` | |
+| `prereq_codes` | `list[str]`, **absent when empty** | `$contains`, `$not_contains` | The unfiltered list; the prerequisite *graph* is `prereqs.json` |
+| `gened_ids` | `list[str]`, **absent when empty** | `$contains`, `$not_contains` | Ids from `requirements.json`, not the raw `Degree Attributes` string |
+
+```python
+{"gened_ids": {"$contains": "cultus"}}                       # 101 courses
+{"$and": [{"subject": "CS"}, {"level": 400}]}                #  47
+{"$and": [{"subject": "CS"}, {"number": {"$gte": 400}}]}     #  70
+{"prereq_codes": {"$contains": "CS 225"}}                    #  31
+```
+
+Three things about that encoding are worth knowing before writing a filter, all pinned by
+`tests/test_chroma_filters.py`:
+
+- **`$contains` on metadata is list membership, not a substring test.** It matches nothing against
+  a string value (`{"subject": {"$contains": "CS"}}` → no rows). The substring operator of the same
+  name applies to the chunk *text*, and lives under `where_document`.
+- **An empty list is not storable**, so the key is left out of the record entirely rather than
+  written as `[]` or as an empty string. A course with no Gen Ed therefore never matches
+  `$contains` and always matches `$not_contains`, which is what those questions mean anyway.
+  `decode_chroma_metadata()` puts the `[]` back, so a `Hit` always carries both list fields.
+- **The metadata encoding is not part of any index key.** `chunk_key` covers the chunk *text*
+  (term, strategy, template, field list), so re-encoding metadata leaves the name of an existing
+  collection unchanged: a collection built before this encoding keeps the old one until it is
+  rebuilt with `--rebuild`.
 
 Neither file is committed, unlike the three above: they are rebuilt from those by one command with
 no private input and no API key, and a template change rewrites all 3 MB. `chunks.meta.json` records
@@ -110,32 +217,6 @@ index build can tell whether the chunks on disk were built under its own config.
 which also moves when `seed`, `bm25` or `fusion` is tuned and the chunks on disk stay valid.
 `tokens` is `null` when the run could not fetch the tokenizer vocabulary, which also means those
 chunks were never checked against the 8191-token embedding limit.
-
-## How credit hours are read
-
-**1,415 of 4,502 courses (31%) are variable-credit** — 834 written `X TO Y`, 581 `X OR Y` — so no
-single number describes the catalog. `creditsRaw` keeps the column verbatim and the chunk renders
-the whole range:
-
-| `Credit Hours` | `creditsRaw` | min / max | rendered |
-|---|---|---|---|
-| `3 hours.` | `"3 hours."` | 3.0 / 3.0 | `Credits: 3` |
-| `3 OR 4 hours.` | `"3 OR 4 hours."` | 3.0 / 4.0 | `Credits: 3 or 4` |
-| `1 TO 5 hours.` | `"1 TO 5 hours."` | 1.0 / 5.0 | `Credits: 1 to 5` |
-| `0 hours.` | `"0 hours."` | 0.0 / 0.0 | `Credits: 0` |
-
-`credits_min <= n <= credits_max` is the filter for "can this be taken for n credits": it answers
-for fixed- and variable-credit courses alike, and finds 2,184 courses that can be taken for 4
-against the 1,009 a single number found. **The connector is kept because the two are different
-claims** — a `3 OR 4` course is worth one of the two, a `1 TO 5` course anything between — which
-also means the min/max *interval* over-reports an `OR` course: AAS 465 is 3 or 4, never 3.5. Read
-`creditsRaw` (or the rendered line) when the answer has to be exact.
-
-The export refuses to write a course whose `Credit Hours` it cannot read, rather than leaving
-`null` bounds that every credit filter skips silently; all 67 distinct strings in the pinned CSV
-parse. `Section Credit Hours` is a different column that can differ per section (3,257 of 12,823
-rows disagree with the course-level one, e.g. AAS 465 has both a 3-hour and a 4-hour section) — the
-course-level column is the one the catalog page shows, and the one exported here.
 
 ## How the requirements block is read
 
@@ -166,19 +247,23 @@ Counts from the 2026-sp export; `ingest/export_almabot.py` prints them on every 
 
 - **497 descriptions are cross-references only** (`"Same as HIST 200. See HIST 200."`). They carry
   no topical text, so both retrievers will rank them poorly. Template `v1` renders them as they
-  are; `v2` follows the `See` clause and borrows the target's description, which resolves 496 of
-  the 497 — the one that does not is `BADM 205`, pointing at `GGIS 205`, not offered this term.
-  Neither template can fix the underlying export: `prereqCodes`, `credits` and `attrs` of a
-  cross-listed course are still whatever the catalog filed under *its* code, not the target's.
+  are; following the reference is #15.
 - **1 course has an empty description** (`CWL 593`).
 - **779 of 2,865 prerequisite references dangle** — a course mentioned in prerequisite text that is
   not offered in 2026-sp. They stay in `courses.json:prereqCodes` and are dropped from
   `prereqs.json`.
 - **Only 572 of 4,502 courses carry any `Degree Attributes`**, so Gen Ed coverage is sparse by
   nature, not by parsing loss.
-- **Gen Ed categories are small, and two of them share a group name.** `socsoc` is 118 courses and
-  `socbeh` 24; both are written under the `Social & Beh Sci` prefix, which is why the rules match
-  on the `- ` separator (#14). A rule added later has to do the same.
+- **`socbeh` over-matches.** The catalog writes both social-science categories under one prefix,
+  `Social & Beh Sci - Soc Sci` / `Social & Beh Sci - Beh Sci`, so the `Beh Sci` substring rule
+  (inherited verbatim from `gened.ts`) matches all 118 Soc Sci courses on top of the 24 real
+  Behavioral Sciences ones — 142 instead of 24. Affects `requirements.json:courseCount` and every
+  chunk's `gened_ids`: #14.
 - **Prerequisite text is prose, not a grammar.** `prereqCodes` is a bag of codes: "One of CS 173,
   MATH 213; CS 225" loses the "one of" structure, so a planner cannot tell alternatives from
-  conjunctions. Parsing that structure is a separate job.
+  conjunctions. **744 of the 1,135 requirement statements contain a disjunction** (`or`, `one of`),
+  and for **397** of them the code list has more than one entry — `ABE 228` reads "One of MATH 220,
+  MATH 221, MATH 234." and exports `["MATH 220", "MATH 234"]`, where the student needs one. **299
+  statements** also offer a "consent of …" escape hatch no code list can express. So a consumer
+  must carry `raw` and quote it rather than read the list as a conjunction; `agent/tools/prereqs.py`
+  puts it on every node of a chain. Parsing that structure into an AND/OR tree is a separate job.

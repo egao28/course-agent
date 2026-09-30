@@ -1,0 +1,165 @@
+{
+  "alpha": 0.1,
+  "answer_everything": {
+    "answered": 42,
+    "ci": [
+      0.256290925483658,
+      0.5671791092799632
+    ],
+    "realized_error": 0.40476190476190477,
+    "wrong": 17
+  },
+  "buckets": {
+    "ambiguous": 6,
+    "fact": 21,
+    "multihop": 12,
+    "unanswerable": 3
+  },
+  "chosen": "verbalized",
+  "ci_level": 0.95,
+  "ci_method": "Clopper-Pearson, two-sided",
+  "config_hash": "c73b197d",
+  "conformal_key": "83496e82",
+  "correctness_key": "c54b1377",
+  "csv": "eval/runs/signals_test_37164723.csv",
+  "csv_sha256": "8db35639f2ba1f139631c8b5bcbce7507da99e95e29e72a175f2b9d84fc93afe",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "dense_top1": {
+    "answered_at_0.7": 4,
+    "max": 0.739536702632904,
+    "n": 42
+  },
+  "fit": "eval/runs/conformal_83496e82.json",
+  "fit_calib_csv_sha256": "2e6ef2df42ef50d47d5271a358b7fe75b0102d5fb4108756c01d9dcb0d7e8e20",
+  "fixed": 0.7,
+  "n": 42,
+  "signals": {
+    "retrieval_score": {
+      "conformal": {
+        "above_target": null,
+        "answered": 0,
+        "answers_nothing": true,
+        "ci": [
+          0.0,
+          1.0
+        ],
+        "coverage": 0.0,
+        "n_non_null": 10,
+        "n_null": 32,
+        "realized_error": null,
+        "t": null,
+        "target_error": 0.1,
+        "wrong": 0
+      },
+      "fixed": {
+        "answered": 10,
+        "answers_nothing": false,
+        "ci": [
+          0.34754714994000274,
+          0.9332604888222655
+        ],
+        "coverage": 1.0,
+        "meaning": "raw BM25 top-1 >= 0.7 (unbounded score, not normalized)",
+        "n_non_null": 10,
+        "n_null": 32,
+        "realized_error": 0.7,
+        "t": 0.7,
+        "target_error": null,
+        "wrong": 7
+      },
+      "test_range": [
+        10.667901141328084,
+        30.289613027602474
+      ]
+    },
+    "self_consistency": {
+      "conformal": {
+        "above_target": null,
+        "answered": 0,
+        "answers_nothing": true,
+        "ci": [
+          0.0,
+          1.0
+        ],
+        "coverage": 0.0,
+        "n_non_null": 42,
+        "n_null": 0,
+        "realized_error": null,
+        "t": null,
+        "target_error": 0.1,
+        "wrong": 0
+      },
+      "fixed": {
+        "answered": 35,
+        "answers_nothing": false,
+        "ci": [
+          0.16851715074700252,
+          0.49288000031517487
+        ],
+        "coverage": 0.8333333333333334,
+        "meaning": "between 2/3 and 1: all 3 pairs agree",
+        "n_non_null": 42,
+        "n_null": 0,
+        "realized_error": 0.3142857142857143,
+        "t": 0.7,
+        "target_error": null,
+        "wrong": 11
+      },
+      "test_range": [
+        0.3333333333333333,
+        1.0
+      ]
+    },
+    "verbalized": {
+      "conformal": {
+        "above_target": null,
+        "answered": 0,
+        "answers_nothing": true,
+        "ci": [
+          0.0,
+          1.0
+        ],
+        "coverage": 0.0,
+        "n_non_null": 42,
+        "n_null": 0,
+        "realized_error": null,
+        "t": null,
+        "target_error": 0.1,
+        "wrong": 0
+      },
+      "fixed": {
+        "answered": 42,
+        "answers_nothing": false,
+        "ci": [
+          0.256290925483658,
+          0.5671791092799632
+        ],
+        "coverage": 1.0,
+        "meaning": "verbalized / 100 >= 0.7, i.e. verbalized >= 70",
+        "n_non_null": 42,
+        "n_null": 0,
+        "realized_error": 0.40476190476190477,
+        "t": 70.0,
+        "target_error": null,
+        "wrong": 17
+      },
+      "test_range": [
+        70.0,
+        100.0
+      ]
+    }
+  },
+  "signals_key": "37164723",
+  "signals_runs": {
+    "calib": {
+      "run": "eval/runs/signals_calib_37164723.jsonl",
+      "sha256": "cd29fdf7e551165eaf9cf372ef10cf9d8b3ff9e9e233111c822464f662a8bac3"
+    },
+    "test": {
+      "run": "eval/runs/signals_test_37164723.jsonl",
+      "sha256": "abd246c1716fcb3efc51c5248cfc30310e0969e051706309ef2fb3415036b245"
+    }
+  },
+  "split": "test"
+}

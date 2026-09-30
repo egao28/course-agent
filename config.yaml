@@ -2,7 +2,9 @@
 #
 # Every artifact this repo produces (Chroma collection, BM25 pickle, report, retrieve() result)
 # is tagged with the config hash: sha256 of the canonical dump of this file, first 8 hex chars.
-# Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash;
+# Changing ANY value below (including seed and the data.source_sha256 pin) changes the hash, except
+# eval.bootstrap, signals and correctness, which only their own results are named after
+# (config.AFTER_THE_RUNS);
 # reordering keys does not. Print the current hash with:  uv run python config.py
 
 seed: 42
@@ -16,7 +18,7 @@ data:
 chunk:
   strategy: one_course_one_chunk
   template_version: v1
-  fields: [code, name, creditsRaw, term, desc, prereqRaw, attrs]
+  fields: [code, name, credits, term, desc, prereqRaw, attrs]
 embedding:
   provider: openai            # openai | local
   model: text-embedding-3-small
@@ -34,3 +36,281 @@ fusion:
   rrf_k: 60
   top_k_each: 20
   top_k_final: 5
+# The chat model, used exactly twice: the intent router and the grounded answer node. Hashed like
+# everything else here, so a report is named after the prompt settings that produced it — but it
+# reaches neither index key, so adding this section left both indexes where they were (see llm.py).
+llm:
+  provider: openai            # openai — the `local` route embedding: offers has no chat twin yet
+  model: gpt-4o-mini
+  temperature: 0              # routing and grounded answering are both deterministic tasks
+  max_tokens: 800
+# How the agent gathers evidence (#36). The dispatch table sends a lookup-shaped question to one of
+# the three tools and everything else to retrieve(), and this is the mode it asks for. Hashed like
+# the rest of this file — a report is named after the retrieval that produced it — and it reaches no
+# index key, so switching it orphans nothing.
+agent:
+  # dense | bm25 | hybrid. hybrid is Day 1's tuned pipeline and is what this says once the dense
+  # index exists; it is still empty (#5 is blocked on OpenAI credits), so bm25 is the only mode that
+  # answers today, and a default nothing can run is not a default — it is a crash on query one.
+  retrieval_mode: bm25
+# The evidence gate (#37): is there enough here to answer from at all? Day 2's version is a
+# threshold, one per source — retrieve()'s three modes score on three unrelated scales (see
+# retrieval/types.py), so a single number cannot serve all three. Day 5 (#92) adds the calibrated
+# method below. Hashed like everything else here, and it reaches no index key.
+evidence:
+  # top_score — the best-scoring block, against the threshold for the source that produced it.
+  # conformal — the signal and threshold #90 fitted on the calib half (the `conformal` block below).
+  #
+  # Still top_score. #90's fit accepted no threshold for any signal at alpha 0.10 (every signal
+  # got t = +inf, eval/runs/conformal_83496e82.json), so the calibrated gate answers nothing: under
+  # `conformal` every question that reaches evidence is handed over, tool rows aside when the
+  # signal is retrieval_score. Switching is one word here, and it moves the config hash.
+  method: top_score
+  # A block passes when its score is >= the threshold for its source. A tool result carries no
+  # score and is never compared: an exact catalog lookup has no ranking to be unsure about.
+  thresholds:
+    # Okapi BM25, unbounded and query-length-dependent. Measured on the live index: "CS 374" 29.03,
+    # "How many credits is MATH 241?" 30.91, "Which intro machine learning course should I take?"
+    # 18.27 — against "What does the algorithms course cover?" 11.79 and "Is there a course about
+    # quantum origami?" 11.06, neither of which should answer. 15 sits between them with room on
+    # both sides. It is a cutoff on this corpus, not a confidence: see the inversions in
+    # agent/nodes/check_evidence.py before reading any meaning into the number.
+    bm25: 15.0
+    # 1 - cosine distance. Measured 2026-09-21 on the live collection (courses_094143d8), top-1
+    # over the same twelve queries: "Is there a course about quantum origami?" 0.4529 (the one
+    # question with no answer, and the lowest of the twelve), "algorithms" 0.4619, "machine
+    # learning" 0.4721, up to "How many credits is MATH 241?" 0.6781. The whole band sits ABOVE
+    # the 0.35 this used to guess, so that value refused nothing — 12 of 12 passed. 0.46 is the
+    # only kind of cutoff this set supports: it sits between the origami row and the next one up,
+    # a 2% margin over a SINGLE negative example, so it is a floor fitted to one query rather
+    # than a tuned threshold, and Day 4's negative set is what re-sets it. Like bm25 it is a
+    # cutoff on this corpus and not a confidence — dense top-1 was the right course in only 6 of
+    # the 12 ("CS 374" returns CS 473 first, at 0.6200).
+    dense: 0.46
+    # RRF, the sum of 1/(rrf_k + rank) over the retrievers that returned the document. 0.025 is
+    # exactly 2/(rrf_k + top_k_each) = 2/(60 + 20), the score of a document both retrievers
+    # returned at the worst rank either of them reports — so this number asks "did the two
+    # retrievers agree?", not "how good is the match?".
+    #
+    # Measured 2026-09-21, that turned out to be unusable as a gate rather than merely blunt:
+    # hybrid top-1 over the twelve queries spans 0.0296 to 0.0328, and "Is there a course about
+    # quantum origami?" scores 0.0325 — fourth highest of the twelve. The top document of a fused
+    # list is nearly always one both retrievers returned near the top, whatever it is, so the
+    # score is almost constant and no cutoff separates the set. top_score therefore REFUSES a
+    # hybrid block instead of comparing it (agent/nodes/check_evidence.py, UNGATEABLE); the
+    # number is kept so the table stays one entry per retrieval mode, and so Day 5's conformal
+    # method — which calibrates rather than thresholds — has somewhere to land.
+    hybrid: 0.025
+  # The gate `method: conformal` runs (#92). Every value is copied from the fit it names, and the
+  # node refuses to build unless they still agree with it: the file's sha256, alpha, fit_on (the
+  # file's split), and this signal's t there. It also refuses an agent that is no longer the one
+  # the fit calibrated — the config hash, signals, correctness and conformal sections are checked
+  # down the key chain the file records. Left out of the config hash while `method` is not
+  # conformal (config.py, DORMANT), so carrying it here renames nothing.
+  conformal:
+    # The one #90 chose: highest calib AUROC (0.792). verbalized and self_consistency are read
+    # after the answer is written, so the graph gains a confidence_gate node after `answer`;
+    # retrieval_score is read in check_evidence, before it.
+    signal: verbalized
+    # null is t = +inf, the file's own spelling: no threshold passed the scan, answer nothing.
+    threshold: null
+    alpha: 0.10
+    fit_on: calib
+    source: eval/runs/conformal_83496e82.json
+    source_sha256: 27987e369aaa27c37f5a9a95cdbe33e7d151e88d901ee30256c062ff26e067b2
+# The frozen 50/50 split of the eval set (#61). Day 5's conformal prediction calibrates on the
+# `calib` half and every final number is reported on `test`; a conformal guarantee computed on the
+# data the thresholds were tuned on is a description, not a guarantee. Hashed like everything else
+# here -- so the Day 3 report is named after the split that produced it -- and it reaches no index
+# key, so adding this section orphaned nothing (see the three keys in README's config section).
+eval:
+  # The seed the assignment is derived from, over each bucket's SORTED ids. The frozen artifact is
+  # the `split` field committed in eval/datasets/v1.jsonl; this is its provenance, and
+  # `python -m eval.scripts.split --verify` is what holds the two together. 61 is the issue that
+  # froze it: a constant with no tuning story, because a seed re-rolled after Day 4 has seen the
+  # test half is not a split, it is a fit.
+  split_seed: 61
+  # The paired bootstrap over questions (#76). One draw of `n_resamples` index vectors is shared by
+  # every mode, so each resample asks all three retrievers the same questions; `ci` is the
+  # percentile interval. 76 is the issue, for the same reason 61 is above: a constant with no
+  # tuning story. These three are read after every run file is written and cannot change a line of
+  # one, so config.hash leaves this block out (config.AFTER_THE_RUNS) and it stays c73b197d; only
+  # eval/runs/bootstrap_{bootstrap_key}.json is named after it -- config.bootstrap_key, which is
+  # this block, the rerank section and cfg.hash, and nothing Day 5 added (#114).
+  bootstrap:
+    n_resamples: 10000
+    seed: 76
+    ci: 0.95
+# The stretch row (#79): hybrid's top `pool` reranked by a cross-encoder, and the top 5 kept. It is
+# a step after retrieve(), not a fourth mode -- `hybrid` means what it meant before -- and it reads
+# its pool through retrieve(q, "hybrid", k=pool). `pool` is the ceiling: the reranker can only
+# reorder what hybrid@pool already holds, so its Recall@5 is at most hybrid's Recall@pool. Like
+# eval.bootstrap, it cannot change a line of anything made before it, so config.hash leaves it out
+# (config.AFTER_THE_RUNS) and stays c73b197d; its run is named after config.rerank_key instead.
+rerank:
+  model: BAAI/bge-reranker-base
+  # The Hugging Face commit the weights were downloaded at. A model id alone names whatever the
+  # hub serves today, and a re-uploaded checkpoint would change the row without changing a byte
+  # here.
+  revision: 2cfc18c9415c912f9d8155881c133215df768a70
+  pool: 20                    # = fusion.top_k_each: how deep hybrid already looks on each side
+  batch_size: 20              # one forward pass per question
+  device: cpu
+# Day 5's three confidence signals per eval row (#87), collected by eval/scripts/signals.py. Like
+# eval.bootstrap, nothing made before this run reads it, so config.hash leaves it out
+# (config.AFTER_THE_RUNS) and stays c73b197d; the run is named after config.signals_key, which is
+# cfg.hash plus this whole section -- so both prompts below, word for word, name the file they made.
+signals:
+  # Self-consistency: this many answers at this temperature, drawn with the answer node's own
+  # prompt and separate from its temperature-0 answer. Every pair is judged, so 3 samples are 3
+  # pairs and the score is one of 0, 1/3, 2/3, 1 -- four values, and #89/#90 treat ties as groups.
+  samples: 3
+  sample_temperature: 0.7
+  # The follow-up asked after the answer is written. {question}, {evidence} and {answer} are filled
+  # in. The reply ends with a line "Confidence: <integer>", and the integer, in [0, 100], is the
+  # signal; a reply that does not end that way is recorded as null (never coerced to 50 or 0) with
+  # the reply kept beside it. v1 asked "your answer" for a bare integer and got 100 on 45 of 46
+  # calib rows, so v2 frames it as a check of someone's answer and asks for the check first.
+  verbalized_prompt: |-
+    You are checking an answer that an assistant wrote to a student's question about university
+    courses. The assistant was told to answer only from the catalog evidence below.
+
+    Question: {question}
+
+    Evidence:
+
+    {evidence}
+
+    Answer to check:
+    {answer}
+
+    Check the answer before you rate it. Is every claim in it stated in the evidence? Does it
+    answer the question that was asked, or a nearby one? Could the question mean more than one
+    course, program or requirement, so that the answer picked one without saying so? Does the
+    question ask for anything the evidence does not contain?
+
+    Write at most three short sentences on what you found. Then, on the last line, give the
+    probability that the answer is correct and fully supported by the evidence, as a whole
+    percentage from 0 to 100, in exactly this form:
+    Confidence: <integer>
+  # The judge for one pair of samples. {question}, {a} and {b} are filled in; the reply must be
+  # "yes" or "no" (case and a trailing period ignored), and anything else is recorded as null.
+  judge_prompt: |-
+    Two answers to the same question about university courses are below. Decide whether they agree:
+    would a student who read either one come away with the same answer to the question? Differences
+    in wording, order, formatting or citations, and extra detail that does not change the answer,
+    still count as agreement. Contradicting facts, a different course, a different number, or one
+    answer declining while the other answers, do not.
+
+    Question: {question}
+
+    Answer A:
+    {a}
+
+    Answer B:
+    {b}
+
+    Do A and B agree? Reply with exactly one word: yes or no.
+# Day 5's correctness labels (#88): the LLM judge's first call on every row of a signals run, made
+# by eval/scripts/judge.py before a person reviews every row (eval/scripts/review_signals.py). Its
+# own section rather than a key under `signals`, because config.signals_key hashes that section
+# whole, and a prompt added there would rename the signals run it is meant to grade. Named after
+# config.correctness_key: the signals key plus this whole section. Left out of config.hash.
+correctness:
+  # One prompt per bucket, because gold_answer means something different in each (eval/schema.py).
+  # {question}, {gold} and {answer} are filled in. The reply's first line must open with "correct"
+  # or "incorrect" (any case; the reason may follow a period or colon on the same line), and anything
+  # else is recorded as null. The rest is a one-line rationale for the reviewer.
+  judge_prompts:
+    fact: |-
+      A student asked a question about university courses. Below are the question, a reference
+      answer checked by a person against the catalog, and the answer a system gave.
+
+      Question: {question}
+
+      Reference answer:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if every fact it asserts agrees with the reference answer and it
+      answers the question. Wording, order, citations in brackets and extra detail that does not
+      contradict the reference do not matter. A wrong course, number, prerequisite or requirement
+      makes it incorrect, and so does declining to answer or answering a different question.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    multihop: |-
+      A student asked a question about university courses that needs more than one catalog record
+      to answer: a chain of prerequisites, or facts about several courses joined together. Below
+      are the question, a reference answer checked by a person against the catalog, and the answer
+      a system gave.
+
+      Question: {question}
+
+      Reference answer:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct only if it gets every hop right: each course and each
+      requirement the reference names that the question asks for, with no step missing and none
+      wrong. Wording, order, citations in brackets and extra detail that does not contradict the
+      reference do not matter. Stopping after the first hop, a wrong course or requirement at any
+      step, or declining to answer makes it incorrect.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    unanswerable: |-
+      A student asked a question about university courses that this course catalog cannot answer:
+      the course, program or fact it asks about is not in the catalog, or the catalog does not
+      record it. Below are the question, one acceptable reply written by a person, and the answer a
+      system gave.
+
+      Question: {question}
+
+      One acceptable reply:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if it declines, or says the catalog does not contain what was
+      asked. It does not need to match the wording above. It is incorrect if it gives an answer
+      anyway -- a number, a course, a requirement, a guess -- even with a hedge, or if it answers
+      about a different course as though that were the one asked about.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+    ambiguous: |-
+      A student asked a question about university courses that does not say enough to be answered:
+      it could mean more than one course, and the right reply asks which one is meant. Below are
+      the question, the clarifying question a person wrote that should have been asked, and the
+      answer a system gave.
+
+      Question: {question}
+
+      Clarifying question that should have been asked:
+      {gold}
+
+      System answer:
+      {answer}
+
+      The system answer is correct if it asks the student to clarify which course or program they
+      mean. It does not need to list the same options. It is incorrect if it picks one reading and
+      answers it without asking, even if it mentions that other readings exist, or if it declines
+      without asking.
+
+      Reply with two lines. Line 1: exactly one word, correct or incorrect. Line 2: one sentence
+      saying why.
+# Day 5's conformal answering threshold (#90), fitted by eval/conformal.py on the calib half's
+# signals CSV. Like correctness, it is read after the run it calibrates on exists and changes no
+# line of it, so config.hash leaves it out (config.AFTER_THE_RUNS) and stays c73b197d; the result is
+# named after config.conformal_key: the correctness key plus this whole section.
+conformal:
+  # The target error rate among answered rows. A threshold t is acceptable when the calib rows
+  # with signal >= t give (k + 1) / (n + 1) <= alpha, so at 0.10 nothing is accepted on fewer than
+  # 9 answered rows, and 9 needs 0 errors.
+  alpha: 0.10
