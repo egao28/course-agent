@@ -1,9 +1,11 @@
 # The repo's first CI (#116), brought forward by #107: the traceability check is only a promise
 # if something other than a laptop runs it.
 #
-# Four things run here, in the order a failure is cheapest to read: the locked environment
-# resolves at all, the tree lints, the suite passes, and report/README.md still traces to the
-# files it cites. Nothing here needs a key -- no step calls a model, and `uv sync` never sees
+# Four things are checked here, in the order a failure is cheapest to read: the locked
+# environment resolves at all, the tree lints, the suite passes, and report/README.md still
+# traces to the files it cites. The fifth step is not a check but the setup one of them needs:
+# the corpus and the lexical index are rebuilt, because they are not committed. Nothing here
+# needs a key -- no step calls a model, and `uv sync` never sees
 # a `.env`, so a test that quietly depended on one would fail here rather than on a laptop
 # where the file exists.
 name: tests
