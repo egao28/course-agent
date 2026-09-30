@@ -62,6 +62,7 @@ from agent.state import EXITS, INTENTS
 from config import (
     REPORT_DIR,
     Config,
+    bootstrap_key,
     conformal_key,
     correctness_key,
     file_sha256,
@@ -312,6 +313,7 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
     keys = {
         cfg.hash: "config.yaml, the sections every run file is named after",
         cfg.full_hash: "config.yaml including the sections read after the runs",
+        bootstrap_key(cfg): "the bootstrap's own settings, and the runs it resamples",
         d5.switched_config(cfg).hash: "config.yaml with evidence.method: conformal",
         run_meta["dense_key"]: "the Chroma collection this config builds",
         run_meta["bm25_key"]: "the BM25 index this config builds",
@@ -392,7 +394,7 @@ def block_seeds(f: Facts) -> str:
             ["the frozen split", f"`{cfg['eval']['split_seed']}`", f"config `{cfg.hash}`",
              "`eval.split_seed`"],
             ["the paired bootstrap", f"`{cfg['eval']['bootstrap']['seed']}`",
-             f"full hash `{cfg.full_hash}`", "`eval.bootstrap`"],
+             f"bootstrap key `{bootstrap_key(cfg)}`", "`eval.bootstrap`"],
             ["the second-annotator sample", f"`{cfg['seed']}`", f"config `{cfg.hash}`",
              "top-level `seed`"],
         ],

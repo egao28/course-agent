@@ -21,6 +21,7 @@ from config import (
     Config,
     bm25_key,
     bm25_path,
+    bootstrap_key,
     chroma_path,
     collection_name,
     config_hash,
@@ -460,10 +461,10 @@ def test_cli_source_digest(raw, tmp_path, capsys):
     assert capsys.readouterr().out.strip() == hashlib.sha256(b"x").hexdigest()
 
 
-def test_the_bootstrap_settings_move_only_the_full_hash():
+def test_the_bootstrap_settings_move_only_the_full_hash_and_their_own_key():
     # #76: eval.bootstrap is read after every run file exists, so it must not rename a single
-    # artifact made before it -- config.yaml's hash stays where #61 left it, and only the full
-    # hash, which names the bootstrap's own result, sees it.
+    # artifact made before it -- config.yaml's hash stays where #61 left it. The full hash sees
+    # it, and so does bootstrap_key (#114), which is what names the bootstrap's own result.
     live = load_config()
     assert "bootstrap" in live["eval"]
     assert live.hash == "c73b197d"
@@ -491,6 +492,43 @@ def test_the_bootstrap_settings_move_only_the_full_hash():
     only = {**without, "eval": {"bootstrap": data["eval"]["bootstrap"]}}
     bare = {k: v for k, v in without.items() if k != "eval"}
     assert config_hash(only) == config_hash(bare)
+
+
+def test_only_what_a_resample_reads_moves_the_bootstrap_key():
+    # #114: the result used to be named after cfg.full_hash, which sees every section cfg.hash
+    # leaves out -- so landing signals, correctness and conformal renamed, three times over, a
+    # resample of Day 4 run files that none of them can change a number in. bootstrap_key sees
+    # only the three things the resample reads.
+    live = load_config()
+    data = live.to_dict()
+    assert bootstrap_key(live) == "baa560e9"
+    day5 = {
+        "signals": {**data["signals"], "samples": 9},
+        "correctness": {"judge_prompts": {}},
+        "conformal": {"alpha": 0.2},
+    }
+    for section, edited in day5.items():
+        moved = Config({**data, section: edited})
+        assert moved.hash == live.hash
+        assert moved.full_hash != live.full_hash  # the old name moved here, and should not have
+        assert bootstrap_key(moved) == bootstrap_key(live)
+    # What it does read moves it: its own three settings, the rerank row, and cfg.hash itself.
+    bootstrap = {**data["eval"]["bootstrap"], "seed": 1}
+    assert bootstrap_key(Config({**data, "eval": {**data["eval"], "bootstrap": bootstrap}})) != (
+        bootstrap_key(live)
+    )
+    assert bootstrap_key(Config({**data, "rerank": {**data["rerank"], "pool": 30}})) != (
+        bootstrap_key(live)
+    )
+    upstream = Config({**data, "fusion": {**data["fusion"], "rrf_k": 61}})
+    assert upstream.hash != live.hash and bootstrap_key(upstream) != bootstrap_key(live)
+    # #76's three-mode procedure runs without a rerank section, so it still has a name there.
+    bare = Config({k: v for k, v in data.items() if k != "rerank"})
+    assert bootstrap_key(bare) != bootstrap_key(live)
+    # Its own settings are the one section it cannot do without.
+    no_bootstrap = {k: v for k, v in data["eval"].items() if k != "bootstrap"}
+    with pytest.raises(ValueError, match="no `eval.bootstrap` section"):
+        bootstrap_key(Config({**data, "eval": no_bootstrap}))
 
 
 def test_the_rerank_section_moves_the_full_hash_and_the_rerank_key_only():

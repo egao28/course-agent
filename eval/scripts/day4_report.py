@@ -5,7 +5,7 @@
     uv run python -m eval.scripts.day4_report --dry-run   # print it, write nothing
 
 Every number is read out of a committed artifact: the intervals and the strongest-single choice
-out of ``eval/runs/bootstrap_{full_hash}.json`` (#76), the per-bucket points and the multi-gold
+out of ``eval/runs/bootstrap_{bootstrap_key}.json`` (#76), the per-bucket points and the multi-gold
 count out of the test run file (#75). Nothing here resamples or re-queries -- a second bootstrap
 inside the report would be a second set of intervals that could disagree with the first, and the
 dense side of a live run does not reproduce.
@@ -40,7 +40,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, TextIO
 
-from config import Config, file_sha256, load_config, rel_to_repo, report_path
+from config import Config, bootstrap_key, file_sha256, load_config, rel_to_repo, report_path
 from eval.schema import BUCKETS
 from eval.scripts import bootstrap as bs
 from eval.scripts import hybrid_failures as hf
@@ -167,10 +167,10 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
     result = json.loads(path.read_text(encoding="utf-8"))
 
     problems = []
-    if result.get("config_hash") != cfg.hash or result.get("full_hash") != cfg.full_hash:
+    if result.get("config_hash") != cfg.hash or result.get("bootstrap_key") != bootstrap_key(cfg):
         problems.append(
             f"{rel_to_repo(path)} was computed under {result.get('config_hash')} / "
-            f"{result.get('full_hash')}, not {cfg.hash} / {cfg.full_hash}"
+            f"{result.get('bootstrap_key')}, not {cfg.hash} / {bootstrap_key(cfg)}"
         )
     for run in (calib, test):
         split = run.meta["split"]
@@ -308,7 +308,8 @@ def render_header(facts: Facts) -> str:
             (
                 f"- **bootstrap** `{rel_to_repo(bs.result_path(facts.cfg, facts.src.runs_dir))}` — "
                 f"paired, B = {r['n_resamples']:,}, seed {r['seed']}, "
-                f"{round(r['ci'] * 100)}% percentile intervals (full hash `{r['full_hash']}`)"
+                f"{round(r['ci'] * 100)}% percentile intervals "
+                f"(bootstrap key `{r['bootstrap_key']}`)"
             ),
         ]
     )

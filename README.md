@@ -2206,7 +2206,7 @@ and two calib runs differed in 1 of 41 dense lines.
 calls `retrieve()`.
 
 ```bash
-uv run python -m eval.scripts.bootstrap    # -> eval/runs/bootstrap_{full_hash}.json
+uv run python -m eval.scripts.bootstrap    # -> eval/runs/bootstrap_{bootstrap_key}.json
 ```
 
 - **Paired.** One draw of B = 10,000 index vectors over the test questions is shared by every
@@ -2228,9 +2228,11 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
-`c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`7910b2a9` since #87 added `signals`, #88 `correctness` and #90 `conformal`, all also left out)
-covers every value, and it names only the bootstrap result.
+`c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. The result is named
+after `config.bootstrap_key` (`baa560e9`): `cfg.hash`, this section and `rerank` — everything a
+resample reads, and nothing else. `cfg.full_hash` (`65bb9643`) covers every value, the sections #87,
+#88 and #90 added included; since #114 it names no artifact at all, and a report prints it to say
+which config, sections and all, it was written under.
 
 ## Confidence signals
 
@@ -2372,8 +2374,9 @@ uv run python -m eval.conformal         # -> eval/runs/conformal_{conformal_key}
   with more non-null rows, then to the order `retrieval_score, verbalized, self_consistency`.
 - **`conformal` does not move the config hash.** It is in `config.AFTER_THE_RUNS`, and the result
   is named after `config.conformal_key`: the correctness key plus the whole section. Changing alpha
-  or relabelling the CSV names a new file. `cfg.hash` stays `c73b197d`. `cfg.full_hash` moved to
-  `7910b2a9`, so the bootstrap result was renamed, with its numbers unchanged.
+  or relabelling the CSV names a new file. `cfg.hash` stays `c73b197d`. It does move
+  `cfg.full_hash`, which since #114 renames nothing: the bootstrap result is named after
+  `config.bootstrap_key`, and alpha is not one of the three things a resample reads.
 
 Calib, signals key `37164723`, conformal key `83496e82`: n = 46 (25 fact, 12 multihop,
 5 ambiguous, 4 unanswerable), 20 wrong. Answering everything gives `(k+1)/(n+1)` = 0.447.

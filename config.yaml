@@ -135,7 +135,8 @@ eval:
   # percentile interval. 76 is the issue, for the same reason 61 is above: a constant with no
   # tuning story. These three are read after every run file is written and cannot change a line of
   # one, so config.hash leaves this block out (config.AFTER_THE_RUNS) and it stays c73b197d; only
-  # eval/runs/bootstrap_{full_hash}.json is named after it.
+  # eval/runs/bootstrap_{bootstrap_key}.json is named after it -- config.bootstrap_key, which is
+  # this block, the rerank section and cfg.hash, and nothing Day 5 added (#114).
   bootstrap:
     n_resamples: 10000
     seed: 76

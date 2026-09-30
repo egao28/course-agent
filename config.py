@@ -20,13 +20,18 @@ variant (an ablation), copy and rebuild::
 exists: it resamples committed run files and cannot change a chunk, a draft, a split or a ranking.
 Hashing it would rename all of those after a setting none of them saw -- and the test half's run
 cannot be redone to follow, since it is read once and the dense side does not reproduce. So
-``cfg.hash`` leaves it out, and ``cfg.full_hash`` (every value, no exceptions) names the one
-artifact it does decide: the bootstrap's own result.
+``cfg.hash`` leaves it out, and the bootstrap's own result is named after :func:`bootstrap_key`:
+``cfg.hash``, the ``eval.bootstrap`` section and the ``rerank`` section, the three things a
+resample reads. It was named after ``cfg.full_hash`` until #114 -- but the full hash sees *every*
+section ``cfg.hash`` leaves out, so ``signals``, ``correctness`` and ``conformal`` renamed this
+result each time one of them landed, for Day 5 settings that cannot move a resample of Day 4's
+committed run files. ``cfg.full_hash`` now names no artifact; it is what a report prints to say
+which config, sections and all, it was written under.
 
 ``rerank`` (#79) is left out for the same reason. It is a step after ``retrieve()`` that no earlier
 artifact ran, so it cannot change a line of one either; its own run is named after
 :func:`rerank_key` -- ``cfg.hash`` plus the ``rerank`` section -- and the bootstrap, which reads
-that run, after ``cfg.full_hash``.
+that run beside the ablation runs, hashes the same section into :func:`bootstrap_key`.
 
 ``signals`` (#87) is left out too. Day 5's signal collection is a run of its own over the frozen
 set, and its sampling settings and prompts reach no chunk, index, draft, split or Day 4 run file;
@@ -60,6 +65,7 @@ Artifacts are named with a hash so results from different settings never mix::
     signals run         eval/runs/signals_{split}_{signals_key}.jsonl    signals_key(cfg)
     judge run           eval/runs/judge_{split}_{correctness_key}.jsonl  correctness_key(cfg)
     conformal fit       eval/runs/conformal_{conformal_key}.json         conformal_key(cfg)
+    bootstrap result    eval/runs/bootstrap_{bootstrap_key}.json         bootstrap_key(cfg)
     reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
 The two indexes are *not* named after the full hash; only the reports are. An index is a function
@@ -364,6 +370,36 @@ def rerank_key(cfg: Mapping[str, Any]) -> str:
     if not section:
         raise ValueError("config has no `rerank` section; see config.yaml for the one #79 added")
     content = {"config_hash": config_hash(cfg), "rerank": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def bootstrap_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a resample: the runs it reads, and its own three settings.
+
+    ``cfg.hash`` names the ablation run files the resample draws from, and the ``rerank`` section
+    names the stretch row read beside them, so both go in whole next to ``eval.bootstrap`` -- B,
+    the seed and the interval width. None of the three moves ``cfg.hash``
+    (:data:`AFTER_THE_RUNS`), so this is the only name that moves when a resample changes.
+
+    Replaces ``cfg.full_hash`` as the bootstrap's name (#114); see "What the hash leaves out".
+
+    Unlike :func:`correctness_key` and :func:`conformal_key`, which chain through the key of the
+    run they read, this does not call :func:`rerank_key`: the rerank run is optional here
+    (``eval.scripts.bootstrap`` adds its row only when ``config.yaml`` has the section, and
+    :func:`rerank_key` raises without one), so the section goes in as ``None`` when absent. A
+    config that has one hashes exactly what :func:`rerank_key` does, one level in.
+    """
+    section = (cfg.get("eval") or {}).get("bootstrap")
+    if not section:
+        raise ValueError(
+            "config has no `eval.bootstrap` section; see config.yaml for the one #76 added"
+        )
+    rerank = cfg.get("rerank")
+    content = {
+        "config_hash": config_hash(cfg),
+        "bootstrap": _to_plain(section),
+        "rerank": _to_plain(rerank) if rerank else None,
+    }
     return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 

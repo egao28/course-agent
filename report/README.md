@@ -154,7 +154,7 @@ seed `61` over each bucket's sorted ids. Every threshold and every choice of sig
 | what | seed | key | where |
 | --- | --- | --- | --- |
 | the frozen split | `61` | config `c73b197d` | `eval.split_seed` |
-| the paired bootstrap | `76` | full hash `65bb9643` | `eval.bootstrap` |
+| the paired bootstrap | `76` | bootstrap key `baa560e9` | `eval.bootstrap` |
 | the second-annotator sample | `42` | config `c73b197d` | top-level `seed` |
 <!-- END gen:seeds -->
 
@@ -178,11 +178,11 @@ denominators differ for that reason and are stated everywhere.
 ### 5.1 RQ1 — does hybrid beat the strongest single mode?
 
 Recall@5 and MRR@5 through `retrieve(q, mode, k=5)` on the 41 test rows that carry gold doc ids
-(`fact` 29, `multihop` 12) [src](../eval/runs/bootstrap_65bb9643.json "n.test, buckets"). The
+(`fact` 29, `multihop` 12) [src](../eval/runs/bootstrap_baa560e9.json "n.test, buckets"). The
 strongest single mode was chosen on `calib` — `bm25` on both metrics — and then tested on `test`;
 choosing it on the test rows would compare hybrid against the larger of two noisy means. Intervals
 are 95% paired bootstrap, B = 10,000, seed 76
-[src](../eval/runs/bootstrap_65bb9643.json "n_resamples, seed"): one draw of question indices
+[src](../eval/runs/bootstrap_baa560e9.json "n_resamples, seed"): one draw of question indices
 shared by every mode.
 
 <!-- BEGIN gen:day4_ablation -->
@@ -197,9 +197,9 @@ shared by every mode.
 <!-- END gen:day4_ablation -->
 
 **No.** On Recall@5 the gap is −0.004 [−0.085, 0.073]
-[src](../eval/runs/bootstrap_65bb9643.json "metrics.recall_at_5.difference"): the interval contains
+[src](../eval/runs/bootstrap_baa560e9.json "metrics.recall_at_5.difference"): the interval contains
 0, so these 41 questions do not separate hybrid from BM25. On MRR@5 the gap is −0.120 [−0.225,
-−0.023] [src](../eval/runs/bootstrap_65bb9643.json "metrics.mrr_at_5.difference") and the interval
+−0.023] [src](../eval/runs/bootstrap_baa560e9.json "metrics.mrr_at_5.difference") and the interval
 excludes 0 — BM25 puts the right record first more often than the fusion does. Reranking hybrid's
 top 20 with a cross-encoder recovers most of the MRR gap but separates from neither, at a median
 cost of 724 ms per question [src](day4_ablation_c73b197d.md "Reranking hybrid's top 20").
@@ -495,7 +495,7 @@ it was produced matters as much as its value.
 **The eval set is small, and the buckets are smaller.** Test n = 63, with per-bucket n from 10 to
 29 [src](../eval/runs/e2e_metrics_c73b197d.json "n, buckets"). A 95% interval on a bucket rate at
 n = 12 spans most of the unit interval, which is why no interval is printed per bucket. Three of
-the four RQ-level comparisons rest on 41 [src](../eval/runs/bootstrap_65bb9643.json "n.test") or 42
+the four RQ-level comparisons rest on 41 [src](../eval/runs/bootstrap_baa560e9.json "n.test") or 42
 [src](../eval/runs/risk_coverage_test_37164723.json "n") rows. A difference much smaller than the
 interval widths above is invisible at this size, and several of the comparisons above say exactly
 that.
@@ -639,7 +639,7 @@ judgement is written down.
 | [`eval/datasets/v1.jsonl`](../eval/datasets/v1.jsonl) | `2a93182221bd` |
 | [`eval/datasets/v1_intents.jsonl`](../eval/datasets/v1_intents.jsonl) | `6a43562535c4` |
 | [`eval/runs/ablation_test_c73b197d.jsonl`](../eval/runs/ablation_test_c73b197d.jsonl) | `0ff000fe55fb` |
-| [`eval/runs/bootstrap_65bb9643.json`](../eval/runs/bootstrap_65bb9643.json) | `7ff1e5ee55a7` |
+| [`eval/runs/bootstrap_baa560e9.json`](../eval/runs/bootstrap_baa560e9.json) | `0904abda1345` |
 | [`eval/runs/risk_coverage_test_37164723.json`](../eval/runs/risk_coverage_test_37164723.json) | `875e469b6160` |
 | [`report/figures/risk_coverage_test_37164723.png`](figures/risk_coverage_test_37164723.png) | `b1ac83a34f39` |
 | [`eval/runs/conformal_83496e82.json`](../eval/runs/conformal_83496e82.json) | `27987e369aaa` |

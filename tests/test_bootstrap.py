@@ -2,8 +2,8 @@
 
 The procedure is tested on hand-made vectors, where the right interval is known without running
 it. The I/O is tested on run files written into ``tmp_path`` in #75's format. One test reads the
-two committed run files, which the committed ``bootstrap_{full_hash}.json`` was computed from; it
-re-queries nothing.
+two committed run files, which the committed ``bootstrap_{bootstrap_key}.json`` was computed from;
+it re-queries nothing.
 
 ``cfg`` is the live config without its ``rerank`` section -- the three-mode procedure #76 shipped.
 The stretch row (#79) has tests of its own at the end, under ``live``.
@@ -19,7 +19,7 @@ from io import StringIO
 import numpy as np
 import pytest
 
-from config import Config, file_sha256, load_config
+from config import Config, bootstrap_key, file_sha256, load_config
 from eval.scripts import ablation as ab
 from eval.scripts import bootstrap as bs
 from eval.scripts import rerank as rr
@@ -183,8 +183,9 @@ def test_the_strongest_single_is_chosen_on_calib_and_tested_on_test(cfg, tmp_pat
     assert recall["test"]["bm25"]["point"] == 1.0 and recall["test"]["bm25"]["degenerate"]
     assert recall["difference"]["point"] == pytest.approx(0.75 - 0.25)
     assert result["n"] == {"calib": 3, "test": 4}
-    assert path.name == f"bootstrap_{cfg.full_hash}.json"
-    assert result["full_hash"] == cfg.full_hash and result["config_hash"] == cfg.hash
+    assert path.name == f"bootstrap_{bootstrap_key(cfg)}.json"
+    assert result["bootstrap_key"] == bootstrap_key(cfg) and result["config_hash"] == cfg.hash
+    assert result["full_hash"] == cfg.full_hash
     assert "strongest single on calib = dense" in out.getvalue()
     assert "degenerate" in out.getvalue()
 

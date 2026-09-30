@@ -3,8 +3,9 @@
     uv run python -m eval.scripts.bootstrap
 
 Reads ``eval/runs/ablation_{calib,test}_{hash}.jsonl`` (#75) and writes
-``eval/runs/bootstrap_{full_hash}.json`` -- named after ``cfg.full_hash``, the one hash that
-sees ``eval.bootstrap`` (see ``config.AFTER_THE_RUNS``). It never calls ``retrieve()``: the run
+``eval/runs/bootstrap_{bootstrap_key}.json`` -- named after ``config.bootstrap_key``: ``cfg.hash``,
+the ``eval.bootstrap`` section and the ``rerank`` section, which is everything a resample reads
+(see ``config.AFTER_THE_RUNS``). It never calls ``retrieve()``: the run
 files are the sample, so re-drawing an interval never re-queries an index -- and cannot, since
 the dense side of a live run does not reproduce.
 
@@ -50,7 +51,7 @@ from typing import Any, NamedTuple, TextIO
 
 import numpy as np
 
-from config import Config, file_sha256, load_config, rel_to_repo
+from config import Config, bootstrap_key, file_sha256, load_config, rel_to_repo
 from eval.schema import Split
 from eval.scripts import rerank as rr
 from eval.scripts.ablation import RUNS_DIR, K, run_path
@@ -254,6 +255,7 @@ def analyse(calib: Run, test: Run, cfg: Config, rerank: rr.Rerank | None = None)
         }
     return {
         "config_hash": cfg.hash,
+        "bootstrap_key": bootstrap_key(cfg),
         "full_hash": cfg.full_hash,
         "n_resamples": n_resamples,
         "seed": seed,
@@ -284,8 +286,8 @@ def _difference_json(boot: Bootstrap, minuend: str, subtrahend: str) -> dict[str
 
 
 def result_path(cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
-    """``eval/runs/bootstrap_{full_hash}.json``: B, the seed and ci decide it, so they name it."""
-    return Path(runs_dir) / f"bootstrap_{cfg.full_hash}.json"
+    """``eval/runs/bootstrap_{bootstrap_key}.json`` -- see :func:`config.bootstrap_key`."""
+    return Path(runs_dir) / f"bootstrap_{bootstrap_key(cfg)}.json"
 
 
 # --- saying what happened -----------------------------------------------------------------------
@@ -323,7 +325,10 @@ def bootstrap(cfg: Config, out: TextIO, runs_dir: Path = RUNS_DIR) -> Path:
     result = analyse(load_run("calib", cfg, runs_dir), test, cfg, rerank)
     path = write_json(result_path(cfg, runs_dir), result)
     print(summary(result), file=out)
-    print(f"\nwrote {rel_to_repo(path)} (full hash {cfg.full_hash}, config {cfg.hash})", file=out)
+    print(
+        f"\nwrote {rel_to_repo(path)} (bootstrap key {bootstrap_key(cfg)}, config {cfg.hash})",
+        file=out,
+    )
     return path
 
 
