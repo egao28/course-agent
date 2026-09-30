@@ -29,7 +29,7 @@ from config import (
     load_config,
     rel_to_repo,
     report_path,
-    rerank_key,
+    signals_key,
     source_path,
     verify_source,
 )
@@ -468,8 +468,10 @@ def test_the_bootstrap_settings_move_only_the_full_hash():
     assert live.hash == "c73b197d"
     assert live.full_hash != live.hash
     data = live.to_dict()
-    without = {**data, "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"}}
-    without.pop("rerank", None)  # the other entry in AFTER_THE_RUNS; see the test below
+    without = {
+        **{k: v for k, v in data.items() if k != "signals"},
+        "eval": {k: v for k, v in data["eval"].items() if k != "bootstrap"},
+    }
     assert Config(without).hash == Config(without).full_hash == live.hash
     reseeded = {**data, "eval": {**data["eval"], "bootstrap": {"n_resamples": 10, "seed": 1}}}
     assert Config(reseeded).hash == live.hash
@@ -485,24 +487,24 @@ def test_the_bootstrap_settings_move_only_the_full_hash():
     assert config_hash(only) == config_hash(bare)
 
 
-def test_the_rerank_section_moves_the_full_hash_and_the_rerank_key_only():
-    # #79: the reranker runs after every three-mode artifact exists and none of them reads it, so
-    # config.hash stays c73b197d. The full hash (the bootstrap, which reads the rerank run) and the
-    # rerank key (the rerank run itself) both see it; neither index key does.
+def test_the_signals_section_moves_only_its_own_key_and_the_full_hash():
+    # #87: Day 5's sampling settings and prompts reach nothing made before the signals run, so
+    # cfg.hash stays where #61 left it -- the Day 4 run files are found by it -- and the run is
+    # named after signals_key, which does see every word of both prompts.
     live = load_config()
+    assert "signals" in live
+    assert live.hash == "c73b197d"
     data = live.to_dict()
-    key = "0" * 8  # any chunk key: only whether the index keys move is asked
-    bare = Config({k: v for k, v in data.items() if k != "rerank"})
-    assert bare.hash == live.hash == "c73b197d"
-    assert bare.full_hash != live.full_hash
-    moved = Config({**data, "rerank": {**data["rerank"], "pool": 30}})
-    assert moved.hash == live.hash and moved.full_hash != live.full_hash
-    assert rerank_key(moved) != rerank_key(live)
-    for other in (bare, moved):
-        assert dense_key(other, key) == dense_key(live, key)
-        assert bm25_key(other, key) == bm25_key(live, key)
-    # The rerank key follows everything the pool is built from, too.
-    refused = Config({**data, "fusion": {**data["fusion"], "rrf_k": 61}})
-    assert refused.hash != live.hash and rerank_key(refused) != rerank_key(live)
-    with pytest.raises(ValueError, match="no `rerank` section"):
-        rerank_key(bare)
+    assert Config({k: v for k, v in data.items() if k != "signals"}).hash == live.hash
+    edited = {
+        **data,
+        "signals": {**data["signals"], "judge_prompt": data["signals"]["judge_prompt"] + "!"},
+    }
+    assert Config(edited).hash == live.hash
+    assert Config(edited).full_hash != live.full_hash
+    assert signals_key(Config(edited)) != signals_key(live)
+    # And a setting the agent does see moves the signals key too, through cfg.hash.
+    moved = {**data, "agent": {"retrieval_mode": "dense"}}
+    assert signals_key(Config(moved)) != signals_key(live)
+    with pytest.raises(ValueError, match="no `signals` section"):
+        signals_key(Config({k: v for k, v in data.items() if k != "signals"}))

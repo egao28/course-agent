@@ -2223,56 +2223,55 @@ Test half, n = 41 (29 fact + 12 multihop), seed 76:
 **The bootstrap settings do not move the config hash.** `eval.bootstrap` is read only after every
 other artifact exists, so `config.AFTER_THE_RUNS` leaves it out of `cfg.hash`, which stays
 `c73b197d`. Day 3's drafts and reports and the #75 run files keep their names. `cfg.full_hash`
-(`e5898265` since #79 added `rerank:`) covers every value, and it names only the bootstrap result.
+(`b409d58d` since #87 added `signals`, which is also left out) covers every value, and it names
+only the bootstrap result.
 
-## Reranking (stretch)
+## Confidence signals
 
-`eval/scripts/rerank.py` ([#79](../../issues/79)) adds a fourth row, `hybrid_rerank`. It takes
-`retrieve(q, "hybrid", k=20)`, rescores the (question, chunk text) pairs with `BAAI/bge-reranker-base`
-(`retrieval/rerank.py`, CPU, one batch per question), and keeps the top 5. It is a step after
-`retrieve()`, not a new mode, so `MODES` and what `hybrid` returns are unchanged.
+`eval/scripts/signals.py` (#87) runs every row of one half through the Day 2 agent and records
+three confidence signals per answered row to `eval/runs/signals_{split}_{signals_key}.jsonl`, with
+a sidecar listing every row it did not answer and why. Correctness labels are #88's.
 
-```bash
-uv sync --extra local                                                          # sentence-transformers
-uv run --env-file .env --extra local python -m eval.scripts.rerank --split test  # -> eval/runs/rerank_test_{rerank_key}.jsonl
-uv run python -m eval.scripts.bootstrap                                        # adds the row, same indices
+```
+uv run --env-file .env python -m eval.scripts.signals --split calib   # --split is required
 ```
 
-- **Same resample indices.** The bootstrap adds the rerank vector to the same `paired_bootstrap`
-  call, so the three existing intervals do not move. It also computes `hybrid_rerank − hybrid`.
-- **The ceiling is printed.** Reranking only reorders the pool, so its Recall@5 is at most
-  hybrid's Recall@20. Each line carries `pool_recall_at_20`.
-- **Latency per question** (`pool_ms`, `rerank_ms`) is in every line, with model loading excluded.
-- **The pool is a second live draw.** Each line records whether the pool's top 5 is the committed
-  hybrid top 5 it is compared with.
-- **Not in `cfg.hash`.** `rerank` is in `config.AFTER_THE_RUNS` beside `eval.bootstrap`, and the
-  run is named after `config.rerank_key` (`cfg.hash` + the `rerank` section). The model is pinned
-  by Hugging Face revision.
+- **`retrieval_score`** is the top-1 of the mode the agent ran (bm25), not an RRF score. A tool row
+  (an exact lookup) has `null`, never 1.0.
+- **`dense_top1`** is the question's own dense top-1 cosine, recorded on every answered row,
+  tool rows included. Most answered rows are tool rows, so without it #89 would have a
+  retrieval-based signal on about 10 rows per half.
+- **`verbalized`** is a follow-up call (`signals.verbalized_prompt`): a short check of the answer
+  against the evidence, then a last line `Confidence: <integer>`. Any other last line is `null`,
+  with the reply kept in `verbalized_raw`. The first prompt asked for a bare integer and got 100 on
+  45 of 46 calib rows, so it was replaced before the test half was read.
+- **`self_consistency`** uses 3 samples at T = 0.7 with the answer node's own prompt, and a judge
+  (`signals.judge_prompt`) rules on each of the 3 pairs. The score is one of 0, 1/3, 2/3 or 1.
+- **The gate is bypassed** so that every row with evidence gets an answer. `gate_ok` is what the
+  Day 2 gate would have said. Rows with no evidence, and `out_of_scope` rows, are skipped and
+  counted.
+- **`signals` does not move the config hash.** Like `eval.bootstrap` it is in
+  `config.AFTER_THE_RUNS`, so `cfg.hash` stays `c73b197d` and the Day 4 run files keep their names.
+  The run is named after `config.signals_key`: `cfg.hash` plus the whole section, prompts included.
+- **The committed file is the sample.** The samples are random and the dense side jitters, so a
+  rerun is a different draw.
 
-Test half, n = 41: Recall@5 0.846 [0.748, 0.931], MRR@5 0.868 [0.774, 0.945]. rerank − hybrid is
-−0.020 [−0.104, 0.061] on Recall@5 and +0.065 [−0.059, 0.186] on MRR@5, and neither interval
-excludes 0. The hybrid@20 ceiling is 0.949, and the median rerank cost is 724 ms per question on CPU.
+gpt-4o-mini, signals key `37164723`, one run per half:
 
-## Day 4 report
+| | calib (64) | test (63) |
+|---|---|---|
+| answered | 46 (25 fact, 12 multihop, 4 unanswerable, 5 ambiguous) | 42 (21 fact, 12 multihop, 3 unanswerable, 6 ambiguous) |
+| skipped: no evidence | 15 (10 `no_course_code`, 4 `course_not_found`, 1 `no_program`) | 15 (12 `no_course_code`, 3 `course_not_found`) |
+| skipped: `out_of_scope` | 3 | 6 |
+| tool rows (`retrieval_score` null) | 36 | 32 |
+| `verbalized` = 100 | 28 of 46 | 26 of 42 |
+| `verbalized` range | 0–100 | 70–100 |
+| `self_consistency` < 1 | 3 (all ambiguous) | 7 (5 multihop, 2 ambiguous) |
+| unparsed replies | 0 | 0 |
 
-`eval/scripts/day4_report.py` ([#77](../../issues/77)) writes the RQ1 table,
-`report/day4_ablation_{hash}.md`, from the committed run files and the bootstrap result. It
-resamples nothing and re-queries nothing.
-
-```bash
-uv run python -m eval.scripts.day4_report --check     # what exists, and what makes the rest
-uv run python -m eval.scripts.day4_report             # write report/day4_ablation_{hash}.md
-uv run python -m eval.scripts.day4_report --dry-run   # print it, write nothing
-```
-
-- **Refuses mismatched inputs.** The bootstrap result has to name the run files on disk by
-  sha256, and the test run has to come from the `v1.jsonl` that is committed now. Otherwise
-  nothing is written.
-- **Intervals only on the full test half.** The per-bucket split (29 fact, 12 multihop) shows
-  point estimates only. At n = 12, one question moves a mean by up to 0.083.
-- **No clock in the body**, so a re-run over the same inputs gives the same bytes.
-  `tests/test_day4_report.py` regenerates the committed report and compares it byte for byte,
-  and parses every number in a fixture report back out to check it against the bootstrap JSON.
+These are counts, not results: no row is labelled correct or wrong yet (#88). Many rows never
+reach an answer (18 on calib, 21 on test), mostly questions where dispatch found no course code.
+Verbalized confidence still sits at 100 on about 60% of rows.
 
 ## Day 1 goal
 
