@@ -8,7 +8,7 @@
   "config_hash": "c73b197d",
   "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
   "dense_key": "094143d8",
-  "full_hash": "b409d58d",
+  "full_hash": "725d7385",
   "k": 5,
   "metrics": {
     "mrr_at_5": {
@@ -20,6 +20,15 @@
         "point": -0.12032520325203222,
         "significant": true,
         "subtrahend": "bm25"
+      },
+      "rerank_difference": {
+        "degenerate": false,
+        "hi": 0.18577235772357714,
+        "lo": -0.05853658536585371,
+        "minuend": "hybrid_rerank",
+        "point": 0.06544715447154459,
+        "significant": false,
+        "subtrahend": "hybrid"
       },
       "strongest_single": {
         "calib_means": {
@@ -47,6 +56,12 @@
           "hi": 0.8910569105691056,
           "lo": 0.7065040650406504,
           "point": 0.8024390243902441
+        },
+        "hybrid_rerank": {
+          "degenerate": false,
+          "hi": 0.9451219512195121,
+          "lo": 0.774390243902439,
+          "point": 0.8678861788617886
         }
       }
     },
@@ -59,6 +74,15 @@
         "point": -0.004065040650406582,
         "significant": false,
         "subtrahend": "bm25"
+      },
+      "rerank_difference": {
+        "degenerate": false,
+        "hi": 0.060975609756097615,
+        "lo": -0.10365853658536583,
+        "minuend": "hybrid_rerank",
+        "point": -0.020325203252032575,
+        "significant": false,
+        "subtrahend": "hybrid"
       },
       "strongest_single": {
         "calib_means": {
@@ -86,6 +110,12 @@
           "hi": 0.9349593495934958,
           "lo": 0.7825203252032519,
           "point": 0.8658536585365854
+        },
+        "hybrid_rerank": {
+          "degenerate": false,
+          "hi": 0.9308943089430896,
+          "lo": 0.7479674796747967,
+          "point": 0.8455284552845528
         }
       }
     }
@@ -95,6 +125,14 @@
     "test": 41
   },
   "n_resamples": 10000,
+  "rerank": {
+    "model": "BAAI/bge-reranker-base",
+    "pool": 20,
+    "rerank_key": "3c68593d",
+    "revision": "2cfc18c9415c912f9d8155881c133215df768a70",
+    "run": "eval/runs/rerank_test_3c68593d.jsonl",
+    "sha256": "144ef3acb4d5d7949fb593649335dfd3a4395ee4d18a96e20d12d48670cdcbfb"
+  },
   "runs": {
     "calib": {
       "run": "eval/runs/ablation_calib_c73b197d.jsonl",
