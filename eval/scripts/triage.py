@@ -169,22 +169,41 @@ class Triage(NamedTuple):
 
 _VARIABLE: dict[str, frozenset[str] | None] = {}
 
+#: The last commit whose ``data/courses.json`` carries ``creditsRaw`` / ``creditsMin`` /
+#: ``creditsMax`` -- the #25/#17 merge, which is ``main`` as it stood immediately before #126.
+#:
+#: Not ``origin/main``, which is where this used to point. #126 resolved ``data/courses.json`` to
+#: the six-day stack's copy on purpose (the stack keeps its chunk template), and that copy carries
+#: a single ``credits`` float. So the branch that had the answer no longer does, and no branch in
+#: the repo does: #17 is merged in history and out of the tree. A pinned commit is what is left,
+#: and it is the better shape anyway -- which courses the *catalog* gives a range for is a fact
+#: about one export, not about whatever a moving branch happens to hold today.
+#:
+#: Reachable from ``origin/main``'s first-parent history, so a ``fetch-depth: 0`` checkout finds
+#: it. A shallow clone does not, and reads as unavailable rather than as zero.
+CREDIT_RANGE_REF = "c9ff4de76555f09f3080af575408af8e001aa3c6"
 
-def variable_credit_codes(ref: str = "origin/main") -> frozenset[str] | None:
+
+def variable_credit_codes(ref: str = CREDIT_RANGE_REF) -> frozenset[str] | None:
     """Course codes whose catalog credits are a range, read from ``ref``. ``None`` if unavailable.
 
     ``GUIDELINES.md`` rule 2 deletes a credit question about one of these, and the rule is a
     **lookup**, not a judgement: the chunk prints ``Credits: 3`` whether the catalog says "3
     hours." or "3 OR 4 hours.", so neither a model nor a person can settle it from the record in
-    front of them. ``creditsMin`` / ``creditsMax`` exist only on ``main`` (#17 is not in this
-    stack), which is why :func:`eval.scripts.review.credit_ranges` returns ``None`` here and
-    prints a ``git show`` one-liner for the reviewer to run by hand instead. This runs that same
-    one-liner, so the 1,415 affected courses are decided by the lookup rather than by whoever
-    remembered to check.
+    front of them. No export in the working tree carries ``creditsMin`` / ``creditsMax`` -- which
+    is why :func:`eval.scripts.review.credit_ranges` returns ``None`` here -- so this reads them
+    out of :data:`CREDIT_RANGE_REF` instead, and the 1,415 affected courses are decided by the
+    lookup rather than by whoever remembered to check.
 
-    ``None``, not an empty set, when git cannot answer -- no remote, a shallow clone, #17 merged
-    into this stack so the fields are local. An empty set would mean "no course has a range",
-    which would silently switch the rule off.
+    ``None``, not an empty set, in both of the ways this can fail to answer:
+
+    * git cannot produce the file at all -- no remote, a shallow clone, a rewritten ref;
+    * git produces a file that has no ``creditsMin`` key in it, which is what ``origin/main``
+      became in #126 and what made this return 0 for 1,415 courses (#128).
+
+    The second is the one worth guarding, because it looks like a successful lookup. An empty set
+    would mean "no course has a range", which silently switches the rule off, and
+    :func:`eval.scripts.review.credit_ranges` has refused it on the same grounds since #59.
     """
     if ref not in _VARIABLE:
         try:
@@ -196,11 +215,14 @@ def variable_credit_codes(ref: str = "origin/main") -> frozenset[str] | None:
                 check=True,
             ).stdout
             courses = json.loads(body)
-            _VARIABLE[ref] = frozenset(
-                course["code"]
-                for course in courses
-                if course.get("creditsMin") != course.get("creditsMax")
-            )
+            if not courses or "creditsMin" not in courses[0]:
+                _VARIABLE[ref] = None
+            else:
+                _VARIABLE[ref] = frozenset(
+                    course["code"]
+                    for course in courses
+                    if course["creditsMin"] != course["creditsMax"]
+                )
         except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
             _VARIABLE[ref] = None
     return _VARIABLE[ref]
@@ -533,10 +555,10 @@ def summary(run: Run, path: Path, total: int) -> str:
     lines.append(
         "rule 2 lookup          "
         + (
-            f"{len(ranges)} variable-credit courses from origin/main"
+            f"{len(ranges)} variable-credit courses from c9ff4de"
             if ranges is not None
-            else "UNAVAILABLE -- git show origin/main:data/courses.json failed, so no row was "
-            "deleted for rule 2; the reviewer's on-screen flag is the only check"
+            else "UNAVAILABLE -- git show c9ff4de:data/courses.json gave no creditsMin, so no "
+            "row was deleted for rule 2; the reviewer's on-screen flag is the only check"
         )
     )
     lines += [

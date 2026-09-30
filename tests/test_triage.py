@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -449,7 +450,7 @@ def test_suggestions_are_keyed_to_the_rows_being_reviewed(tmp_path: Path):
 
 
 def test_the_lookup_finds_the_courses_the_guidelines_cite():
-    """1,415 of 4,502, from ``origin/main`` -- the number ``GUIDELINES.md`` rule 2 quotes.
+    """1,415 of 4,502, from :data:`CREDIT_RANGE_REF` -- the number ``GUIDELINES.md`` rule 2 quotes.
 
     Skipped rather than failed where git cannot answer: a shallow clone and a machine with no
     remote are both real, and the run says so on its own summary line instead of deleting
@@ -457,9 +458,37 @@ def test_the_lookup_finds_the_courses_the_guidelines_cite():
     """
     codes = tr.variable_credit_codes()
     if codes is None:
-        pytest.skip("git show origin/main:data/courses.json is unavailable here")
+        pytest.skip(f"git show {tr.CREDIT_RANGE_REF}:data/courses.json is unavailable here")
     assert len(codes) == 1415
     assert "AAS 465" in codes
+
+
+def test_an_export_without_the_range_fields_is_unavailable_not_empty(monkeypatch):
+    """The #128 failure, pinned: 0 and "cannot say" are different answers.
+
+    ``origin/main`` still resolves after #126 -- it is the six-day stack's export now, with a
+    single ``credits`` float. Every row then compared ``None != None``, so the lookup returned an
+    empty set, the summary line read ``0 variable-credit courses`` as though it had checked, and
+    rule 2 was off for all 1,415 courses without one line of output saying so.
+    """
+    stack_export = json.dumps([{"code": "AAS 465", "credits": 3.0}])
+    monkeypatch.setattr(tr, "_VARIABLE", {})
+    monkeypatch.setattr(
+        tr.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(stdout=stack_export),
+    )
+    assert tr.variable_credit_codes("some-ref-without-the-fields") is None
+
+
+def test_an_export_with_the_fields_and_no_range_is_empty_not_unavailable(monkeypatch):
+    """The other side of it: the fields are there, nothing is a range, and that is an answer."""
+    fixed = json.dumps([{"code": "CS 225", "creditsMin": 4.0, "creditsMax": 4.0}])
+    monkeypatch.setattr(tr, "_VARIABLE", {})
+    monkeypatch.setattr(
+        tr.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=fixed)
+    )
+    assert tr.variable_credit_codes("some-ref-with-the-fields") == frozenset()
 
 
 def test_rule_two_needs_both_halves(cfg):

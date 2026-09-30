@@ -451,10 +451,12 @@ CHECKS = (
 )
 
 #: The one-liner ``eval/GUIDELINES.md`` gives for the variable-credit courses, repeated on screen
-#: when a credit question comes up and this branch's export cannot answer it. See
+#: when a credit question comes up and the working tree's export cannot answer it. The ref is
+#: :data:`eval.scripts.triage.CREDIT_RANGE_REF`: no branch carries the fields any more, so this
+#: names the last commit that does rather than a branch that moved (#128). See
 #: :func:`credit_ranges`.
 CREDIT_COMMAND = (
-    "git show origin/main:data/courses.json | jq -r "
+    "git show c9ff4de:data/courses.json | jq -r "
     "'.[]|select(.creditsMin!=.creditsMax)|.code'"
 )
 
