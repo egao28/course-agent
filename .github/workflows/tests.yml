@@ -1,0 +1,63 @@
+# The repo's first CI (#116), brought forward by #107: the traceability check is only a promise
+# if something other than a laptop runs it.
+#
+# Four things run here, in the order a failure is cheapest to read: the locked environment
+# resolves at all, the tree lints, the suite passes, and report/README.md still traces to the
+# files it cites. Nothing here needs a key -- no step calls a model, and `uv sync` never sees
+# a `.env`, so a test that quietly depended on one would fail here rather than on a laptop
+# where the file exists.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: this workflow builds nothing, publishes nothing and comments nowhere.
+permissions:
+  contents: read
+
+# A stacked branch is force-pushed often; only the newest push per ref is worth a runner.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv installs the interpreter `.python-version` pins (3.12), so there is no setup-python
+      # step and no second place where a Python version is written down.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # --locked fails if uv.lock does not match pyproject.toml, which is half of what
+      # "reproducible" means here; the analysis extra is what keeps 47 tests from skipping.
+      - name: Sync the locked environment
+        run: uv sync --locked --extra analysis
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # data/{courses,prereqs,requirements}.json are committed, so the corpus and the lexical
+      # index rebuild from the tree with no private CSV and no network beyond tiktoken's
+      # vocabulary. Without them five test_draft_items tests fail rather than skip, and the
+      # BM25 index they name (bm25_877a6610) is the one the committed runs were made against.
+      - name: Rebuild the corpus and the BM25 index
+        run: |
+          uv run python -m ingest.chunk
+          uv run python -m ingest.build_bm25
+
+      - name: Tests
+        run: uv run pytest -q
+
+      # Redundant with tests/test_final_report.py on purpose: when this fails, the log says
+      # which number in the report moved and where, rather than which assertion did.
+      - name: The report traces to its files
+        run: uv run python -m eval.scripts.final_report --check
