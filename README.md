@@ -2639,6 +2639,56 @@ Four things the tables do not say on their own:
 - **No test row is labelled `degree_requirement`**, so the half carries no sample of that intent
   and the report says so rather than reporting a rate of 0.
 
+## Report traceability
+
+`eval/scripts/final_report.py` ([#107](../../issues/107)) owns the tables in
+[report/README.md](report/README.md) and the promise the first paragraph of that file makes.
+
+```bash
+uv run python -m eval.scripts.final_report            # rewrite the generated blocks
+uv run python -m eval.scripts.final_report --check     # verify the committed file; exit 1 if not
+uv run python -m eval.scripts.final_report --inputs    # list the artifacts it reads
+```
+
+The front page is the one report here whose prose is *written* rather than formatted, so the Day
+3–5 rule ("every number is printed from the data") is replaced by two lighter ones that a machine
+can still hold:
+
+- **A table or a figure is generated.** Each sits between `<!-- BEGIN gen:name -->` and
+  `<!-- END gen:name -->`, and `final_report.BLOCKS` is the only thing that writes between them.
+  A table outside a marker pair is a failure, not an exemption.
+- **A number in the prose carries its source.** `0.405 [src](../eval/runs/x.json "a.key.path")` —
+  the link names the file and its title names the path inside it, or several paths separated by
+  commas. `--check` reads the value there and compares it against the digits, at the precision
+  they are printed to.
+
+`--check` fails when a block is stale, a prose number has no link in its paragraph, a linked value
+is not in the linked file, a table sits outside a block, a hex key is not one this config produces,
+or an input's sha256 no longer matches the one its sidecar records. The exceptions are an allowlist
+in the script (`ALLOWED`) — issue and section numbers, RQ and day labels, the interval level, the
+two formulas, metric names, course codes — and a test fails if it grows past a dozen entries,
+because a number that wants an entry there usually wants a link instead.
+
+- **The hash chain is not re-implemented.** It runs `day4_report.read_facts` and
+  `day5_report.read_facts`, which already refuse to build a report out of files that do not belong
+  together, and adds Day 6's three links to it. The Day 4 blocks are rendered from Day 4's own
+  facts — including its per-bucket means — so the front page and
+  `report/day4_ablation_{hash}.md` cannot disagree about a value.
+- **The architecture diagram is drawn from the wiring.** Nodes and edges come from
+  `agent.graph.build_graph` under this config and under the one config that builds the dormant
+  confidence gate (#92); an edge only the second one has is dashed. The graph is built with stub
+  nodes, so drawing it opens no index and reads no key. The wording on each box is hand-written,
+  with the model, the retrieval mode and `k` interpolated from `config.yaml`.
+- **No clock anywhere.** Re-running over unchanged inputs rewrites the same bytes, which is what
+  makes `--check` a check rather than a diff against a timestamp.
+- **What it cannot do is read.** It holds the file to the files it cites; whether the sentence
+  around a number is a fair reading of it is a person's judgement, and section 7 of the report is
+  where that judgement is written down.
+
+`tests/test_final_report.py` runs `--check` on the committed report, then breaks the report a dozen
+ways — a typed-in wrong number, a stale block, a mistyped key path, an unsourced number, a stale
+hash — and fails if any of them passes.
+
 ## Day 1 goal
 
 End-to-end `query → dense + BM25 recall → RRF → top-k`:
