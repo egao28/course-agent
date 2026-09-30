@@ -37,8 +37,10 @@ jobs:
 
       # uv installs the interpreter `.python-version` pins (3.12), so there is no setup-python
       # step and no second place where a Python version is written down.
+      # Pinned exactly: setup-uv publishes no floating v10 tag, and a workflow that cannot
+      # resolve its action fails before any step of this job runs.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
