@@ -7,7 +7,7 @@ Recall@5 and MRR@5 for `dense`, `bm25` and `hybrid` through `retrieve(q, mode, k
 - **config** `c73b197d` (dense index `094143d8`, bm25 index `877a6610`)
 - **runs** `eval/runs/ablation_test_c73b197d.jsonl` (reported), `eval/runs/ablation_calib_c73b197d.jsonl` (chooses the strongest single mode only)
 - **rerank** `eval/runs/rerank_test_3c68593d.jsonl` — `BAAI/bge-reranker-base` at revision `2cfc18c9415c`, rerank key `3c68593d`
-- **bootstrap** `eval/runs/bootstrap_e5898265.json` — paired, B = 10,000, seed 76, 95% percentile intervals (full hash `e5898265`)
+- **bootstrap** `eval/runs/bootstrap_725d7385.json` — paired, B = 10,000, seed 76, 95% percentile intervals (full hash `725d7385`)
 
 ## Result
 

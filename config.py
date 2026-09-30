@@ -23,6 +23,11 @@ cannot be redone to follow, since it is read once and the dense side does not re
 ``cfg.hash`` leaves it out, and ``cfg.full_hash`` (every value, no exceptions) names the one
 artifact it does decide: the bootstrap's own result.
 
+``rerank`` (#79) is left out for the same reason. It is a step after ``retrieve()`` that no earlier
+artifact ran, so it cannot change a line of one either; its own run is named after
+:func:`rerank_key` -- ``cfg.hash`` plus the ``rerank`` section -- and the bootstrap, which reads
+that run, after ``cfg.full_hash``.
+
 ``signals`` (#87) is left out too. Day 5's signal collection is a run of its own over the frozen
 set, and its sampling settings and prompts reach no chunk, index, draft, split or Day 4 run file;
 hashing them would rename every one of those -- and orphan the Day 4 run files, which are looked up
@@ -34,6 +39,7 @@ Artifacts are named with a hash so results from different settings never mix::
 
     Chroma collection   courses_{dense_key}                   collection_name(cfg, chunk_key)
     BM25 index          <repo>/indexes/bm25_{bm25_key}.pkl    bm25_path(cfg, chunk_key)
+    rerank run          eval/runs/rerank_{split}_{rerank_key}.jsonl    rerank_key(cfg)
     signals run         eval/runs/signals_{split}_{signals_key}.jsonl    signals_key(cfg)
     reports             <repo>/report/{stem}_{hash}.md        report_path(stem, cfg)
 
@@ -111,7 +117,11 @@ def canonical_dump(cfg: Mapping[str, Any]) -> str:
 #: ``(section, key)`` pairs read only after every other artifact exists, and so left out of
 #: :func:`config_hash` -- see "What the hash leaves out" above. :func:`full_hash` keeps them.
 #: A key of ``None`` is the whole section.
-AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (("eval", "bootstrap"), ("signals", None))
+AFTER_THE_RUNS: tuple[tuple[str, str | None], ...] = (
+    ("eval", "bootstrap"),
+    ("rerank", None),
+    ("signals", None),
+)
 
 
 def _digest(cfg: Mapping[str, Any]) -> str:
@@ -305,6 +315,21 @@ def bm25_key(cfg: Mapping[str, Any], chunk_key: str) -> str:
             "(see config.yaml) -- all of them are hashed into the BM25 index name"
         )
     content = {"chunk_key": chunk_key, "bm25": _to_plain(section)}
+    return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
+
+
+def rerank_key(cfg: Mapping[str, Any]) -> str:
+    """Short hash of what decides a reranked list: the pool's settings, and the ``rerank`` section.
+
+    The pool is ``retrieve(q, "hybrid", k=pool)``, a function of everything :func:`config_hash`
+    sees, so that hash goes in whole; the section goes in whole for the reason :func:`bm25_key`
+    gives. ``rerank`` is left out of ``cfg.hash`` (:data:`AFTER_THE_RUNS`), so this is the only
+    name that moves when the model, its revision or the pool depth does.
+    """
+    section = cfg.get("rerank")
+    if not section:
+        raise ValueError("config has no `rerank` section; see config.yaml for the one #79 added")
+    content = {"config_hash": config_hash(cfg), "rerank": _to_plain(section)}
     return hashlib.sha256(canonical_dump(content).encode("utf-8")).hexdigest()[:HASH_LEN]
 
 
