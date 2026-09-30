@@ -16,10 +16,9 @@ claim it makes that something else in the repo already decides, and this file ho
   and fatal to the promise that every number traces to a committed file. #107 adds the expensive
   half -- comparing the *value* at that path against the digits in the prose.
 
-``report/day4_ablation_c73b197d.md`` is in :data:`PENDING`: the Day 4 report is written and
-reviewed on ``feat/77-day4-report`` (#86), which is not an ancestor of this branch, so the two
-links into it dangle until that PR merges into ``feat/56-drafting-harness``. Delete the constant
-then; a link to anything else that is missing is a failure today.
+There is no exemption list. ``report/day4_ablation_c73b197d.md`` (#77) was the one link that did
+not resolve here, and the merge of ``feat/56-drafting-harness`` brought it, so a link target that
+is missing is simply a failure.
 """
 
 from __future__ import annotations
@@ -51,12 +50,6 @@ SECTIONS = (
 #: Diagram nodes that are not graph nodes: where a query enters and where a reply leaves. The
 #: graph's own START/END, which LangGraph supplies and :func:`agent.graph.node_names` does not.
 PSEUDO_NODES = frozenset({"query", "reply"})
-
-#: Linked files that do not exist on this branch yet, and the issue that brings each one. A link
-#: to a file outside this set must resolve.
-PENDING: dict[str, str] = {
-    "report/day4_ablation_c73b197d.md": "#77, on feat/77-day4-report (PR #86)",
-}
 
 #: ``0.405 [src](../eval/runs/x.json "a.key.path")`` -- a number's source, and where in it to look.
 SRC_RE = re.compile(r'\[src\]\((?P<path>[^)\s]+) "(?P<key>[^"]+)"\)')
@@ -190,15 +183,7 @@ def links(text: str) -> list[str]:
 
 def test_every_local_link_resolves(links: list[str]) -> None:
     missing = [p for p in links if not resolve(p).exists()]
-    unexpected = [p for p in missing if str(resolve(p).relative_to(REPO_ROOT)) not in PENDING]
-    assert not unexpected, f"link(s) to files that do not exist: {unexpected}"
-
-
-def test_pending_links_are_still_pending(links: list[str]) -> None:
-    """Every entry in PENDING is still linked and still absent -- or the constant is stale."""
-    linked = {str(resolve(p).relative_to(REPO_ROOT)) for p in links}
-    for path, why in PENDING.items():
-        assert path in linked, f"PENDING lists {path} ({why}), but nothing links to it any more"
+    assert not missing, f"link(s) to files that do not exist: {missing}"
 
 
 def test_src_key_paths_are_real(text: str) -> None:
@@ -211,8 +196,6 @@ def test_src_key_paths_are_real(text: str) -> None:
     for m in SRC_RE.finditer(text):
         path, key = m.group("path"), m.group("key")
         target = resolve(path)
-        if str(target.relative_to(REPO_ROOT)) in PENDING:
-            continue
         assert target.exists(), f"[src] link to a missing file: {path}"
         if target.suffix == ".json":
             assert walk(json.loads(target.read_text()), key), f"{path} has no key path {key!r}"

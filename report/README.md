@@ -181,9 +181,9 @@ question indices shared by every mode.
 <!-- END gen:day4_ablation -->
 
 **No.** On Recall@5 the gap is −0.004 [−0.085, 0.073]
-[src](../eval/runs/bootstrap_0b435439.json "metrics.recall_at_5.difference"): the interval contains
+[src](../eval/runs/bootstrap_65bb9643.json "metrics.recall_at_5.difference"): the interval contains
 0, so these 41 questions do not separate hybrid from BM25. On MRR@5 the gap is −0.120 [−0.225,
-−0.023] [src](../eval/runs/bootstrap_0b435439.json "metrics.mrr_at_5.difference") and the interval
+−0.023] [src](../eval/runs/bootstrap_65bb9643.json "metrics.mrr_at_5.difference") and the interval
 excludes 0 — BM25 puts the right record first more often than the fusion does. Reranking hybrid's
 top 20 with a cross-encoder recovers most of the MRR gap but separates from neither, at a median
 cost of 724 ms per question [src](day4_ablation_c73b197d.md "Reranking hybrid's top 20").
@@ -580,7 +580,7 @@ generator has somewhere to write.
 | [`eval/datasets/v1.jsonl`](../eval/datasets/v1.jsonl) | `2a93182221bd` |
 | [`eval/datasets/v1_intents.jsonl`](../eval/datasets/v1_intents.jsonl) | `6a43562535c4` |
 | [`eval/runs/ablation_test_c73b197d.jsonl`](../eval/runs/ablation_test_c73b197d.jsonl) | `0ff000fe55fb` |
-| [`eval/runs/bootstrap_0b435439.json`](../eval/runs/bootstrap_0b435439.json) | `68b07e60ffb4` |
+| [`eval/runs/bootstrap_65bb9643.json`](../eval/runs/bootstrap_65bb9643.json) | `7ff1e5ee55a7` |
 | [`eval/runs/risk_coverage_test_37164723.json`](../eval/runs/risk_coverage_test_37164723.json) | `875e469b6160` |
 | [`eval/runs/conformal_83496e82.json`](../eval/runs/conformal_83496e82.json) | `27987e369aaa` |
 | [`eval/runs/conformal_eval_83496e82.json`](../eval/runs/conformal_eval_83496e82.json) | `10fe779c58c5` |
