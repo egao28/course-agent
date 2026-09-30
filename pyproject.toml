@@ -41,8 +41,20 @@ line-length = 100
 # target-version is inferred from requires-python
 
 [tool.ruff.lint]
-# keep ruff defaults, add the full pycodestyle E set (incl. E501 line length)
-extend-select = ["E"]
+# Ruff's defaults stay on (E4/E7/E9 + F): F is what measured 0 unused imports and 0 unused locals
+# in #115's audit, and it is the rule that keeps it there. Each addition below is a finding from
+# that audit, turned into something that fails the build rather than something to re-measure.
+extend-select = [
+    "E",    # the full pycodestyle E set, incl. E501 -- line-length 100 is enforced, not advisory
+    "D1",   # every module, class and function carries a docstring (#115 wrote the 148 missing ones)
+    "ERA",  # no commented-out code: the audit found 0, and this is what stops the first one
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The test names are the documentation here -- they are full sentences
+# (`test_the_line_names_only_what_would_change`), and 1,800 of them would gain nothing from a
+# docstring restating the name. D1 is enforced everywhere the *library* is read from.
+"tests/*" = ["D1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

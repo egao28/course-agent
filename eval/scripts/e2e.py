@@ -230,6 +230,7 @@ def by_bucket(lines: Sequence[Mapping[str, Any]]) -> dict[str, int]:
 
 
 def where(lines: Sequence[Mapping[str, Any]], **fields: Any) -> list[Mapping[str, Any]]:
+    """The run lines whose every named field equals the value given for it."""
     return [line for line in lines if all(line[key] == value for key, value in fields.items())]
 
 
@@ -389,6 +390,7 @@ def collect_split(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run one half end to end and write the run file; a refusal exits 1 with its reason."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--split",

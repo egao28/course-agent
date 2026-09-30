@@ -47,7 +47,12 @@ class Retriever(Protocol):
     recall depth gets the depth the fusion step was tuned for.
     """
 
-    def search(self, query: str, k: int | None = None) -> list[Hit]: ...
+    def search(self, query: str, k: int | None = None) -> list[Hit]:
+        """The top ``k`` hits for ``query``, best first, ``rank`` already filled in.
+
+        ``k`` defaults to the retriever's own ``default_k`` -- what fusion asks each side for.
+        """
+        ...
 
 
 def format_hit(hit: Hit) -> str:

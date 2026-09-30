@@ -212,6 +212,7 @@ class Config(Mapping[str, Any]):
     __slots__ = ("_data", "_full_hash", "_hash", "path")
 
     def __init__(self, data: Mapping[str, Any], path: Path | None = None) -> None:
+        """Freeze ``data`` and compute both hashes once; ``path`` is carried for ``repr`` only."""
         if not isinstance(data, Mapping):
             raise TypeError(f"config must be a mapping, got {type(data).__name__}")
         plain = _to_plain(data)
@@ -222,10 +223,12 @@ class Config(Mapping[str, Any]):
 
     @property
     def hash(self) -> str:
+        """The config hash frozen at construction -- the one that names files in ``indexes/``."""
         return self._hash
 
     @property
     def full_hash(self) -> str:
+        """The hash over every value, :data:`AFTER_THE_RUNS` included."""
         return self._full_hash
 
     def to_dict(self) -> dict[str, Any]:
@@ -233,15 +236,19 @@ class Config(Mapping[str, Any]):
         return _to_plain(self._data)
 
     def __getitem__(self, key: str) -> Any:
+        """The top-level section under ``key``, frozen -- a proxy or a tuple, never a live dict."""
         return self._data[key]
 
     def __iter__(self) -> Iterator[str]:
+        """The top-level section names, in the order the YAML declared them."""
         return iter(self._data)
 
     def __len__(self) -> int:
+        """How many top-level sections the config has."""
         return len(self._data)
 
     def __repr__(self) -> str:
+        """The hash and the source path -- never the values, which are long and often secret-ish."""
         return f"Config(hash={self._hash!r}, path={self.path})"
 
 
@@ -273,6 +280,7 @@ def source_path(cfg: Mapping[str, Any]) -> Path:
 
 
 def file_sha256(path: str | Path) -> str:
+    """The sha256 of a file's bytes, read in chunks -- what ``data.source_sha256`` is pinned to."""
     with Path(path).open("rb") as f:
         return hashlib.file_digest(f, "sha256").hexdigest()
 
@@ -499,6 +507,7 @@ def rel_to_repo(path: str | Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Print a config's hash, or with ``--source-digest`` the digest of the corpus it points at."""
     parser = argparse.ArgumentParser(description="Print the config hash of a config.yaml.")
     parser.add_argument("path", nargs="?", default=DEFAULT_CONFIG_PATH, help="config file path")
     parser.add_argument("--canonical", action="store_true", help="also print the canonical dump")

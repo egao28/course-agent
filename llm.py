@@ -58,7 +58,12 @@ class Chat(Protocol):
 
     def complete(
         self, prompt: str, *, system: str | None = None, temperature: float | None = None
-    ) -> str: ...
+    ) -> str:
+        """One prompt in, the completion text out -- no message list, no streaming, no tool calls.
+
+        ``system`` and ``temperature`` override the implementation's defaults when given.
+        """
+        ...
 
 
 # --- config ---------------------------------------------------------------------------------------
@@ -138,6 +143,11 @@ class OpenAIChat:
         max_retries: int = 5,
         timeout: float = 60.0,
     ) -> None:
+        """Build a client for ``model``, or take ``client`` as given so a test can inject a fake.
+
+        ``temperature`` and ``max_tokens`` are the per-call defaults; :meth:`complete` overrides
+        the first of them per call.
+        """
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens

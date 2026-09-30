@@ -430,6 +430,7 @@ def summary(path: Path, violations: Sequence[Violation]) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Check one JSONL eval set and print every violation; exit non-zero if any was an error."""
     parser = argparse.ArgumentParser(
         prog="python -m eval.validate",
         description="Check a JSONL eval set against eval/schema.py; print every violation.",

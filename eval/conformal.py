@@ -275,6 +275,7 @@ def run(cfg: Config, out: TextIO, runs_dir: Path = RUNS_DIR) -> Path:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Fit the threshold on the calib half and write the JSON; a refusal exits 1 with its reason."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR,
                         help="where the calib CSV is, and where the JSON goes")

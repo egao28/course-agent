@@ -345,6 +345,11 @@ def plan(cfg: Config, rebuild: bool = False, client: chromadb.ClientAPI | None =
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Embed ``data/chunks.jsonl`` into the collection this config names.
+
+    ``--dry-run`` reports the same plan without calling the API or writing anything, which is how
+    the cost of a ``--rebuild`` is checked before it is paid.
+    """
     parser = argparse.ArgumentParser(
         description="Embed data/chunks.jsonl into the Chroma collection named by the config hash."
     )

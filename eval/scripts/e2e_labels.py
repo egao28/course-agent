@@ -382,6 +382,14 @@ def main(
     known: frozenset[str] | None = None,
     chat: Chat | None = None,
 ) -> int:
+    """Label one half's answers: exactly one of ``--judge``, ``--review``, ``--stats``, CSV.
+
+    Requiring exactly one is the point -- the judge pass and the human pass write different logs,
+    and a run that did both would leave no record of which verdict came first.
+
+    ``out``, ``input_fn``, ``runs_dir``, ``logs``, ``known`` and ``chat`` are injected so a test
+    can drive the whole loop without a terminal, a model or the committed runs.
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", required=True, choices=SPLITS, help="which half to label")
     parser.add_argument("--judge", action="store_true", help="the LLM judge's first pass")

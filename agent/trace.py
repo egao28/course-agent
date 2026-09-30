@@ -146,6 +146,7 @@ def calibration(gate: Mapping[str, Any]) -> str:
 
 
 def threshold_of(gate: Mapping[str, Any]) -> float:
+    """The gate's threshold as a float, with "no threshold" read as ``inf`` -- answer nothing."""
     return math.inf if gate.get("threshold") is None else float(gate["threshold"])
 
 

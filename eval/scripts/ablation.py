@@ -78,6 +78,7 @@ class Selection(NamedTuple):
     skipped: Counter[str]
 
     def counts(self) -> dict[str, int]:
+        """Scored rows per bucket, buckets with none left out."""
         scored = Counter(row.bucket for row in self.rows)
         return {bucket: scored[bucket] for bucket in BUCKETS if scored[bucket]}
 
@@ -197,6 +198,7 @@ def ablate(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run one half through all three modes and write the run file; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--split",

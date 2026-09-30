@@ -333,10 +333,12 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
 
 
 def pct(x: float) -> str:
+    """A rate as a percentage to one decimal place."""
     return f"{100 * x:.1f}%"
 
 
 def signal_list(names: Sequence[str]) -> str:
+    """Names joined for prose, each in backticks."""
     return ", ".join(f"`{name}`" for name in names)
 
 
@@ -362,6 +364,11 @@ def tie_groups(points: Sequence[Mapping[str, Any]]) -> list[tuple[float, int]]:
 
 
 def render_header(facts: Facts) -> str:
+    """Title, the four keys, the headline AUROC, and the digest of every input.
+
+    The chosen signal and the highest-AUROC signal are both named, because on the test half they
+    need not be the same one and reporting only the winner would be picking it after the fact.
+    """
     cfg = facts.cfg
     test = facts.halves[REPORTED]
     reading = facts.reading
@@ -400,6 +407,11 @@ def render_header(facts: Facts) -> str:
 
 
 def conformal_headline(facts: Facts) -> str:
+    """One sentence comparing the conformal gate, a fixed 0.7, and answering everything.
+
+    A fit that accepted no threshold is said as exactly that -- the gate answers nothing -- rather
+    than reported as an error rate over an empty set.
+    """
     reading = facts.reading
     chosen = reading["chosen"]
     block = reading["signals"][chosen]
@@ -424,6 +436,11 @@ def conformal_headline(facts: Facts) -> str:
 
 
 def render_setup(facts: Facts) -> str:
+    """Rows and answered rows per bucket and half, the nulls, and what the two runs cost.
+
+    Raises ``ValueError`` if the calib and test runs disagree on model, retrieval mode, sampling
+    or prompt digests: the halves are only comparable when the run behind them was the same one.
+    """
     cfg = facts.cfg
     calib, test = facts.halves["calib"], facts.halves["test"]
     counts = {half: bucket_counts(facts.halves[half]) for half in SPLITS}
@@ -515,6 +532,7 @@ def render_setup(facts: Facts) -> str:
 
 
 def render_labels(facts: Facts) -> str:
+    """The judge-versus-human confusion per half, who reviewed, and correct/answered per bucket."""
     rows = []
     for half in SPLITS:
         meta = facts.halves[half].table.meta
@@ -563,6 +581,7 @@ def render_labels(facts: Facts) -> str:
 
 
 def render_rq2(facts: Facts) -> str:
+    """RQ2: the risk-coverage figure, #89's own table verbatim, and the notes that qualify it."""
     rc = facts.rc
     figure = Path(rc["figure"])
     link = figure.relative_to("report").as_posix() if figure.parts[0] == "report" else rc["figure"]
@@ -630,6 +649,7 @@ def rq2_notes(facts: Facts) -> list[str]:
 
 
 def render_rq3(facts: Facts) -> str:
+    """RQ3: #91's tables, why the calib fit landed where it did, and what 0.7 means per scale."""
     reading, fit = facts.reading, facts.fit
     lines = [
         "## 4. RQ3: conformal against a fixed 0.7",
@@ -666,6 +686,11 @@ def render_rq3(facts: Facts) -> str:
 
 
 def render_wiring(facts: Facts) -> str:
+    """Which gate the agent actually runs, and what switching to the conformal one would cost.
+
+    The live method, not the fitted one, is what this section leads with: the conformal gate is
+    built and pinned but dormant, and a report that described it as running would be wrong.
+    """
     cfg, switched, gate = facts.cfg, facts.switched, facts.gate
     live = check_method(cfg)
     nodes_live = node_names(cfg)
@@ -705,6 +730,7 @@ def render_wiring(facts: Facts) -> str:
 
 
 def render_limitations(facts: Facts) -> str:
+    """What these numbers cannot support: tie structure, empty buckets, and the interval's width."""
     test = facts.halves[REPORTED]
     reading, rc = facts.reading, facts.rc
     every = reading["answer_everything"]
@@ -793,6 +819,7 @@ generator refuses to write if any sha256 in that chain has moved.
 
 
 def render_report(facts: Facts) -> str:
+    """Every section joined, in the order the report reads."""
     sections = [
         render_header(facts),
         render_setup(facts),
@@ -807,6 +834,11 @@ def render_report(facts: Facts) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Write the Day 5 report, or with ``--check`` list its inputs and with ``--dry-run`` print it.
+
+    The file is named by the conformal key, so a refitted threshold writes a new report rather
+    than overwriting the one its numbers no longer belong to.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.day5_report",
         description="Write report/day5_signals_{conformal_key}.md from Day 5's committed runs.",

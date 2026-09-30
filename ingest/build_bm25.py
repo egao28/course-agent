@@ -107,7 +107,6 @@ def check_bm25_config(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
 def index_payload(
     cfg: Mapping[str, Any],
     chunks: Sequence[Mapping[str, Any]],
-    corpus: Sequence[Sequence[str]],
     bm25: BM25Okapi,
 ) -> dict[str, Any]:
     """Everything the pickle holds: how it was built, what it holds, and the index itself.
@@ -209,7 +208,7 @@ def build(cfg: Config) -> dict[str, Any]:
     started = time.perf_counter()
     corpus = corpus_tokens(chunks, get_tokenizer(cfg), code_boost(cfg))
     bm25 = BM25Okapi(corpus, k1=float(cfg["bm25"]["k1"]), b=float(cfg["bm25"]["b"]))
-    path = write_index(bm25_path(cfg, chunk_key(cfg)), index_payload(cfg, chunks, corpus, bm25))
+    path = write_index(bm25_path(cfg, chunk_key(cfg)), index_payload(cfg, chunks, bm25))
     tally = Tally(
         docs=len(chunks),
         terms=len(bm25.idf),
@@ -241,6 +240,7 @@ def summarize(result: Mapping[str, Any]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Build the BM25 index from ``data/chunks.jsonl`` and print what went into it."""
     parser = argparse.ArgumentParser(
         description="Tokenize data/chunks.jsonl into the BM25 index named by the bm25 key."
     )

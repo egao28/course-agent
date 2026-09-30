@@ -175,10 +175,12 @@ class Candidate(NamedTuple):
 
     @property
     def id(self) -> str:
+        """The row's id, which is what a log verdict names."""
         return self.item.id
 
     @property
     def where(self) -> str:
+        """``path:line`` for the draft this row was read from, printed beside it in the queue."""
         return f"{rel_to_repo(self.source)}:{self.line}"
 
 
@@ -913,6 +915,7 @@ class Promotion(NamedTuple):
 
     @property
     def ok(self) -> bool:
+        """Whether ``--promote`` may write: nothing unreviewed, no orphan, no validation error."""
         return not self.unreviewed and not self.orphans and not any(
             v.level == "error" for v in self.violations
         )
@@ -1061,6 +1064,11 @@ def suggestions(where: str | None, candidates: Sequence[Candidate]) -> dict[str,
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Judge the drafted rows, or with ``--stats`` / ``--promote`` report on or write the dataset.
+
+    ``--promote`` refuses while any drafted row is unreviewed: a partial dataset that looks whole
+    is the one failure a reader of ``v1.jsonl`` cannot see.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.review",
         description="Read every drafted eval row, judge it, log what changed, and promote what "

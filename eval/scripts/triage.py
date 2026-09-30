@@ -132,6 +132,7 @@ class Triage(NamedTuple):
     config_hash: str = ""
 
     def to_json(self) -> dict[str, Any]:
+        """The reading as it is written to the file, provenance fields included."""
         return {
             "id": self.id,
             "suggested": self.suggested,
@@ -571,6 +572,11 @@ def summary(run: Run, path: Path, total: int) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Read every drafted row with a model and write an advisory suggestion per row.
+
+    A draft that does not parse stops the run before anything is written: a triage of a row that
+    does not parse is nothing. Exits 1 only when every attempted row failed.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.triage",
         description="Read every drafted row against eval/GUIDELINES.md with a model, and write "

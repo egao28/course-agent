@@ -192,6 +192,7 @@ def format_listing(tools: Sequence[Tool]) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Serve the three tools over stdio, or with ``--list`` print their schemas and exit."""
     parser = argparse.ArgumentParser(
         prog="python -m agent.mcp_server",
         description="Serve the three course tools over MCP (stdio), or list what a client sees.",

@@ -102,6 +102,11 @@ class BM25Retriever:
     """
 
     def __init__(self, cfg: Config, index: Mapping[str, Any] | None = None) -> None:
+        """Open the index named by ``cfg`` and check it was built from these settings.
+
+        ``index`` is taken as given when passed, which is how a test runs against a handful of
+        chunks; the check runs either way, so an injected index cannot skip it.
+        """
         self.cfg = cfg
         #: Default recall depth: what fusion (#7) asks each retriever for.
         self.default_k = top_k_each(cfg)
@@ -143,6 +148,7 @@ class BM25Retriever:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Query the BM25 index alone and print the hits, with ``--terms`` for the query's tokens."""
     parser = argparse.ArgumentParser(description="Query the BM25 index and print the top hits.")
     parser.add_argument("query", nargs="+", help="query text")
     parser.add_argument(
