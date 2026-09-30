@@ -190,6 +190,7 @@ class Overturn(NamedTuple):
 
     @property
     def changed(self) -> bool:
+        """Whether the second reading landed on a different verdict than the first."""
         return self.first != self.second
 
 
@@ -226,14 +227,17 @@ class Result(NamedTuple):
 
     @property
     def rate(self) -> float | None:
+        """Overturns over rows actually re-read, or ``None`` when none has been -- never 0.0."""
         return len(self.changed) / self.reread if self.reread else None
 
     @property
     def interval(self) -> tuple[float, float]:
+        """A Wilson interval on the rate; ``(0.0, 1.0)`` when nothing has been re-read yet."""
         return wilson(len(self.changed), self.reread) if self.reread else (0.0, 1.0)
 
     @property
     def done(self) -> bool:
+        """Whether every row the sample asked for has been re-read."""
         return self.reread >= self.asked
 
 
@@ -327,6 +331,11 @@ def render_result(found: Result, out: TextIO) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Draw the re-read sample, or with ``--result`` report what the second reading overturned.
+
+    Redrawing over a sample whose re-read has begun needs ``--force``, and exits 1 without it: a
+    fresh draw would report an overturn rate over rows nobody was asked to read.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.recheck",
         description="Draw a stratified sample of already-judged rows for a careful second "

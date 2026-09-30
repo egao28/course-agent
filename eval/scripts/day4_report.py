@@ -77,6 +77,7 @@ class Input(NamedTuple):
 
     @property
     def exists(self) -> bool:
+        """Whether the artifact is on disk -- the whole of what ``--check`` reports per row."""
         return self.path.exists()
 
 
@@ -115,6 +116,7 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
 
 
 def missing(cfg: Config, src: Sources) -> list[Input]:
+    """The inputs that are not on disk yet, in pipeline order."""
     return [one for one in inputs(cfg, src) if not one.exists]
 
 
@@ -250,21 +252,29 @@ def num(x: float, signed: bool = False) -> str:
 
 
 def cell(interval: Mapping[str, Any], signed: bool = False) -> str:
+    """One table cell: ``point [lo, hi]``, marked ``(degenerate)`` when every resample agreed."""
     text = f"{num(interval['point'], signed)} [{num(interval['lo'])}, {num(interval['hi'])}]"
     return text + (" (degenerate)" if interval["degenerate"] else "")
 
 
 def verdict(gap: Mapping[str, Any]) -> str:
+    """The sentence for a difference, said as what its interval does rather than as a p-value."""
     return (
         "significant (CI excludes 0)" if gap["significant"] else "not significant (CI contains 0)"
     )
 
 
 def subtrahends(result: Mapping[str, Any]) -> list[str]:
+    """What hybrid was compared against, per metric -- they can differ, since calib picks each."""
     return [result["metrics"][m]["difference"]["subtrahend"] for m in bs.METRICS]
 
 
 def render_header(facts: Facts) -> str:
+    """The title and the provenance block: n, dataset digest, config, run names, bootstrap.
+
+    The rerank lines appear only when the run is there, so a report written without the stretch
+    row never claims one.
+    """
     r = facts.result
     n = r["n"]["test"]
     split = ", ".join(f"{b} {facts.bucket_n[b]}" for b in facts.bucket_n)
@@ -316,6 +326,12 @@ def render_header(facts: Facts) -> str:
 
 
 def render_table(facts: Facts) -> str:
+    """The main result table and the sentence per metric that says how to read its interval.
+
+    The difference row is labelled with the single mode's name when calib picked the same one for
+    both metrics, and per metric when it did not. Degenerate intervals get their own line: no
+    variance observed is not the same claim as certainty.
+    """
     r = facts.result
     metrics = r["metrics"]
     rows = [
@@ -387,6 +403,7 @@ def render_table(facts: Facts) -> str:
 
 
 def render_strongest(facts: Facts) -> str:
+    """Which single mode each metric is compared against, its calib means, and why calib picks."""
     out = [
         "## Strongest single mode",
         "",
@@ -409,6 +426,7 @@ def render_strongest(facts: Facts) -> str:
 
 
 def render_buckets(facts: Facts) -> str:
+    """Point estimates per bucket, and the arithmetic for why no interval is printed beside them."""
     headers = ["mode"] + [
         f"{b} {LABELS[m]} (n = {facts.bucket_n[b]})" for b in facts.by_bucket for m in bs.METRICS
     ]
@@ -493,6 +511,7 @@ def render_rerank(facts: Facts) -> str:
 
 
 def render_failures(facts: Facts) -> str:
+    """How often hybrid misses a gold id, where that is logged, and how far the live pass drifts."""
     f = facts.failures
     total = sum(f["failing"].values())
     counts = ", ".join(f"{f['failing'][b]} of {f['scored'][b]} `{b}`" for b in f["scored"])
@@ -520,6 +539,7 @@ def render_failures(facts: Facts) -> str:
 
 
 def render_definitions(facts: Facts) -> str:
+    """What the metric names mean here: fractional recall@k, MRR@k, and the cut before both."""
     multi = ", ".join(f"{facts.multi_gold[b]} of {facts.bucket_n[b]} `{b}`" for b in facts.bucket_n)
     return "\n".join(
         [
@@ -563,6 +583,7 @@ records its own timings. The committed run files are the sample this table descr
 
 
 def render_report(facts: Facts) -> str:
+    """Every section joined, with the rerank one present only when there is a rerank run."""
     sections = [
         render_header(facts),
         render_table(facts),
@@ -577,6 +598,7 @@ def render_report(facts: Facts) -> str:
 
 
 def summary(facts: Facts, path: Path) -> str:
+    """The few lines printed to the terminal after writing: the gaps, their verdicts, the path."""
     metrics = facts.result["metrics"]
     out = [f"config hash {facts.cfg.hash}, test n = {facts.result['n']['test']}"]
     for m in bs.METRICS:
@@ -594,6 +616,11 @@ def summary(facts: Facts, path: Path) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Write the Day 4 report, or with ``--check`` list its inputs and with ``--dry-run`` print it.
+
+    A missing input is reported as the command that makes it and exits 1, rather than writing a
+    report with a section silently left out.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.day4_report",
         description="Write report/day4_ablation_{hash}.md from the committed run files and the "

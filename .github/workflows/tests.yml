@@ -30,9 +30,11 @@ jobs:
     timeout-minutes: 20
     steps:
       # fetch-depth: 0 rather than the default shallow clone, because one test reads
-      # `git show origin/main:data/courses.json` -- the 1,415 variable-credit courses
-      # GUIDELINES.md rule 2 quotes -- and skips itself where git cannot answer. A shallow
-      # clone has no origin/main, and a test that only ever runs on a laptop is not a test.
+      # `git show c9ff4de:data/courses.json` -- the 1,415 variable-credit courses GUIDELINES.md
+      # rule 2 quotes -- and skips itself where git cannot answer. That commit is reachable from
+      # main's first-parent history but not from a shallow clone, and a test that only ever runs
+      # on a laptop is not a test. It is a pinned commit rather than a branch because #126 left
+      # no branch carrying the range fields (#128).
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

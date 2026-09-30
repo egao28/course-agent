@@ -380,6 +380,7 @@ class StandInDrafter:
     model = "stand-in"
 
     def __init__(self, bucket: str, per_batch: int = DEFAULT_PER_BATCH) -> None:
+        """Take the bucket whose canned shape to produce, and how many rows per batch."""
         if bucket not in DRAFTABLE:
             raise ValueError(
                 f"unknown bucket {bucket!r}; the three drafted: {', '.join(DRAFTABLE)}"
@@ -491,10 +492,12 @@ class Batch(NamedTuple):
 
     @property
     def doc_ids(self) -> tuple[str, ...]:
+        """The batch's doc ids in the order the records were drawn."""
         return tuple(chunk["doc_id"] for chunk in self.chunks)
 
     @property
     def ids(self) -> frozenset[str]:
+        """The same ids as a set, for checking a drafted gold id came out of this batch."""
         return frozenset(self.doc_ids)
 
 
@@ -860,6 +863,7 @@ class Draft(NamedTuple):
     provenance: dict[str, Any]
 
     def to_json(self) -> dict[str, Any]:
+        """The row as it is written back: the six schema fields, then ``provenance``."""
         return {**row_json(self.item), "provenance": self.provenance}
 
 
@@ -989,14 +993,17 @@ class RunReport(NamedTuple):
 
     @property
     def kept(self) -> int:
+        """How many rows survived every check across all batches."""
         return sum(len(result.kept) for result in self.results)
 
     @property
     def failed(self) -> list[BatchResult]:
+        """The batches that raised, so the summary can name them instead of hiding a short run."""
         return [result for result in self.results if result.error]
 
     @property
     def drops(self) -> dict[str, int]:
+        """Dropped rows per reason, reasons with no drops left out."""
         counts = {reason: 0 for reason in DROP_REASONS}
         for result in self.results:
             for drop in result.dropped:
@@ -1304,6 +1311,11 @@ def summary(cfg: Config, report: RunReport, bucket: str, batches: int) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Draft one bucket into ``eval/datasets/drafts/`` and print what was kept and dropped.
+
+    Exits 1 if a batch failed or if the file does not validate afterwards. The second case is a
+    bug in this script rather than a bad draft: every row is checked before it is written.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.draft_items",
         description="Draft eval questions from ten real course records at a time, seeded and "

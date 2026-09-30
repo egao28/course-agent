@@ -126,6 +126,7 @@ def intent_section(path: Path = GUIDELINES_PATH) -> str:
 
 
 def section_sha256(path: Path = GUIDELINES_PATH) -> str:
+    """The digest of :func:`intent_section` -- what the meta stamps, so edited rules show up."""
     return hashlib.sha256(intent_section(path).encode("utf-8")).hexdigest()
 
 
@@ -252,6 +253,7 @@ def validate(
 
 
 def read_meta(sidecar: Path) -> dict[str, Any] | None:
+    """The sidecar's ``.meta.json`` as a dict, or ``None`` when it has never been stamped."""
     path = Path(sidecar).with_suffix(".meta.json")
     if not path.exists():
         return None
@@ -299,6 +301,7 @@ def stamp(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Check the gold-intent sidecar, and with ``--stamp`` write its meta if it has no errors."""
     parser = argparse.ArgumentParser(
         prog="python -m eval.intents",
         description="Check the test half's gold intents (#102); with --stamp, also write the meta.",

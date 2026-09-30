@@ -1842,7 +1842,7 @@ the row, which is the thing this pass exists to not do.
 |---|---|
 | a gold id the validator rejects | #54 — shown here while the reviewer can still fix it, rather than at promotion |
 | more than four cited records | "Which bucket": past four it is a list question, so narrow it or drop it |
-| a credit question | rule 2 — 1,415 courses have a credit *range* and a single number in the chunk. This stack's export cannot say which, so the flag names the course and prints the one-liner over `origin/main`; once [#17](../../issues/17) lands it names the course outright |
+| a credit question | rule 2 — 1,415 courses have a credit *range* and a single number in the chunk. No export in the tree can say which, so the flag names the course and prints the one-liner over `c9ff4de`, the last commit that carried the range fields ([#128](../../issues/128)); once [#17](../../issues/17) is back in the tree it names the course outright |
 | #56's top-decile overlap | the question may be retrievable by its own wording, which inflates Day 4's recall |
 | a code in the answer that no cited chunk carries | check 2, mechanically: a citation about the right topic is still the wrong id |
 

@@ -97,10 +97,12 @@ class Run(NamedTuple):
 
     @property
     def intent_ok(self) -> bool:
+        """Whether the router landed on the label the query was written to reach."""
         return self.state.get("intent") == self.row.expected_intent
 
     @property
     def exit_ok(self) -> bool:
+        """Whether the graph left by the exit the query was written to reach."""
         return self.state.get("exit") == self.row.expected_exit
 
 
@@ -551,6 +553,11 @@ def summary(cfg: Config, runs: Sequence[Run], path: Path, fake_model: bool) -> s
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the ten smoke queries and write the report; exits 1 if an exit never fired.
+
+    The report is written either way: Day 2's acceptance is that all three exits fire over this
+    set, and a run that failed it is still the evidence for saying so.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.day2_smoke",
         description="Run Day 2's ten queries end to end and write report/day2_smoke_{hash}.md.",

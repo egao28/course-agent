@@ -60,6 +60,7 @@ class Settings(NamedTuple):
 
 
 def fields_of(template: str) -> set[str]:
+    """The named ``{}`` placeholders in a format template, so a prompt can be checked before use."""
     return {name for _, name, _, _ in Formatter().parse(template) if name is not None}
 
 

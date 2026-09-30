@@ -505,6 +505,7 @@ class Corpus(NamedTuple):
     named: Mapping[str, tuple[str, ...]]
 
     def has(self, code: str) -> bool:
+        """Whether the export offers this code this term."""
         return code in self.codes
 
 
@@ -1087,6 +1088,11 @@ def render(violations: Sequence[Violation], where: str) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Write the unanswerable rows and print the summary; exits 1 if the table or the file is wrong.
+
+    Both failure modes are bugs in this script rather than bad rows: the hand-written table is
+    checked against the live corpus, and every row is validated before it is written.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.build_unanswerable",
         description="Check, score and write the 25 constructed unanswerable rows into "

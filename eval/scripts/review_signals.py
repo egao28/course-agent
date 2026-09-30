@@ -109,6 +109,7 @@ def now() -> str:
 
 
 def action_of(judge_correct: bool | None, correct: bool) -> str:
+    """What a human verdict did to the judge's: accepted, overturned, or had none to act on."""
     if judge_correct is None:
         return "no_judge_verdict"
     return "accepted_judge" if judge_correct == correct else "overturned"
@@ -171,10 +172,12 @@ class Row(NamedTuple):
 
     @property
     def id(self) -> str:
+        """The eval row's id, as the run line carries it."""
         return self.line["id"]
 
     @property
     def answer_sha256(self) -> str:
+        """The digest of the answer text, which is what a stored verdict is pinned to."""
         return sha256_text(self.line["answer"])
 
 
@@ -250,10 +253,16 @@ def status(rows: Sequence[Row], entries: Sequence[Mapping[str, Any]], split: Spl
 
 
 def word(verdict: bool | None) -> str:
+    """A verdict as the word the reviewer reads; ``None`` is an unparsed judgement, not a "no"."""
     return "unparsed" if verdict is None else "correct" if verdict else "incorrect"
 
 
 def render_row(row: Row, position: int, total: int, seen: Mapping[str, Any] | None) -> str:
+    """One row as the reviewer sees it: question, gold, answer, the judge, and any earlier verdict.
+
+    A draft the citation check discarded is flagged, because the reviewer is then judging text the
+    user never saw and should know that before calling it correct.
+    """
     line = row.line
     lines = [
         RULE,
@@ -290,6 +299,7 @@ def render_row(row: Row, position: int, total: int, seen: Mapping[str, Any] | No
 
 
 def prompt_for(judge_correct: bool | None) -> str:
+    """The input line, offering ``[a]gree`` only when there is a judge verdict to agree with."""
     agree = "[a]gree with judge  " if judge_correct is not None else ""
     return f"correct?  {agree}[y]es  [n]o  [q]uit > "
 
@@ -393,6 +403,7 @@ def agreement(rows: Sequence[Row], verdicts: Mapping[str, Mapping[str, Any]]) ->
 
 
 def render_agreement(result: Mapping[str, Any]) -> str:
+    """Progress per bucket and the judge-by-human confusion, as fixed-width terminal text."""
     lines = [
         (
             f"{'bucket':<14}{'rows':>6}{'reviewed':>10}{'accepted':>10}{'overturned':>12}"
@@ -421,6 +432,7 @@ def render_agreement(result: Mapping[str, Any]) -> str:
 
 
 def cell(value: Any) -> str:
+    """One CSV value: ``None`` as empty, a bool as 1/0, anything else as ``str``."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -505,6 +517,14 @@ def main(
     log_path: Path | None = None,
     known: frozenset[str] | None = None,
 ) -> int:
+    """Review one half's answers, or with ``--stats`` / ``--write-csv`` report on what is reviewed.
+
+    ``--reviewer`` is required for a reviewing sitting and not for the two reporting modes: every
+    verdict records who gave it, and a report of existing verdicts adds none.
+
+    ``out``, ``input_fn``, ``runs_dir``, ``log_path`` and ``known`` are injected so a test can run
+    the whole loop without a terminal or the committed runs.
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", required=True, choices=SPLITS, help="which half to review")
     parser.add_argument("--reviewer", help="your name, recorded on every verdict you give")

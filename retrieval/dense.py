@@ -159,6 +159,11 @@ class DenseRetriever:
         collection: Any | None = None,
         embedder: Embedder | None = None,
     ) -> None:
+        """Open the collection named by ``cfg`` and check it was built from these settings.
+
+        ``collection`` and ``embedder`` are taken as given when passed, which is how a test runs
+        without Chroma or an API key; the check runs either way, so neither can skip it.
+        """
         self.cfg = cfg
         #: Default recall depth: what fusion (#7) asks each retriever for.
         self.default_k = top_k_each(cfg)
@@ -183,6 +188,7 @@ class DenseRetriever:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Query the dense index alone and print the hits, naming the collection they came from."""
     parser = argparse.ArgumentParser(description="Query the dense index and print the top hits.")
     parser.add_argument("query", nargs="+", help="query text")
     parser.add_argument(

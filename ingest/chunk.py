@@ -656,6 +656,11 @@ def summarize(result: Mapping[str, Any]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Render every course into ``data/chunks.jsonl``, or with ``--show CODE`` print just one.
+
+    ``--show`` prints the doc id, both metadata shapes and the rendered text for a single course
+    and writes nothing -- the way to read what a template change actually did before rebuilding.
+    """
     parser = argparse.ArgumentParser(
         description="Chunk data/courses.json into data/chunks.jsonl, one chunk per course."
     )

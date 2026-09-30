@@ -175,10 +175,12 @@ class Candidate(NamedTuple):
 
     @property
     def id(self) -> str:
+        """The row's id, which is what a log verdict names."""
         return self.item.id
 
     @property
     def where(self) -> str:
+        """``path:line`` for the draft this row was read from, printed beside it in the queue."""
         return f"{rel_to_repo(self.source)}:{self.line}"
 
 
@@ -451,10 +453,12 @@ CHECKS = (
 )
 
 #: The one-liner ``eval/GUIDELINES.md`` gives for the variable-credit courses, repeated on screen
-#: when a credit question comes up and this branch's export cannot answer it. See
+#: when a credit question comes up and the working tree's export cannot answer it. The ref is
+#: :data:`eval.scripts.triage.CREDIT_RANGE_REF`: no branch carries the fields any more, so this
+#: names the last commit that does rather than a branch that moved (#128). See
 #: :func:`credit_ranges`.
 CREDIT_COMMAND = (
-    "git show origin/main:data/courses.json | jq -r "
+    "git show c9ff4de:data/courses.json | jq -r "
     "'.[]|select(.creditsMin!=.creditsMax)|.code'"
 )
 
@@ -911,6 +915,7 @@ class Promotion(NamedTuple):
 
     @property
     def ok(self) -> bool:
+        """Whether ``--promote`` may write: nothing unreviewed, no orphan, no validation error."""
         return not self.unreviewed and not self.orphans and not any(
             v.level == "error" for v in self.violations
         )
@@ -1059,6 +1064,11 @@ def suggestions(where: str | None, candidates: Sequence[Candidate]) -> dict[str,
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Judge the drafted rows, or with ``--stats`` / ``--promote`` report on or write the dataset.
+
+    ``--promote`` refuses while any drafted row is unreviewed: a partial dataset that looks whole
+    is the one failure a reader of ``v1.jsonl`` cannot see.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.review",
         description="Read every drafted eval row, judge it, log what changed, and promote what "

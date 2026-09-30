@@ -29,6 +29,12 @@ def duration(ms: float) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Run one query in one mode and print its hits, then what opening the indexes cost.
+
+    The opening time is printed separately and only when it rounds to a millisecond or more: it is
+    paid once per process, so folding it into the query time would make every single-query run
+    look far slower than the same query inside a report.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m retrieval",
         description="Query the course corpus in one of three modes and print the top hits.",

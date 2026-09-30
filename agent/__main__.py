@@ -85,6 +85,12 @@ def duration(ms: float) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    """Run one question through the graph and print the trace, then the run's provenance line.
+
+    ``--fake-model`` is refused without ``--intent``: the stand-in answers out of the evidence in
+    the prompt and has no label to hand the router, so a run that let it classify would report a
+    routing decision nobody made.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m agent",
         description="Ask the course agent one question and print the whole run.",

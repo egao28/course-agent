@@ -225,10 +225,12 @@ class Failure(NamedTuple):
 
     @property
     def id(self) -> str:
+        """The eval row's id, as #104's joined row carries it."""
         return self.row.id
 
     @property
     def bucket(self) -> str:
+        """The row's dataset bucket, which is what the distribution table is grouped by."""
         return self.row.bucket
 
 
@@ -586,6 +588,7 @@ def render_failure(
 
 
 def prompt_for(proposal: Proposal) -> str:
+    """The input line: confirm what the rules proposed, pick a class by number, or other."""
     keys = "  ".join(f"[{rule.number}] {rule.name}" for rule in RULES)
     return f"class?  [c]onfirm {proposal.cls}  {keys}  [o]ther  [q]uit > "
 
@@ -794,6 +797,14 @@ def main(
     input_fn: Callable[[str], str] = input,
     runs_dir: Path = RUNS_DIR,
 ) -> int:
+    """Attribute the failures, or report what the rules propose, progress, or the final table.
+
+    Printing is the default and writes nothing; ``--review`` needs ``--reviewer``, because every
+    class records who chose it, and the rules only ever propose one.
+
+    ``out``, ``input_fn`` and ``runs_dir`` are injected so a test can drive the loop without a
+    terminal.
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--review", action="store_true", help="attribute the rows, one by one")
     parser.add_argument("--reviewer", help="your name, recorded on every row you decide")

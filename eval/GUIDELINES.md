@@ -36,11 +36,12 @@ gold id can, and it is not a v1 row (boundary case **U2**).
    hours."* Codes keep the catalog's space (`CS 225`); only `gold_doc_ids` use the dash.
 2. **Credit counts: fixed-value courses only.** The chunk prints `Credits:` as a single number
    even where the catalog gives a range — AAS 465 is "3 OR 4 hours." and its chunk says
-   `Credits: 3`. 1,415 of 4,502 courses are affected ([#17](../../../issues/17) is fixed on `main`,
-   not in this stack), so for those any credit answer is wrong about either the catalog or the
-   corpus and the row is deleted, not repaired. The list, when in doubt:
+   `Credits: 3`. 1,415 of 4,502 courses are affected ([#17](../../../issues/17) is merged in
+   history but out of the tree), so for those any credit answer is wrong about either the catalog
+   or the corpus and the row is deleted, not repaired. The list, when in doubt — read out of the
+   last export that carried the range fields, since no branch does now ([#128](../../../issues/128)):
    ```bash
-   git show origin/main:data/courses.json | jq -r '.[]|select(.creditsMin!=.creditsMax)|.code'
+   git show c9ff4de:data/courses.json | jq -r '.[]|select(.creditsMin!=.creditsMax)|.code'
    ```
 3. **Prerequisite disjunctions follow the sentence, never the code list.** `prereq_codes` has the
    booleans flattened out of it — 744 of the 1,135 raw statements say "or" or "one of" — so

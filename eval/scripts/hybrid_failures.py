@@ -192,6 +192,7 @@ def load_failures(cfg: Config, run_path: Path, runs_dir: Path = RUNS_DIR) -> dic
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Log the rows where hybrid misses a gold id, with ranks at depth; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", type=Path, default=DATASET_PATH, help="the frozen dataset")
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help="runs and the log")
