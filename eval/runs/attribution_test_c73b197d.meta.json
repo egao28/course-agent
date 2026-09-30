@@ -1,0 +1,43 @@
+{
+  "actions": {
+    "confirmed": 20,
+    "overrode_proposal": 0,
+    "overrode_rule": 0
+  },
+  "attribution": "eval/runs/attribution_test_c73b197d.jsonl",
+  "by_class": {
+    "evidence_misread": 8,
+    "intent_misjudged": 0,
+    "other": 0,
+    "overconfident": 2,
+    "retrieval_failure": 10
+  },
+  "complete": true,
+  "config_hash": "c73b197d",
+  "csv": "eval/runs/e2e_test_c73b197d.csv",
+  "csv_sha256": "f1a76626029c022791b533364efe59cd0c5e93ce5497603f12f23d25bede4eca",
+  "dataset": "eval/datasets/v1.jsonl",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "intents": "eval/datasets/v1_intents.jsonl",
+  "intents_sha256": "6a43562535c458378405e47f9196981dfeb9c76f29b75c1d3532597029b387cc",
+  "metrics": "eval/runs/e2e_metrics_c73b197d.json",
+  "metrics_sha256": "5c0a814e73062c295b76af6636f299d9b1c65480f70660392b27d47a52901d53",
+  "n_attributed": 20,
+  "n_correct": 43,
+  "n_failures": 20,
+  "n_rows": 63,
+  "reading": "verdict_backed",
+  "reviewers": {
+    "eve": 20
+  },
+  "rules": [
+    "Intent misjudged: the predicted `intent` is not in `gold_intents`.",
+    "Retrieval failure: the row has `gold_doc_ids`, and none of them is in `evidence_doc_ids`.",
+    "Evidence misread: the gold evidence was in the prompt, and the answer is still wrong (a wrong fact, a dropped requirement, a wrong citation).",
+    "Overconfident: answered when it should have declined or asked (a false release), with the intent right and nothing to misread."
+  ],
+  "run": "eval/runs/e2e_test_c73b197d.jsonl",
+  "run_sha256": "482074c878a487a8154a205fdc6c78080bef3a5a672df82861e51c31a43a1c18",
+  "sha256": "750960646a69581acc542041f1cc854e23ec411c9119c5697e47d556bc164dfe",
+  "split": "test"
+}
