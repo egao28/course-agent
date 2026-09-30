@@ -117,6 +117,9 @@ def prompts(cfg: Mapping[str, Any]) -> dict[str, str]:
 
 
 class Parsed(NamedTuple):
+    """A judge reply read apart: the verdict, and the reason it gave for it."""
+
+    #: ``None`` when the reply did not parse -- an unparsed judgement, not a "no".
     verdict: bool | None
     rationale: str | None
 
@@ -154,6 +157,7 @@ def read_run(path: Path) -> list[dict[str, Any]]:
 
 
 def gold_by_id(rows: Sequence[EvalItem]) -> dict[str, EvalItem]:
+    """The dataset keyed by row id, for joining a run line back to its gold answer."""
     return {row.id: row for row in rows}
 
 
@@ -263,6 +267,7 @@ def judge_split(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Judge one half's answers with the model and write the verdicts; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", required=True, choices=SPLITS, help="which half to judge")
     parser.add_argument("--dataset", type=Path, default=DATASET_PATH, help="a frozen dataset")

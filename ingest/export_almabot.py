@@ -561,6 +561,7 @@ def export(cfg: Config) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Re-export the catalog CSV into ``data/`` and print the three files it wrote."""
     parser = argparse.ArgumentParser(
         description="Re-export the catalog CSV into data/ (full desc + term), for retrieval."
     )

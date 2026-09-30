@@ -78,6 +78,7 @@ class Interval(NamedTuple):
 
     @property
     def excludes_zero(self) -> bool:
+        """Whether the interval is entirely on one side of 0 -- how significance is said here."""
         return self.lo > 0 or self.hi < 0
 
     @property
@@ -333,6 +334,7 @@ def bootstrap(cfg: Config, out: TextIO, runs_dir: Path = RUNS_DIR) -> Path:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the paired bootstrap over the committed runs and write its result; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help="where the run files are")
     args = parser.parse_args(argv)

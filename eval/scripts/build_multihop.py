@@ -715,9 +715,11 @@ class Graph(NamedTuple):
     by_code: Mapping[str, Mapping[str, Any]]
 
     def has(self, code: str) -> bool:
+        """Whether the catalog offers this code at all this term."""
         return code in self.by_code
 
     def raw(self, code: str) -> str:
+        """The course's ``prereqRaw`` sentence, or ``""`` when it has none or is not offered."""
         return self.by_code.get(code, {}).get("prereqRaw") or ""
 
 
@@ -842,6 +844,7 @@ class Disagreement(NamedTuple):
     added: tuple[str, ...]
 
     def as_json(self) -> dict[str, Any]:
+        """The three drop/add lists as plain lists, for the sidecar."""
         return {
             "course": self.course,
             "dropped_offered": list(self.dropped_offered),
@@ -1486,6 +1489,11 @@ def render(violations: Sequence[Violation], where: str) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Write the multi-hop rows and print the summary; exits 1 if the table or the file is wrong.
+
+    Both failure modes are bugs in this script rather than bad rows: the hand-written table is
+    checked against the live graph, and every row is validated before it is written.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.build_multihop",
         description="Check and write the 25 multi-hop rows, built from the prereq graph, into "

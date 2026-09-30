@@ -794,6 +794,7 @@ class Problem(NamedTuple):
     message: str
 
     def __str__(self) -> str:
+        """``path:line: message`` -- the form an editor can jump to."""
         return f"{rel_to_repo(REPORT)}:{self.line}: {self.message}"
 
 
@@ -1056,6 +1057,11 @@ def render_check(text: str, facts: Facts, bodies: Mapping[str, str], out: TextIO
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Rewrite the report's generated blocks, or with ``--check`` verify every number traces.
+
+    ``--check`` writes nothing and exits 1 on a failure, which is what CI runs; ``--inputs``
+    lists the artifacts behind the report and ``--dry-run`` prints it instead of writing it.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.final_report",
         description="Rewrite report/README.md's generated blocks, or check that every number in "

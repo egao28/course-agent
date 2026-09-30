@@ -140,6 +140,7 @@ class Input(NamedTuple):
 
     @property
     def exists(self) -> bool:
+        """Whether the artifact is on disk -- the whole of what ``--check`` reports per row."""
         return self.path.exists()
 
 
@@ -290,6 +291,7 @@ class Facts(NamedTuple):
     reread: recheck.Result | None
 
     def of(self, bucket: str) -> list[EvalItem]:
+        """The dataset's rows in one bucket, in file order."""
         return [row for row in self.rows if row.bucket == bucket]
 
 
@@ -1346,6 +1348,11 @@ def summary(facts: Facts, path: Path) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Write the Day 3 report, or with ``--check`` list its inputs and with ``--dry-run`` print it.
+
+    A missing input is reported as the command that makes it and exits 1, rather than writing a
+    report with a section silently left out.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.day3_report",
         description="Write report/day3_evalset_{hash}.md: Day 3's dataset, its provenance, the "

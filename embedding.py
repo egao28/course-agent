@@ -60,7 +60,9 @@ class Embedder(Protocol):
 
     model: str
 
-    def embed(self, texts: Sequence[str]) -> Vectors: ...
+    def embed(self, texts: Sequence[str]) -> Vectors:
+        """One batch of texts in, their vectors out, in the order they were given."""
+        ...
 
 
 # --- config ---------------------------------------------------------------------------------------
@@ -145,12 +147,18 @@ class OpenAIEmbedder:
         max_retries: int = 5,
         timeout: float = 120.0,
     ) -> None:
+        """Build a client for ``model``, or take ``client`` as given so a test can inject a fake."""
         self.model = model
         self._client = (
             openai_client(max_retries=max_retries, timeout=timeout) if client is None else client
         )
 
     def embed(self, texts: Sequence[str]) -> Vectors:
+        """One request for the whole batch, re-sorted by the index each item carries.
+
+        An empty batch costs no request. A response whose length does not match the input raises,
+        because a short response silently mislabels every vector after the gap.
+        """
         texts = list(texts)
         if not texts:
             return Vectors([], 0)
@@ -179,6 +187,12 @@ class LocalEmbedder:
     """
 
     def __init__(self, model: str, encoder: Any | None = None) -> None:
+        """Load ``model`` through sentence-transformers, or take ``encoder`` as given.
+
+        The import happens here, not at module scope, so the torch dependency is only paid for by
+        a config that asked for the local route; a missing extra is reported as the command to fix
+        it rather than as an ``ImportError``.
+        """
         self.model = model
         if encoder is None:
             try:
@@ -192,6 +206,7 @@ class LocalEmbedder:
         self._encoder = encoder
 
     def embed(self, texts: Sequence[str]) -> Vectors:
+        """The batch encoded locally and L2-normalized; no token count, since nothing bills one."""
         texts = list(texts)
         if not texts:
             return Vectors([], None)

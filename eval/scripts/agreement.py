@@ -211,6 +211,7 @@ class Draw(NamedTuple):
 
     @property
     def short(self) -> int:
+        """How many rows this bucket could not supply; 0 when it filled its allocation."""
         return self.wanted - self.got
 
 
@@ -228,6 +229,7 @@ class Sample(NamedTuple):
 
     @property
     def by_id(self) -> dict[str, EvalItem]:
+        """The sampled rows keyed by id, for matching a returned sheet line back to its row."""
         return {row.id: row for row in self.rows}
 
 
@@ -787,14 +789,17 @@ class Agreement(NamedTuple):
 
     @property
     def p_o(self) -> float:
+        """Observed agreement -- the ``p_o`` in Cohen's kappa; 0.0 on an empty line."""
         return self.agreed / self.n if self.n else 0.0
 
     @property
     def pct(self) -> str:
+        """Observed agreement for the table, or the missing marker when nothing was scored."""
         return MISSING if not self.n else f"{100.0 * self.p_o:.1f}%"
 
     @property
     def interval(self) -> str:
+        """The agreement interval for the table, or the missing marker on an empty line."""
         if not self.n:
             return MISSING
         return f"[{100.0 * self.lo:.0f}%, {100.0 * self.hi:.0f}%]"
@@ -1376,6 +1381,10 @@ def score(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Export the second annotator's packet, or with ``--score`` score the sheet they returned.
+
+    Both paths exit 2 on a refusal, so a bad sheet is distinguishable from a low agreement score.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.agreement",
         description="Draw a seeded, stratified 15-row sample for a second annotator, and score "

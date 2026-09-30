@@ -99,6 +99,7 @@ class Stratum(NamedTuple):
 
     @property
     def n(self) -> int:
+        """How many rows the bucket holds across both halves."""
         return len(self.calib) + len(self.test)
 
 
@@ -110,10 +111,12 @@ class Assignment(NamedTuple):
     seed: int
 
     def counts(self, half: Split) -> int:
+        """How many rows landed in ``half``."""
         return sum(1 for value in self.halves.values() if value == half)
 
     @property
     def totals(self) -> dict[str, int]:
+        """Rows per half, both halves always present even at zero."""
         return {half: self.counts(half) for half in SPLITS}
 
 
@@ -334,6 +337,7 @@ class Verification(NamedTuple):
 
     @property
     def ok(self) -> bool:
+        """True when the committed split still re-derives from the seed, problems and all."""
         return not self.problems
 
 
@@ -513,6 +517,11 @@ def report_verification(path: Path, result: Verification, cfg: Config, out: Text
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Freeze the 50/50 split, or with ``--verify`` check the committed one still re-derives.
+
+    A row changing halves on an already-frozen dataset needs ``--refreeze``: the halves are what
+    every later run is reported against, so moving one silently would re-scope those numbers.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.split",
         description="Freeze the eval set into a stratified, seeded 50/50 calibration/test split, "

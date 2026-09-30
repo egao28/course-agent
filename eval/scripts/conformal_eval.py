@@ -254,6 +254,7 @@ def result_path(cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
 
 
 def load_fit(cfg: Config, runs_dir: Path) -> dict[str, Any]:
+    """The calib fit this config names, or a refusal naming the command that produces it."""
     path = fit_path(cfg, runs_dir)
     fit = read_sidecar(path)
     if fit is None:
@@ -356,6 +357,7 @@ def run(cfg: Config, out: TextIO, runs_dir: Path = RUNS_DIR,
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Apply the calib fit to the test half once and write the result; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR,
                         help="where the CSVs, the signals runs and the fit are; the JSON goes here")

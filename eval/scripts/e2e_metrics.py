@@ -551,6 +551,7 @@ def run(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Join the run, its labels and the gold intents into the metrics JSON; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR,
                         help="where the run, its CSV and the JSON this writes live")

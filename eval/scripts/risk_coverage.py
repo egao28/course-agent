@@ -298,10 +298,12 @@ def analyse(table: Table, split: Split, cfg: Config) -> dict[str, Any]:
 
 
 def figure_path(split: Split, cfg: Config, figures_dir: Path = FIGURES_DIR) -> Path:
+    """Where this half's curve goes, named by the signals key that produced it."""
     return Path(figures_dir) / f"risk_coverage_{split}_{signals_key(cfg)}.png"
 
 
 def result_path(split: Split, cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
+    """Where this half's numbers go, named by the signals key that produced them."""
     return Path(runs_dir) / f"risk_coverage_{split}_{signals_key(cfg)}.json"
 
 
@@ -396,6 +398,7 @@ def run(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Draw the risk-coverage curves for one half and write the figure and JSON; refusals exit 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", default="test", choices=SPLITS,
                         help="test is reported; calib is for development (default: test)")

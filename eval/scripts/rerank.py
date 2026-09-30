@@ -66,6 +66,7 @@ def run_path(split: Split, cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
 
 
 def pool_depth(cfg: Config) -> int:
+    """``rerank.pool``, refused when shallower than ``k`` -- such a pool cannot be cut to k."""
     depth = int(cfg["rerank"]["pool"])
     if depth < K:
         raise ValueError(
@@ -121,6 +122,7 @@ def spread(values: Sequence[float]) -> dict[str, float]:
 
 
 def version(package: str) -> str | None:
+    """An installed package's version, or ``None`` when it is not installed."""
     try:
         return importlib.metadata.version(package)
     except importlib.metadata.PackageNotFoundError:
@@ -130,6 +132,11 @@ def version(package: str) -> str | None:
 def sidecar(
     path: Path, run: bs.Run, lines: Sequence[Mapping[str, Any]], cfg: Config, depth: int
 ) -> dict[str, Any]:
+    """What this rerank run was: its keys, its versions, the run it is paired with, and the drift.
+
+    ``pool_top5_differs`` is the honest part: the pool is gathered live, so it can disagree with
+    the committed run it is being compared against, and the ids where it did are listed.
+    """
     ids = [line["id"] for line in lines]
     return {
         "run": rel_to_repo(path),
@@ -158,6 +165,7 @@ def sidecar(
 
 
 def summary(lines: Sequence[Mapping[str, Any]], base: Mapping[str, Mapping[str, Any]]) -> str:
+    """The two means the run produced, base above rerank, as fixed-width terminal text."""
     n = len(lines)
     out = [f"{'':<14}  {'n':>3}  recall@{K}  mrr@{K}"]
     for name, rows in ((BASE, [base[ln["id"]] for ln in lines]), (MODE, lines)):
@@ -264,6 +272,7 @@ def load_rerank(cfg: Config, run: bs.Run, runs_dir: Path = RUNS_DIR) -> Rerank:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Rerank one half's run and write the run file and its sidecar; a refusal exits 1."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--split", required=True, choices=SPLITS, help="which half's run to rerank")
     parser.add_argument("--dataset", type=Path, default=DATASET_PATH, help="the frozen dataset")

@@ -125,6 +125,7 @@ def run_path(split: Split, cfg: Config, runs_dir: Path = RUNS_DIR) -> Path:
 
 
 def sha256_text(text: str) -> str:
+    """The sha256 of a string's UTF-8 bytes -- how an answer and a prompt are pinned."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -149,6 +150,7 @@ class Recorder:
     """
 
     def __init__(self, chat: Chat) -> None:
+        """Wrap ``chat``, taking its model name so the recorder is a drop-in for it."""
         self.chat = chat
         self.model = chat.model
         self.last: Draft | None = None
@@ -156,6 +158,7 @@ class Recorder:
     def complete(
         self, prompt: str, *, system: str | None = None, temperature: float | None = None
     ) -> str:
+        """Pass the call straight through, keeping prompt, system and reply as :attr:`last`."""
         reply = self.chat.complete(prompt, system=system, temperature=temperature)
         self.last = Draft(prompt, system, reply)
         return reply
@@ -413,6 +416,7 @@ def collect_split(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Collect one half's signals into a run file; a refusal exits 1 with its reason."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--split",
