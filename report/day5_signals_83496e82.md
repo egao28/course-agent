@@ -1,6 +1,6 @@
 # Day 5: confidence signals and conformal gating
 
-Config hash `c73b197d` · signals `37164723` · correctness `c54b1377` · conformal `83496e82` · full hash `0b435439` · dataset sha256 `2a93182221bd`
+Config hash `c73b197d` · signals `37164723` · correctness `c54b1377` · conformal `83496e82` · full hash `65bb9643` · dataset sha256 `2a93182221bd`
 
 On the test half (42 answered rows), `verbalized`, the signal chosen on calib, ranks correct above incorrect answers with AUROC 0.847 [0.722, 0.953]. The highest test AUROC is `retrieval_score`'s (1.000, on 10 non-null rows).
 The calib fit accepted no threshold for any signal at alpha = 0.10, so the conformal gate answers nothing on test; a fixed 0.7 answers 42 of 42 at 0.405, against 0.405 for answering everything.
