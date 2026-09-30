@@ -1,0 +1,96 @@
+{
+  "by_bucket": {
+    "ambiguous": {
+      "accepted_judge": 1,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 1,
+      "rows": 1
+    },
+    "fact": {
+      "accepted_judge": 21,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 21,
+      "rows": 21
+    },
+    "multihop": {
+      "accepted_judge": 12,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 12,
+      "rows": 12
+    },
+    "unanswerable": {
+      "accepted_judge": 3,
+      "no_judge_verdict": 0,
+      "overturned": 0,
+      "reviewed": 3,
+      "rows": 3
+    }
+  },
+  "carried_over_ids": [
+    "v1-0002",
+    "v1-0004",
+    "v1-0009",
+    "v1-0010",
+    "v1-0012",
+    "v1-0015",
+    "v1-0017",
+    "v1-0018",
+    "v1-0020",
+    "v1-0022",
+    "v1-0025",
+    "v1-0026",
+    "v1-0032",
+    "v1-0034",
+    "v1-0035",
+    "v1-0038",
+    "v1-0039",
+    "v1-0044",
+    "v1-0046",
+    "v1-0059",
+    "v1-0064",
+    "v1-1001",
+    "v1-1008",
+    "v1-1010",
+    "v1-1011",
+    "v1-1016",
+    "v1-1019",
+    "v1-1020",
+    "v1-2006",
+    "v1-2015",
+    "v1-2019",
+    "v1-3028"
+  ],
+  "config_hash": "c73b197d",
+  "csv": "eval/runs/e2e_test_c73b197d.csv",
+  "e2e_run": "eval/runs/e2e_test_c73b197d.jsonl",
+  "e2e_run_sha256": "482074c878a487a8154a205fdc6c78080bef3a5a672df82861e51c31a43a1c18",
+  "judge_run": "eval/runs/e2e_judge_test_c73b197d.jsonl",
+  "judge_run_sha256": "d7751085fa6602714703adfe8fd985e2f78adb05d4acfa8b0a91ab9cddddd6f5",
+  "judge_x_human": {
+    "correct": {
+      "correct": 25,
+      "incorrect": 0
+    },
+    "incorrect": {
+      "correct": 0,
+      "incorrect": 12
+    },
+    "unparsed": {
+      "correct": 0,
+      "incorrect": 0
+    }
+  },
+  "n_answered_rows": 37,
+  "review_logs": {
+    "eval/runs/correctness_log.jsonl": "66e404dd987d90af653b061d32a24196272b635fd7bc058faf853b888d1c3159",
+    "eval/runs/e2e_correctness_log.jsonl": "d126f902430092888db8f4c96bf2ffc4da58c7391ad090112172651ff8b4d62f"
+  },
+  "reviewers": {
+    "eve": 37
+  },
+  "sha256": "f1a76626029c022791b533364efe59cd0c5e93ce5497603f12f23d25bede4eca",
+  "verdicts_carried_over": 32
+}
