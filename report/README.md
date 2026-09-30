@@ -142,7 +142,7 @@ seed `61` over each bucket's sorted ids. Every threshold and every choice of sig
 | what | seed | key | where |
 | --- | --- | --- | --- |
 | the frozen split | `61` | config `c73b197d` | `eval.split_seed` |
-| the paired bootstrap | `76` | full hash `0b435439` | `eval.bootstrap` |
+| the paired bootstrap | `76` | full hash `65bb9643` | `eval.bootstrap` |
 | the second-annotator sample | `42` | config `c73b197d` | top-level `seed` |
 
 `eval.bootstrap`, `signals`, `correctness` and `conformal` are excluded from the config hash
