@@ -27,12 +27,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      # fetch-depth: 0 rather than the default shallow clone, because one test reads
+      # `git show origin/main:data/courses.json` -- the 1,415 variable-credit courses
+      # GUIDELINES.md rule 2 quotes -- and skips itself where git cannot answer. A shallow
+      # clone has no origin/main, and a test that only ever runs on a laptop is not a test.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # uv installs the interpreter `.python-version` pins (3.12), so there is no setup-python
       # step and no second place where a Python version is written down.
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -54,8 +60,10 @@ jobs:
           uv run python -m ingest.chunk
           uv run python -m ingest.build_bm25
 
+      # -rs prints the reason for every skip, so "2287 passed" never quietly becomes
+      # "2286 passed, 1 skipped" with nothing in the log saying which one stopped running.
       - name: Tests
-        run: uv run pytest -q
+        run: uv run pytest -q -rs
 
       # Redundant with tests/test_final_report.py on purpose: when this fails, the log says
       # which number in the report moved and where, rather than which assertion did.
