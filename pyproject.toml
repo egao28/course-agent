@@ -7,21 +7,29 @@ readme = "README.md"
 # 3.13/3.14 today, but chromadb's onnxruntime dependency has lagged new CPython releases before,
 # so stay one version behind the system Python (3.14).
 requires-python = ">=3.12,<3.13"
+# `uv.lock` is the pin: exact versions with hashes, and `uv sync --locked` fails on a stale one.
+# The bounds below are floors, not pins. They exist for the reader who has no uv and installs by
+# name, so that a resolver cannot walk backwards to a release whose API this code predates and
+# hand them something that imports but does not work. Each floor is the version `uv.lock` holds,
+# because that is the oldest release any of this has ever been run against -- a lower number would
+# be a guess written as a guarantee. The five left unbounded carry no floor because none was
+# measured for them, not because any version will do; `uv.lock` is their only constraint.
 dependencies = [
-    "chromadb",
+    "chromadb>=1.5.9",
     "rank-bm25",
-    "openai",
+    "openai>=3.13.0",
     "pyyaml",
     "numpy",
     "tqdm",
     "python-dotenv",
-    "tiktoken",
+    "tiktoken>=0.14.0",
     # Day 2: the agent graph, the MCP server over its tools, and the schemas those tools declare.
     # pydantic already arrives transitively through chromadb and fastmcp, but the tool schemas are
-    # ours, so the import belongs to a direct dependency.
-    "langgraph",
-    "fastmcp",
-    "pydantic",
+    # ours, so the import belongs to a direct dependency. `>=2` rather than the locked 2.13.5: the
+    # v1 -> v2 break is the one this code would not survive, and it is the whole of what is known.
+    "langgraph>=1.2.11",
+    "fastmcp>=4.0.3",
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]

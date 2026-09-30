@@ -1,13 +1,23 @@
 # The repo's first CI (#116), brought forward by #107: the traceability check is only a promise
 # if something other than a laptop runs it.
 #
-# Four things are checked here, in the order a failure is cheapest to read: the locked
-# environment resolves at all, the tree lints, the suite passes, and report/README.md still
-# traces to the files it cites. The fifth step is not a check but the setup one of them needs:
-# the corpus and the lexical index are rebuilt, because they are not committed. Nothing here
-# needs a key -- no step calls a model, and `uv sync` never sees
-# a `.env`, so a test that quietly depended on one would fail here rather than on a laptop
-# where the file exists.
+# Two jobs.
+#
+# `tests` is the repo as it is developed, through uv. Five things are checked, in the order a
+# failure is cheapest to read: the locked environment resolves at all, the generated
+# requirements files still match the lock, the tree lints, the suite passes, and
+# report/README.md still traces to the files it cites. One further step is not a check but the
+# setup two of them need: the corpus and the lexical index are rebuilt, because they are not
+# committed.
+#
+# `pip` is the repo as a reader without uv installs it (#116) -- stock CPython, `python -m venv`,
+# `pip install -r requirements-dev.txt`, no uv anywhere in the job. A generated requirements file
+# that nobody installs from is a file nobody notices is broken, and `--check` above can only ever
+# run where uv already exists, which is exactly not the machine these files are for.
+#
+# Nothing here needs a key -- no step calls a model, and neither installer ever sees a `.env`, so
+# a test that quietly depended on one would fail here rather than on a laptop where the file
+# exists.
 name: tests
 
 on:
@@ -54,6 +64,12 @@ jobs:
       - name: Sync the locked environment
         run: uv sync --locked --extra analysis
 
+      # requirements*.txt are generated from uv.lock, never written; the generator re-exports and
+      # diffs. Editing a version by hand fails here, which is the whole reason the files can be
+      # trusted -- a pip user installs from them without ever seeing uv.lock.
+      - name: The requirements files still match the lock
+        run: uv run python -m scripts.export_requirements --check
+
       - name: Lint
         run: uv run ruff check .
 
@@ -75,3 +91,49 @@ jobs:
       # which number in the report moved and where, rather than which assertion did.
       - name: The report traces to its files
         run: uv run python -m eval.scripts.final_report --check
+
+  # The same suite, installed the way someone without uv installs it. requirements-dev.txt rather
+  # than requirements.txt because the dev group asks for `almabot[analysis]`, so that file is the
+  # one whose contents equal the environment the job above tests in -- same counts, no skips,
+  # pytest and ruff included. A runtime-only install (requirements.txt + pytest) leaves 114 tests
+  # unable to run: Day 5's and Day 6's reach for scipy and sklearn, 47 of them in two modules
+  # that importorskip and skip cleanly, and 67 in five modules that fail instead (30 failed, 37
+  # errors). That is a property of the suite, not of the file -- `uv sync --locked --no-dev` plus
+  # pytest produces the identical counts -- and it has no issue yet.
+  pip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # fetch-depth: 0 for the same reason as above: one test reads a pinned commit out of git.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # python-version-file, so 3.12 is written down once, in .python-version, and this job reads
+      # the same pin uv does rather than a second copy of the number.
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # A venv the interpreter makes, not one uv makes. --require-hashes is implied by the file
+      # (every line carries its sha256), and it is what makes this an install of the lock rather
+      # than an install of whatever the index serves today; it is passed explicitly so that a
+      # future file which lost its hashes fails here instead of quietly resolving.
+      - name: Install from requirements-dev.txt
+        run: |
+          python -m venv "$RUNNER_TEMP/pipenv"
+          "$RUNNER_TEMP/pipenv/bin/pip" install --require-hashes -r requirements-dev.txt
+
+      - name: Rebuild the corpus and the BM25 index
+        run: |
+          "$RUNNER_TEMP/pipenv/bin/python" -m ingest.chunk
+          "$RUNNER_TEMP/pipenv/bin/python" -m ingest.build_bm25
+
+      # No `uv run`: pytest's `pythonpath = ["."]` is what makes the modules importable, since
+      # --no-emit-project keeps almabot itself out of its own requirements. The pass count here
+      # and the one in `tests` are meant to be the same number, and -rs makes a new skip visible.
+      - name: Tests
+        run: "$RUNNER_TEMP/pipenv/bin/python -m pytest -q -rs"

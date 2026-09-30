@@ -11,7 +11,7 @@ index key or committed artifact ever carried the old name, so none of them moved
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/). Python is pinned to **3.12** via `.python-version` and
+Requires [uv](https://docs.astral.sh/uv/) — or see [Without uv](#without-uv). Python is pinned to **3.12** via `.python-version` and
 `requires-python`: one interpreter version keeps `uv.lock`, indexes and reports reproducible across
 machines. The stack also resolves on 3.13/3.14 today, but `chromadb`'s `onnxruntime` dependency has
 lagged new CPython releases before, so we stay one version behind the system Python (3.14).
@@ -31,6 +31,38 @@ Optional local-embedding route (BGE-M3 via `sentence-transformers`): `uv sync --
 `uv sync` is exact by default, so pass `--extra local` on **every** sync or the extra is removed again;
 alternatively use `uv sync --inexact` to leave already-installed extras in place.
 
+### Without uv
+
+`uv.lock` is the pin — exact versions with hashes — but pip cannot read it, so three
+`requirements*.txt` files are **generated** from it and committed. They are never written by
+hand: `uv run python -m scripts.export_requirements` rewrites all three, and CI runs the same
+command with `--check`, so a file that has stopped matching the lock fails the build instead of
+being discovered by whoever installed from it.
+
+| file | installs | for |
+| --- | --- | --- |
+| `requirements.txt` | the agent + retrieval stack, neither extra | running `python -m agent`, `python -m retrieval` |
+| `requirements-full.txt` | the above + `analysis` + `local` | reproducing Day 4's `hybrid_rerank` row (pulls in torch) |
+| `requirements-dev.txt` | the `dev` group, which asks for `almabot[analysis]` | running the suite — the environment CI tests in |
+
+```bash
+python3.12 -m venv .venv-pip && . .venv-pip/bin/activate
+pip install --require-hashes -r requirements-dev.txt   # pytest and ruff come with it
+python -m ingest.chunk && python -m ingest.build_bm25  # not committed; without them 5 tests fail, 5 skip
+pytest -q                                              # same pass count as `uv run pytest -q`, no skips
+```
+
+`requirements.txt` alone runs the agent, not the suite: Day 5's and Day 6's tests reach for
+`scipy` and `sklearn` directly, so 114 of them cannot run without the `analysis` extra — 47 sit
+in two modules that `importorskip` and skip cleanly, and 67 (30 failed, 37 errors, over five
+modules) fail instead. That is the shape of the suite, not something the file is missing:
+`uv sync --locked --no-dev` plus `pytest` gives the identical counts.
+
+`pyproject.toml` carries **floors** (`chromadb>=1.5.9`, `pydantic>=2`, …) for the dependencies
+whose API this code assumes. A floor is not a pin and not a second lock — `uv.lock` is the pin.
+They exist only so that a resolver which never sees the lock cannot walk backwards to a release
+this code predates and hand you something that imports but does not work.
+
 ## Layout
 
 ```
@@ -45,6 +77,7 @@ almabot/
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
 ├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
+├── scripts/       # repo maintenance, never imported by the library: export_requirements.py regenerates requirements*.txt from uv.lock
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
 └── indexes/       # Chroma persistence + BM25 pickle (contents gitignored, dir kept)
 ```
