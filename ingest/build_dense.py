@@ -198,7 +198,9 @@ def build(
     Returns ``status`` ``"up-to-date"`` (nothing embedded, nothing charged) or ``"built"``.
     Everything that can fail without spending money -- the config, the corpus, the collection
     state, the API key -- is checked before the store is opened, so a run that cannot embed
-    leaves nothing behind, not even an empty ``indexes/chroma``.
+    leaves nothing behind, not even an empty ``indexes/chroma``. What no guard here can foresee is
+    the API refusing the first request (an exhausted credit balance, say), which does leave an
+    empty collection behind -- so an empty one is read as absent, not as an interrupted build.
 
     What landed is counted afterwards as well. ``count()`` is the signal every later run reads to
     decide whether there is anything to do, so a build that reports success while the collection
@@ -215,11 +217,15 @@ def build(
         count = existing.count()
         if count == len(chunks):
             return {"status": "up-to-date", "name": name, "chunks": count, "section": section}
-        raise ValueError(
-            f"collection {name!r} holds {count} of the {len(chunks)} chunks -- an interrupted "
-            "build, or a corpus that grew since. Re-run with --rebuild to drop it and re-embed "
-            f"(about {len(chunks)} chunks)"
-        )
+        if count:
+            raise ValueError(
+                f"collection {name!r} holds {count} of the {len(chunks)} chunks -- an interrupted "
+                "build, or a corpus that grew since. Re-run with --rebuild to drop it and "
+                f"re-embed (about {len(chunks)} chunks)"
+            )
+        # Zero rows is not an interrupted build: the collection was created and the first request
+        # was refused, so there is nothing in it to preserve and nothing --rebuild would do
+        # differently. Demanding the flag here would ask the reader to rebuild nothing.
 
     embedder = make_embedder(cfg) if embedder is None else embedder
     client = open_store() if client is None else client
