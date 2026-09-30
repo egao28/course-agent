@@ -1,0 +1,92 @@
+{
+  "base": "hybrid",
+  "buckets": {
+    "fact": 29,
+    "multihop": 12
+  },
+  "config_hash": "c73b197d",
+  "dataset_sha256": "2a93182221bd8546d5bed8e121d0b4bde9a8b624a2197c67f5e87120d36cfce6",
+  "ids": [
+    "v1-0002",
+    "v1-0004",
+    "v1-0009",
+    "v1-0010",
+    "v1-0012",
+    "v1-0015",
+    "v1-0017",
+    "v1-0018",
+    "v1-0020",
+    "v1-0022",
+    "v1-0023",
+    "v1-0025",
+    "v1-0026",
+    "v1-0029",
+    "v1-0032",
+    "v1-0034",
+    "v1-0035",
+    "v1-0038",
+    "v1-0039",
+    "v1-0040",
+    "v1-0042",
+    "v1-0043",
+    "v1-0044",
+    "v1-0045",
+    "v1-0046",
+    "v1-0054",
+    "v1-0055",
+    "v1-0059",
+    "v1-0064",
+    "v1-1001",
+    "v1-1002",
+    "v1-1003",
+    "v1-1008",
+    "v1-1010",
+    "v1-1011",
+    "v1-1016",
+    "v1-1017",
+    "v1-1018",
+    "v1-1019",
+    "v1-1020",
+    "v1-1023"
+  ],
+  "k": 5,
+  "latency_ms": {
+    "pool": {
+      "max": 558.2,
+      "mean": 201.6,
+      "median": 175.5,
+      "p90": 272.4
+    },
+    "rerank": {
+      "max": 1247.5,
+      "mean": 789.6,
+      "median": 724.2,
+      "p90": 987.2
+    }
+  },
+  "mode": "hybrid_rerank",
+  "n": 41,
+  "paired_with": {
+    "run": "eval/runs/ablation_test_c73b197d.jsonl",
+    "sha256": "0ff000fe55fbf90c39acec58fee63d1f0a5fdb8895bec99c66e805615f0a2eb6"
+  },
+  "pool": 20,
+  "pool_recall_at_20": 0.9491869918699186,
+  "pool_top5_differs": [],
+  "rerank": {
+    "batch_size": 20,
+    "device": "cpu",
+    "model": "BAAI/bge-reranker-base",
+    "pool": 20,
+    "revision": "2cfc18c9415c912f9d8155881c133215df768a70"
+  },
+  "rerank_key": "3c68593d",
+  "run": "eval/runs/rerank_test_3c68593d.jsonl",
+  "sha256": "144ef3acb4d5d7949fb593649335dfd3a4395ee4d18a96e20d12d48670cdcbfb",
+  "split": "test",
+  "versions": {
+    "sentence-transformers": "6.0.1",
+    "torch": "2.14.0",
+    "transformers": "5.17.0"
+  }
+}

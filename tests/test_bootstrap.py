@@ -4,6 +4,9 @@ The procedure is tested on hand-made vectors, where the right interval is known 
 it. The I/O is tested on run files written into ``tmp_path`` in #75's format. One test reads the
 two committed run files, which the committed ``bootstrap_{full_hash}.json`` was computed from; it
 re-queries nothing.
+
+``cfg`` is the live config without its ``rerank`` section -- the three-mode procedure #76 shipped.
+The stretch row (#79) has tests of its own at the end, under ``live``.
 """
 
 from __future__ import annotations
@@ -16,16 +19,22 @@ from io import StringIO
 import numpy as np
 import pytest
 
-from config import file_sha256, load_config
+from config import Config, file_sha256, load_config
 from eval.scripts import ablation as ab
 from eval.scripts import bootstrap as bs
+from eval.scripts import rerank as rr
 from eval.scripts.draft_items import write_json
 from retrieval import MODES
 
 
 @pytest.fixture
-def cfg():
+def live():
     return load_config()
+
+
+@pytest.fixture
+def cfg(live):
+    return Config({k: v for k, v in live.to_dict().items() if k != "rerank"})
 
 
 # --- the procedure ------------------------------------------------------------------------------
@@ -224,12 +233,69 @@ def test_halves_run_against_different_indexes_are_refused(cfg, tmp_path):
         bs.bootstrap(cfg, StringIO(), tmp_path)
 
 
-def test_the_committed_result_is_what_the_committed_runs_give(cfg, tmp_path):
-    committed = bs.result_path(cfg)
-    for split in ("calib", "test"):
-        run = ab.run_path(split, cfg)
+def test_the_committed_result_is_what_the_committed_runs_give(live, tmp_path):
+    committed = bs.result_path(live)
+    for run in (ab.run_path("calib", live), ab.run_path("test", live), rr.run_path("test", live)):
         shutil.copy(run, tmp_path / run.name)
         shutil.copy(run.with_suffix(".meta.json"), tmp_path / run.with_suffix(".meta.json").name)
-    fresh = json.loads(bs.bootstrap(cfg, StringIO(), tmp_path).read_text())
+    fresh = json.loads(bs.bootstrap(live, StringIO(), tmp_path).read_text())
     fresh["runs"] = json.loads(committed.read_text())["runs"]  # tmp_path is not the repo
     assert fresh == json.loads(committed.read_text())
+
+
+# --- the stretch row (#79) ------------------------------------------------------------------------
+
+
+def write_rerank_run(cfg, runs_dir, per_row):
+    """A rerank run in #79's format, paired with the test run already in ``runs_dir``."""
+    test_run = bs.load_run("test", cfg, runs_dir)
+    lines = [
+        {"id": i, "mode": rr.MODE, "recall_at_5": r, "mrr_at_5": m}
+        for i, (r, m) in zip(test_run.ids, per_row, strict=True)
+    ]
+    path = ab.write_lines(rr.run_path("test", cfg, runs_dir), lines)
+    write_json(
+        path.with_suffix(".meta.json"),
+        {
+            "run": "eval/runs/" + path.name,
+            "sha256": file_sha256(path),
+            "config_hash": cfg.hash,
+            "rerank_key": rr.rerank_key(cfg),
+            "rerank": dict(cfg["rerank"]),
+            "paired_with": {"sha256": file_sha256(test_run.path)},
+            "ids": test_run.ids,
+            "k": 5,
+            "pool": cfg["rerank"]["pool"],
+        },
+    )
+    return path
+
+
+RERANK = [(1.0, 1.0), (1.0, 1.0), (0.0, 0.0), (1.0, 1.0)]
+
+
+def test_the_rerank_row_is_resampled_with_the_three_modes_indices(cfg, live, tmp_path):
+    write_run(live, tmp_path, "calib", CALIB)
+    write_run(live, tmp_path, "test", TEST)
+    three = json.loads(bs.bootstrap(cfg, StringIO(), tmp_path).read_text())
+    write_rerank_run(live, tmp_path, RERANK)
+    out = StringIO()
+    four = json.loads(bs.bootstrap(live, out, tmp_path).read_text())
+    for metric in bs.METRICS:
+        block = four["metrics"][metric]
+        assert {m: block["test"][m] for m in MODES} == three["metrics"][metric]["test"]
+        assert block["difference"] == three["metrics"][metric]["difference"]
+        gap = block["rerank_difference"]
+        assert (gap["minuend"], gap["subtrahend"]) == ("hybrid_rerank", "hybrid")
+    mrr = four["metrics"]["mrr_at_5"]["rerank_difference"]
+    assert mrr["point"] == pytest.approx(0.75 - 0.375)
+    assert four["rerank"]["rerank_key"] == rr.rerank_key(live)
+    assert four["rerank"]["model"] == live["rerank"]["model"]
+    assert "hybrid_rerank - hybrid" in out.getvalue()
+
+
+def test_with_a_rerank_section_the_rerank_run_is_required(live, tmp_path):
+    write_run(live, tmp_path, "calib", CALIB)
+    write_run(live, tmp_path, "test", TEST)
+    with pytest.raises(ValueError, match="eval.scripts.rerank --split test"):
+        bs.bootstrap(live, StringIO(), tmp_path)

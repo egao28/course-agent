@@ -30,6 +30,12 @@ interval on a mean of 0/1 values near 1 collapses against the ceiling: a mode th
 every question has the interval [1, 1] however few questions there are. That is recorded as
 ``degenerate``, and must be reported as such -- it is the absence of evidence of variance, not
 certainty.
+
+**The stretch row (#79).** When ``config.yaml`` has a ``rerank`` section, the test half's rerank run
+(``eval.scripts.rerank``) is a fourth score vector in the same :func:`paired_bootstrap` call, so it
+is resampled with the very indices the three modes are -- adding it moves none of their intervals
+-- and ``rerank - hybrid`` gets an interval by the same rule. It is required then, not picked up
+when present: a table that quietly lost a row would be the silent filter #75 guards against.
 """
 
 from __future__ import annotations
@@ -46,6 +52,7 @@ import numpy as np
 
 from config import Config, file_sha256, load_config, rel_to_repo
 from eval.schema import Split
+from eval.scripts import rerank as rr
 from eval.scripts.ablation import RUNS_DIR, K, run_path
 from eval.scripts.draft_items import write_json
 from eval.scripts.split import META_SUFFIX, read_sidecar
@@ -208,8 +215,11 @@ def _interval_json(interval: Interval) -> dict[str, Any]:
     }
 
 
-def analyse(calib: Run, test: Run, cfg: Config) -> dict[str, Any]:
-    """Per metric: the strongest single on calib, every interval on test, and the gap."""
+def analyse(calib: Run, test: Run, cfg: Config, rerank: rr.Rerank | None = None) -> dict[str, Any]:
+    """Per metric: the strongest single on calib, every interval on test, and the gap.
+
+    With ``rerank``, also its interval and ``rerank - hybrid``, from the same resample indices.
+    """
     for field in ("dense_key", "bm25_key", "dataset_sha256"):
         if calib.meta.get(field) != test.meta.get(field):
             raise ValueError(f"the two halves were run with different {field}s")
@@ -220,17 +230,27 @@ def analyse(calib: Run, test: Run, cfg: Config) -> dict[str, Any]:
     for metric in METRICS:
         calib_means = {mode: float(calib.scores[metric][mode].mean()) for mode in SINGLES}
         chosen, tied = strongest_single(calib_means)
-        boot = paired_bootstrap(test.scores[metric], n_resamples, seed, ci)
-        gap = boot.difference(HYBRID, chosen)
+        vectors = dict(test.scores[metric])
+        if rerank is not None:
+            vectors[rr.MODE] = rerank.scores[metric]
+        boot = paired_bootstrap(vectors, n_resamples, seed, ci)
         metrics[metric] = {
             "strongest_single": {"mode": chosen, "tied": tied, "calib_means": calib_means},
-            "test": {mode: _interval_json(boot.interval(mode)) for mode in MODES},
-            "difference": {
-                "minuend": HYBRID,
-                "subtrahend": chosen,
-                **_interval_json(gap),
-                "significant": gap.excludes_zero,
-            },
+            "test": {mode: _interval_json(boot.interval(mode)) for mode in vectors},
+            "difference": _difference_json(boot, HYBRID, chosen),
+        }
+        if rerank is not None:
+            metrics[metric]["rerank_difference"] = _difference_json(boot, rr.MODE, rr.BASE)
+    extra = {}
+    if rerank is not None:
+        meta = rerank.meta
+        extra["rerank"] = {
+            "run": meta["run"],
+            "sha256": meta["sha256"],
+            "rerank_key": meta["rerank_key"],
+            "model": meta["rerank"]["model"],
+            "revision": meta["rerank"]["revision"],
+            "pool": meta["pool"],
         }
     return {
         "config_hash": cfg.hash,
@@ -249,6 +269,17 @@ def analyse(calib: Run, test: Run, cfg: Config) -> dict[str, Any]:
         "n": {"calib": len(calib.ids), "test": len(test.ids)},
         "buckets": test.meta.get("buckets", {}),
         "metrics": metrics,
+        **extra,
+    }
+
+
+def _difference_json(boot: Bootstrap, minuend: str, subtrahend: str) -> dict[str, Any]:
+    gap = boot.difference(minuend, subtrahend)
+    return {
+        "minuend": minuend,
+        "subtrahend": subtrahend,
+        **_interval_json(gap),
+        "significant": gap.excludes_zero,
     }
 
 
@@ -275,16 +306,21 @@ def summary(result: Mapping[str, Any]) -> str:
         calib = ", ".join(f"{m} {v:.3f}" for m, v in choice["calib_means"].items())
         tie = ", a tie" if choice["tied"] else ""
         out.append(f"\n{metric}: strongest single on calib = {choice['mode']} ({calib}{tie})")
-        out.extend(f"  {mode:<8} {_fmt(block['test'][mode])}" for mode in MODES)
-        gap = block["difference"]
-        verdict = "significant" if gap["significant"] else "not significant: the CI contains 0"
-        out.append(f"  {gap['minuend']} - {gap['subtrahend']}  {_fmt(gap)}  {verdict}")
+        out.extend(f"  {mode:<13} {_fmt(interval)}" for mode, interval in block["test"].items())
+        for key in ("difference", "rerank_difference"):
+            if key not in block:
+                continue
+            gap = block[key]
+            verdict = "significant" if gap["significant"] else "not significant: the CI contains 0"
+            out.append(f"  {gap['minuend']} - {gap['subtrahend']}  {_fmt(gap)}  {verdict}")
     return "\n".join(out)
 
 
 def bootstrap(cfg: Config, out: TextIO, runs_dir: Path = RUNS_DIR) -> Path:
     """Read both halves' runs, compute the intervals, write them, and print them."""
-    result = analyse(load_run("calib", cfg, runs_dir), load_run("test", cfg, runs_dir), cfg)
+    test = load_run("test", cfg, runs_dir)
+    rerank = rr.load_rerank(cfg, test, runs_dir) if "rerank" in cfg else None
+    result = analyse(load_run("calib", cfg, runs_dir), test, cfg, rerank)
     path = write_json(result_path(cfg, runs_dir), result)
     print(summary(result), file=out)
     print(f"\nwrote {rel_to_repo(path)} (full hash {cfg.full_hash}, config {cfg.hash})", file=out)
