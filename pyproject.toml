@@ -1,5 +1,5 @@
 [project]
-name = "course-agent"
+name = "almabot"
 version = "0.1.0"
 description = "Hybrid retrieval (dense + BM25 + RRF) and agent layer for a UIUC course-planning assistant"
 readme = "README.md"
@@ -34,7 +34,7 @@ analysis = ["scikit-learn", "matplotlib"]
 [dependency-groups]
 # The analysis extra is in dev too, so a plain `uv run pytest` runs its tests instead of skipping
 # them -- `uv run` removes an extra that was not asked for.
-dev = ["pytest", "ruff", "course-agent[analysis]"]
+dev = ["pytest", "ruff", "almabot[analysis]"]
 
 [tool.ruff]
 line-length = 100

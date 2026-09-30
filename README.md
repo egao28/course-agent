@@ -1,7 +1,13 @@
-# course-agent
+# almabot
 
-Retrieval + agent layer for a UIUC course-planning assistant. Data comes from [AlmaBot](../almabot-web)
-(React frontend; its `scripts/build_data.py` exports courses and the prerequisite DAG from `course-catalog.csv`).
+The retrieval + agent layer of AlmaBot, a UIUC course-planning assistant. Data comes from the other
+half, the React frontend [`almabot-web`](../almabot-web), whose `scripts/build_data.py` exports
+courses and the prerequisite DAG from `course-catalog.csv`. Throughout this README, *`almabot-web`*
+means that repo; **almabot**, unqualified, is this one.
+
+Renamed from `course-agent` (#113). GitHub redirects the old URL, so a link written before the
+rename still resolves — but nothing here leans on that redirect: no module, import path, config key,
+index key or committed artifact ever carried the old name, so none of them moved.
 
 ## Setup
 
@@ -28,7 +34,7 @@ alternatively use `uv sync --inexact` to leave already-installed extras in place
 ## Layout
 
 ```
-course-agent/
+almabot/
 ├── config.yaml    # embedding model, chunk strategy, BM25/RRF params, seed — every experiment output carries the config hash
 ├── config.py      # load_config() -> Config (hash frozen at load), artifact-name helpers
 ├── embedding.py   # text → vector: OpenAI or local BGE-M3, the one encoder both sides share
@@ -98,7 +104,7 @@ Print the current hash with `uv run python config.py`, and the exact string bein
 
 ## Data
 
-`ingest/export_almabot.py` re-exports the catalog CSV into `data/`. AlmaBot's `public/courses.json`
+`ingest/export_almabot.py` re-exports the catalog CSV into `data/`. `almabot-web`'s `public/courses.json`
 cannot be reused: it truncates `desc` to 240 chars (3,255 of 4,502 courses lose text) and carries no
 term, so the exporter re-reads the CSV and keeps only the *logic* from `build_data.py` — section
 de-duplication, credit parsing, prerequisite extraction.
@@ -451,7 +457,7 @@ clock starts, since a number that included a one-off index load on the first que
 next four would not be the latency of anything. The CLI prints the load on its own line when it
 happened.
 
-A fourth mode — `keyword`, the `searchCourses()` baseline from AlmaBot's `planner.ts`, which Day 4
+A fourth mode — `keyword`, the `searchCourses()` baseline from `almabot-web`'s `planner.ts`, which Day 4
 may want to compare against — is a builder in `BUILDERS` and an entry in `MODE_SOURCES`, and
 nothing else. That room is deliberate; the implementation is out of scope for Day 1.
 
