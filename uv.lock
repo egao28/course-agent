@@ -73,6 +73,66 @@ wheels = [
 ]
 
 [[package]]
+name = "almabot"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "chromadb" },
+    { name = "fastmcp" },
+    { name = "langgraph" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rank-bm25" },
+    { name = "tiktoken" },
+    { name = "tqdm" },
+]
+
+[package.optional-dependencies]
+analysis = [
+    { name = "matplotlib" },
+    { name = "scikit-learn" },
+]
+local = [
+    { name = "sentence-transformers" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "almabot", extra = ["analysis"] },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "chromadb" },
+    { name = "fastmcp" },
+    { name = "langgraph" },
+    { name = "matplotlib", marker = "extra == 'analysis'" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rank-bm25" },
+    { name = "scikit-learn", marker = "extra == 'analysis'" },
+    { name = "sentence-transformers", marker = "extra == 'local'" },
+    { name = "tiktoken" },
+    { name = "tqdm" },
+]
+provides-extras = ["local", "analysis"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "almabot", extras = ["analysis"] },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -371,66 +431,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ac/f0/b75a10e9d0616b97a30de277b6dfe83f1879880854c7330337309530eb48/contourpy-1.4.0-cp312-cp312-win32.whl", hash = "sha256:5450f091ac1be0be3ad3a2a3b3f23b5e443e78c670ced4fd347d626f92a28fd2", size = 347345, upload-time = "2026-09-11T19:03:06.192Z" },
     { url = "https://files.pythonhosted.org/packages/50/a9/dab08786bb4d77ef9a046b3c1be923be4e73c5d07d91f5a54e8ea9b09e41/contourpy-1.4.0-cp312-cp312-win_amd64.whl", hash = "sha256:6e697d94e69f499ff6bebb899cae97a58d5d14f0e1fe9568b43a0248d2f9af8c", size = 234083, upload-time = "2026-09-11T19:03:08.122Z" },
     { url = "https://files.pythonhosted.org/packages/47/b9/3ba509755a970dbde5948e7142ac21f266be72f38017cc4087a05fdceee1/contourpy-1.4.0-cp312-cp312-win_arm64.whl", hash = "sha256:0c7a4c2716a4e98342221954416a836cca77c996c14ddbf22b5f01d5d93ca09c", size = 559521, upload-time = "2026-09-11T19:03:10.047Z" },
-]
-
-[[package]]
-name = "course-agent"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "chromadb" },
-    { name = "fastmcp" },
-    { name = "langgraph" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "rank-bm25" },
-    { name = "tiktoken" },
-    { name = "tqdm" },
-]
-
-[package.optional-dependencies]
-analysis = [
-    { name = "matplotlib" },
-    { name = "scikit-learn" },
-]
-local = [
-    { name = "sentence-transformers" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "course-agent", extra = ["analysis"] },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "chromadb" },
-    { name = "fastmcp" },
-    { name = "langgraph" },
-    { name = "matplotlib", marker = "extra == 'analysis'" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "rank-bm25" },
-    { name = "scikit-learn", marker = "extra == 'analysis'" },
-    { name = "sentence-transformers", marker = "extra == 'local'" },
-    { name = "tiktoken" },
-    { name = "tqdm" },
-]
-provides-extras = ["local", "analysis"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "course-agent", extras = ["analysis"] },
-    { name = "pytest" },
-    { name = "ruff" },
 ]
 
 [[package]]
