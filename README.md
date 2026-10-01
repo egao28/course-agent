@@ -227,7 +227,7 @@ almabot/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), scripts/saturation.py = why the fitted gate accepts nothing (→ report/day8_saturation_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── scripts/       # repo maintenance, never imported by the library: export_requirements.py regenerates requirements*.txt from uv.lock
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -2661,6 +2661,40 @@ the report adds is what those tables cannot say on their own. `retrieval_score`'
 1.000 [1.000, 1.000] is perfect separation on 10 non-null rows, not certainty. Its "significant"
 paired differences rank different rows (10 vs 42), so they do not show it orders the same answers
 better.
+
+### Why the gate accepts nothing
+
+`eval/scripts/saturation.py` ([#140](../../issues/140)) asks what RQ3 left unasked: the fit
+answers nothing, and "not measurable at this calibration size" names the sample size without
+checking that it is the cause. Writes
+`report/day8_saturation_{conformal_key}.md` (committed: `day8_saturation_83496e82.md`).
+
+```bash
+uv run python -m eval.scripts.saturation --check    # the two inputs; write nothing
+uv run python -m eval.scripts.saturation            # write the diagnosis
+uv run python -m eval.scripts.saturation --dry-run  # print it, write nothing
+```
+
+It separates three causes that have three different fixes. **Saturation**: a scan can only cut
+where the signal changes value, and `verbalized` puts 28 of its 46 calib rows on the single top
+value, so the smallest set it can offer is 28 — the 9-row set the correction would accept is one
+this signal cannot make. **Observed errors**: 5 of those 28 are wrong where acceptance allows 1.
+**The finite-sample correction**: it adds 0.028 at that n, a quarter of the gap, and forbids sets
+smaller than `ceil(1/α − 1)` outright — so it decides nothing here, because the signal offers no
+small set for it to forbid.
+
+**It reads calib and computes nothing.** Two committed files, no model call, no resample, and the
+`test` half is never opened. It refuses to write unless its own replay of the acceptance rule is
+the committed scan step for step, so a diagnosis is always a diagnosis of the fit on disk.
+
+**α reaches the rule as a `Fraction`.** The α sweep asks about ratios such as `6/29`, whose
+nearest float is below them, and a cut whose risk is exactly α has to pass rather than fail by a
+hair. `eval.conformal.scan` takes a float, which is right for one fixed α from YAML and wrong for
+a sweep, so the sweep replays the same steps exactly.
+
+**Every candidate is printed, and none may be chosen.** Section 2 is the whole curve rather than
+the prefix the rule tests. Reading a threshold off it would be the global selection the
+fixed-sequence rule refuses, and the report says so where someone might.
 
 ## End-to-end run
 

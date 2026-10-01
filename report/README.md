@@ -543,8 +543,15 @@ one.
 calibration draws, not on this calib half and not on this test half. At calib n = 46 and α = 0.10
 the scan cannot accept a threshold that answers fewer than 9 rows
 [src](../eval/runs/conformal_83496e82.json "n, alpha, min_answered_to_accept"), and no threshold
-for any signal was accepted, so the fitted gate answers nothing. RQ3's honest answer is "not
-measurable at this calibration size", and the deployed system still runs the fixed Day 2 threshold.
+for any signal was accepted, so the fitted gate answers nothing and the deployed system still runs
+the fixed Day 2 threshold. **The calibration size is not what refuses it** (#140). `verbalized`
+puts 28 of those rows on the single top value, so the strictest set any threshold can offer is 28
+rows, and 5 of those answers are wrong where acceptance allows at most 1
+[src](day8_saturation_83496e82.md "6. The answer"). The finite-sample correction adds 0.028 to
+that, about a quarter of the gap, and removing it would not accept the cut either. A larger
+calibration half would sharpen the 0.179 [0.061, 0.369] that interval sits on
+[src](day8_saturation_83496e82.md "5. How many rows would it take?"), not relax what it has to
+clear.
 
 **The gate was bypassed for Day 5.** Every signal and every Day 5 label describes an answer the
 deployed gate might never have allowed. Day 6's run is the one with the gate on, and its answered
@@ -584,9 +591,9 @@ function of, the labelling and review steps among them. It is what
 `uv run python -m eval.scripts.final_report --inputs` names per artifact, flattened into the order
 a reader would re-run it in, and every line writes a file this repo carries. The steps that need a
 person rather than an API key are marked, and the second annotator's sheet is handed over rather
-than run. The report commands — `day3_report`, `day4_report`, `day5_report`, `e2e_metrics` and
-`final_report` — read committed files: they call no model and draw no new sample, which is what
-makes a re-run of the last two a check rather than another result.
+than run. The report commands — `day3_report`, `day4_report`, `day5_report`, `e2e_metrics`,
+`saturation` and `final_report` — read committed files: they call no model and draw no new
+sample, which is what makes a re-run of the last two a check rather than another result.
 
 It used to say "the runs, in the order they were made" over a list that left twelve of them out,
 systematically: the measuring runs were here and the steps where a person decides something were
@@ -647,6 +654,8 @@ uv run python -m eval.scripts.e2e_labels --split test --review --reviewer NAME  
 uv run python -m eval.scripts.e2e_labels --split test --write-csv
 uv run python -m eval.scripts.e2e_metrics
 uv run python -m eval.scripts.attribute --review --reviewer NAME       # a person, per failure
+
+uv run python -m eval.scripts.saturation                               # why the gate accepts none
 
 uv run python -m eval.scripts.final_report                             # day 7; this file's tables
 uv run python -m eval.scripts.final_report --check                     # ... and fails if one moved

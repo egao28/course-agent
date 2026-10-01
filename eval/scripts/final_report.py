@@ -98,6 +98,7 @@ from eval.scripts import (
     e2e_labels,
     e2e_metrics,
     risk_coverage,
+    saturation,
 )
 from eval.scripts import day4_report as d4
 from eval.scripts import day5_report as d5
@@ -243,6 +244,8 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
               "uv run python -m eval.scripts.day4_report"),
         Input("day 5 report", d5.report_path(cfg, src.report_dir),
               "uv run python -m eval.scripts.day5_report"),
+        Input("day 8 saturation", saturation.report_path(cfg, src.report_dir),
+              "uv run python -m eval.scripts.saturation"),
         Input("corpus: courses", src.courses, "committed; re-exported by "
               "`uv run python -m ingest.export_almabot` from the private CSV"),
         Input("corpus: prerequisites", src.prereqs, "committed; re-exported by "
