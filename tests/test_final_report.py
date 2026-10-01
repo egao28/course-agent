@@ -462,6 +462,19 @@ def test_the_front_page_needs_its_reference_divider(front_page, front_text: str)
         front_page.region(broken)
 
 
+def test_the_reproduction_chain_runs_without_the_private_csv(text: str) -> None:
+    """`data.source` is not in the repo, so a live `ingest.export_almabot` would stop a reader
+    on an absolute path from the machine that made the export. Its three `data/*.json` outputs
+    are committed, and the chain starts at `ingest.chunk` (#132).
+    """
+    block = text.split("## Reproduction")[1].split("```bash")[1].split("```")[0]
+    live = [one for one in block.splitlines() if one.startswith("uv run")]
+    assert live, "the Reproduction block names no commands; the section changed shape"
+    assert not [one for one in live if "export_almabot" in one]
+    assert "# uv run python -m ingest.export_almabot" in block
+    assert any("ingest.chunk" in one for one in live)
+
+
 # --- the sha256 chain ------------------------------------------------------------------------
 
 
