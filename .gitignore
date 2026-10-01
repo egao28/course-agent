@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+# a second environment beside uv's, e.g. `python -m venv .venv-pip` (#116)
+.venv-*/
 venv/
 *.egg-info/
 .pytest_cache/

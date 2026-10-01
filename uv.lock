@@ -108,19 +108,19 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "chromadb" },
-    { name = "fastmcp" },
-    { name = "langgraph" },
+    { name = "chromadb", specifier = ">=1.5.9" },
+    { name = "fastmcp", specifier = ">=4.0.3" },
+    { name = "langgraph", specifier = ">=1.2.11" },
     { name = "matplotlib", marker = "extra == 'analysis'" },
     { name = "numpy" },
-    { name = "openai" },
-    { name = "pydantic" },
+    { name = "openai", specifier = ">=3.13.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "scikit-learn", marker = "extra == 'analysis'" },
     { name = "sentence-transformers", marker = "extra == 'local'" },
-    { name = "tiktoken" },
+    { name = "tiktoken", specifier = ">=0.14.0" },
     { name = "tqdm" },
 ]
 provides-extras = ["local", "analysis"]
