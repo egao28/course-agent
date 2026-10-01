@@ -470,6 +470,18 @@ def test_the_front_page_needs_its_reference_divider(front_page, front_text: str)
 BLOCK_FLAG_RE = re.compile(r"--[a-z][a-z-]*")
 ADD_ARGUMENT_RE = re.compile(r"""add_argument\(\s*["'](--[a-z][a-z-]*)["']""")
 
+#: ``raise ValueError("choose exactly one of --judge, --review, ...")`` -- a module that refuses
+#: to do two things in one sitting, and the flags it refuses between. Named from the message
+#: rather than listed here, so a module that adopts the convention is covered by adopting it.
+ONE_OF_RE = re.compile(r"choose exactly one of ((?:--[a-z-]+(?:, )?)+)")
+
+#: The same, for the flag that names the person: a module that records a verdict refuses to
+#: record it anonymously.
+REVIEWER_RE = re.compile(r"--reviewer NAME is required")
+
+#: ... and the modes that return before it asks, so they need no name.
+REPORTING = frozenset({"--judge", "--stats", "--write-csv"})
+
 
 def reproduction_commands(text: str) -> list[str]:
     """The live `uv run` commands of `report/README.md`'s Reproduction block, `&&` split apart."""
@@ -478,24 +490,124 @@ def reproduction_commands(text: str) -> list[str]:
     return [part.strip() for one in lines for part in one.split("&&") if part.strip()]
 
 
-def test_every_flag_in_the_reproduction_block_is_one_its_module_defines(text: str) -> None:
-    """A command that argparse rejects exits 2, so the block stops there.
+def input_commands(cfg) -> list[str]:
+    """The `uv run` lines `--inputs` prints beside an artifact that is not there.
 
-    `eval.conformal --split calib` did: the module fits on calib by construction and documents
-    that it has no `--split`. Checked statically against each module's `add_argument` calls --
-    flags before `-m` belong to `uv`, not to the module (#132).
+    `inputs()` holds the other half of the same claim -- it is what the block is checked for
+    completeness against below -- so a command that would not start is as wrong here as there.
+    Five entries are deliberately prose instead and are skipped; the test below names them.
     """
+    return [one.how for one in fr.inputs(cfg, fr.Sources()) if one.how.startswith("uv run")]
+
+
+def module_and_args(command: str) -> tuple[str, list[str]] | None:
+    """`uv run ... -m mod --flag value` -> `("mod", ["--flag value", ...])`, or `None` for no `-m`.
+
+    A flag *before* `-m` belongs to `uv` -- `--env-file`, `--extra local` -- and is not the
+    module's to define. A value is kept with its flag so that `--split calib` and `--split test`
+    are two different commands rather than one.
+    """
+    if " -m " not in command:
+        return None
+    module, _, rest = command.split(" -m ", 1)[1].partition(" ")
+    tokens, args, i = rest.split(), [], 0
+    while i < len(tokens):
+        if not tokens[i].startswith("--"):
+            i += 1
+        elif i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+            args.append(f"{tokens[i]} {tokens[i + 1]}")
+            i += 2
+        else:
+            args.append(tokens[i])
+            i += 1
+    return module, args
+
+
+def would_not_start(command: str) -> list[str]:
+    """Every static reason `command` would stop at its module's argument handling, or `[]`.
+
+    Three rules, each one a defect this repo has actually shipped: a flag the module does not
+    define (`eval.conformal --split calib`, exit 2, #132); none or several of the modes a module
+    takes exactly one of (`e2e_labels --split test`, exit 1); and a reviewing sitting with nobody's
+    name on it (`review_signals --split test`, exit 1). All three are read out of the module's own
+    source, so a module that changes its mind is what moves the test.
+    """
+    found = module_and_args(command)
+    if found is None:
+        return []
+    module, args = found
+    source = REPO_ROOT / (module.replace(".", "/") + ".py")
+    if not source.exists():
+        return [f"{module} is not a module in this repo"]
+    text = source.read_text(encoding="utf-8")
+    flags = {one.split(" ")[0] for one in args}
+    defined = set(ADD_ARGUMENT_RE.findall(text))
+    wrong = [f"{command}: {module} does not define {flag}"
+             for flag in sorted(flags) if flag not in defined and flag != "--help"]
+    for listed in ONE_OF_RE.findall(text):
+        modes = set(BLOCK_FLAG_RE.findall(listed))
+        if len(flags & modes) != 1:
+            got = ", ".join(sorted(flags & modes)) or "none"
+            wrong.append(f"{command}: {module} takes exactly one of "
+                         f"{', '.join(sorted(modes))}, got {got}")
+    if REVIEWER_RE.search(text) and not flags & (REPORTING | {"--reviewer"}):
+        wrong.append(f"{command}: {module} refuses a verdict with no name on it; "
+                     "give it --reviewer NAME")
+    return wrong
+
+
+def test_every_command_in_the_reproduction_block_would_start(text: str) -> None:
+    """A command that stops at argparse exits 2 and the block stops with it, so a reader who
+    pastes it gets a usage message instead of the next artifact (#132, #136)."""
     commands = [one for one in reproduction_commands(text) if " -m " in one]
     assert commands, "the Reproduction block names no modules; the section changed shape"
-    wrong = []
-    for one in commands:
-        module, _, rest = one.split(" -m ", 1)[1].partition(" ")
-        source = REPO_ROOT / (module.replace(".", "/") + ".py")
-        assert source.exists(), f"{module} is not a module in this repo"
-        defined = set(ADD_ARGUMENT_RE.findall(source.read_text(encoding="utf-8")))
-        wrong += [f"{module} {flag}" for flag in BLOCK_FLAG_RE.findall(rest)
-                  if flag not in defined and flag != "--help"]
-    assert not wrong, f"flag(s) the module does not define: {wrong}"
+    wrong = [one for command in commands for one in would_not_start(command)]
+    assert not wrong, "command(s) that would not start:\n  " + "\n  ".join(wrong)
+
+
+def test_every_command_the_inputs_list_prints_would_start(cfg) -> None:
+    """The same rules on `inputs()`, which is where two of them rotted unseen.
+
+    `--inputs` prints these beside a missing artifact as the thing to run, and nothing read them
+    back: `agreement --read SHEET` had no such flag, and the review log's line had no
+    `--reviewer` (#136).
+    """
+    commands = input_commands(cfg)
+    assert commands, "inputs() names no commands; the list changed shape"
+    wrong = [one for command in commands for one in would_not_start(command)]
+    assert not wrong, "command(s) that would not start:\n  " + "\n  ".join(wrong)
+
+
+def test_every_command_the_inputs_list_names_is_in_the_reproduction_block(cfg, text: str) -> None:
+    """#136: the block says it is the whole chain, and `inputs()` is what the chain is.
+
+    Matched on the module and its *module* arguments, so the block may be more explicit than
+    `inputs()` -- `risk_coverage --split test` where the default is left implicit -- and may put
+    `--extra local` before `-m`, which belongs to `uv`. What it may not do is leave one out, which
+    is how twelve commands went missing while the lead sentence said otherwise.
+    """
+    block = [found for found in map(module_and_args, reproduction_commands(text))
+             if found is not None]
+    absent = []
+    for command in input_commands(cfg):
+        module, args = module_and_args(command)
+        if not any(module == block_module and set(args) <= set(block_args)
+                   for block_module, block_args in block):
+            absent.append(command)
+    assert not absent, ("the Reproduction block claims every command that writes an input; "
+                        "these are not in it:\n  " + "\n  ".join(absent))
+
+
+def test_the_inputs_with_no_command_are_the_ones_that_are_not_run(cfg) -> None:
+    """Five `how` strings are sentences rather than lines to paste: the three pages this script
+    writes, and the two corpus files, which are committed output of a step a reader cannot run.
+    A sixth is a decision about what the Reproduction block carries, so it fails here until it is
+    made rather than being skipped quietly by the completeness test above (#136).
+    """
+    prose = sorted(one.name for one in fr.inputs(cfg, fr.Sources())
+                   if not one.how.startswith("uv run"))
+    assert prose == ["corpus: courses", "corpus: prerequisites", "the claims page",
+                     "the front page", "the report itself"]
 
 
 def test_the_reproduction_chain_runs_without_the_private_csv(text: str) -> None:
