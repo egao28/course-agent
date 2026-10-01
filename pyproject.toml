@@ -3,6 +3,10 @@ name = "almabot"
 version = "0.1.0"
 description = "Hybrid retrieval (dense + BM25 + RRF) and agent layer for a UIUC course-planning assistant"
 readme = "README.md"
+# MIT, and the file says what it does not reach: `data/` redistributes 4,502 courses of
+# university catalog text, which is not ours to relicense (#119, `data/README.md`).
+license = "MIT"
+license-files = ["LICENSE"]
 # Single interpreter version for reproducible lock/indexes/reports. The stack also resolves on
 # 3.13/3.14 today, but chromadb's onnxruntime dependency has lagged new CPython releases before,
 # so stay one version behind the system Python (3.14).
