@@ -1,13 +1,19 @@
-"""``report/README.md``'s tables, and the check that every number in it traces to a file.
+"""The two front pages' tables, and the check that every number in them traces to a file.
 
     uv run python -m eval.scripts.final_report            # rewrite the generated blocks
-    uv run python -m eval.scripts.final_report --check     # verify it; exit 1 if it does not
-    uv run python -m eval.scripts.final_report --dry-run   # print the rewritten file, write nothing
+    uv run python -m eval.scripts.final_report --check     # verify them; exit 1 if it does not
+    uv run python -m eval.scripts.final_report --dry-run   # print the rewritten pages, write none
     uv run python -m eval.scripts.final_report --inputs    # list the artifacts it reads
 
-#106's report is the one report in this repo whose prose is *written*, not formatted -- that is
-what makes it half a day's work rather than a generator. So the Day 3-5 rule ("every number is
-formatted from the data") is replaced here by a lighter one that a machine can still hold:
+Two files are held to the rules, and :data:`Page` is the difference between them.
+``report/README.md`` (#106) is the study's report, and all of it is checked. The README (#117) is
+checked down to its ``## Reference`` heading and no further: above it sits a front page that states
+the three RQ conclusions with their intervals, below it the 2,600-line component reference that
+predates the rule and that nothing here generates.
+
+Both are pages whose prose is *written*, not formatted -- that is what makes #106 half a day's
+work rather than a generator. So the Day 3-5 rule ("every number is formatted from the data") is
+replaced here by a lighter one that a machine can still hold:
 
 * **A table or a figure is generated.** Each sits between ``<!-- BEGIN gen:name -->`` and
   ``<!-- END gen:name -->``, and :data:`BLOCKS` is the only thing that writes between them. A
@@ -40,7 +46,9 @@ dormant gate (:func:`eval.scripts.day5_report.switched_config`); an edge only th
 is dashed. The graph is built with stub nodes, so drawing the diagram opens no index and reads no
 key. What stays hand-written is the *wording* on each box and arrow (:data:`LABELS`,
 :data:`EDGE_LABELS`) -- with the parts a config decides interpolated, so the model name, the
-retrieval mode and ``k`` in the picture move when ``config.yaml`` does.
+retrieval mode and ``k`` in the picture move when ``config.yaml`` does. Both pages carry that one
+block, rendered once and spliced into each: #117 asked for one diagram with one owner, and the
+owner is this script rather than either file, so the two copies cannot drift.
 
 **No clock anywhere.** A re-run over unchanged inputs rewrites the same bytes, which is what makes
 ``--check`` a check rather than a diff against a timestamp.
@@ -60,6 +68,7 @@ from typing import Any, NamedTuple, TextIO
 from agent.graph import CONDITIONAL, NODE_BUILDERS, build_graph, node_names
 from agent.state import EXITS, INTENTS
 from config import (
+    REPO_ROOT,
     REPORT_DIR,
     Config,
     bootstrap_key,
@@ -90,9 +99,13 @@ from eval.scripts.split import META_SUFFIX
 from eval.validate import plural
 from retrieval.fusion import top_k_final
 
-#: The file this script owns. Not named after a hash: it is the front page, and a front page that
-#: changes its name when a threshold moves is a front page nobody can link to.
+#: The files this script owns. Neither is named after a hash: they are front pages, and a front
+#: page that changes its name when a threshold moves is one nobody can link to.
 REPORT = REPORT_DIR / "README.md"
+FRONT = REPO_ROOT / "README.md"
+
+#: Where the repo's README stops being a front page. Everything below is the component reference.
+REFERENCE = "## Reference"
 
 #: ``<!-- BEGIN gen:name -->`` / ``<!-- END gen:name -->``, at the start of a line.
 MARKER_RE = re.compile(r"^<!-- (?P<edge>BEGIN|END) gen:(?P<name>[a-z0-9_]+) -->$", re.MULTILINE)
@@ -110,10 +123,39 @@ INTENTS_PATH = DATASET_PATH.with_name("v1_intents.jsonl")
 # --- what it reads ------------------------------------------------------------------------------
 
 
+class Page(NamedTuple):
+    """One file this script writes into, and the part of it the rules apply to."""
+
+    path: Path
+    #: The ``gen:`` blocks this page carries. A name here with no markers in the region, or a
+    #: marker naming a block the page does not carry, is an error rather than a no-op.
+    blocks: tuple[str, ...]
+    #: The heading the checked region ends at, or ``None`` for the whole file.
+    upto: str | None = None
+
+    def region(self, text: str) -> str:
+        """The part of ``text`` held to the rules.
+
+        Always a prefix, so an offset into it is an offset into the file and a reported line
+        number is the one an editor jumps to. Give it the whole file: it is not idempotent, and
+        it refuses a text with no divider in it rather than guessing that one was already cut.
+        """
+        if self.upto is None:
+            return text
+        cut = text.find(f"\n{self.upto}\n")
+        if cut < 0:
+            raise ValueError(
+                f"{rel_to_repo(self.path)} has no `{self.upto}` heading: that heading is where "
+                "the front page ends and the reference begins, and without it there is no front "
+                "page to check")
+        return text[: cut + 1]
+
+
 class Sources(NamedTuple):
-    """Where the report reads from, rooted so a test can point it at a copy."""
+    """Where the pages read from, rooted so a test can point them at a copy."""
 
     report: Path = REPORT
+    front: Path = FRONT
     runs_dir: Path = RUNS_DIR
     dataset: Path = DATASET_PATH
     intents: Path = INTENTS_PATH
@@ -175,6 +217,7 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
         Input("day 5 report", d5.report_path(cfg, src.report_dir),
               "uv run python -m eval.scripts.day5_report"),
         Input("the report itself", src.report, "this script, with no flags"),
+        Input("the front page", src.front, "this script, with no flags"),
     ]
 
 
@@ -187,7 +230,8 @@ def render_inputs(cfg: Config, src: Sources, out: TextIO) -> int:
     """``--inputs``: every artifact, and what to run for each that is absent."""
     found = inputs(cfg, src)
     width = max(len(one.name) for one in found)
-    out.write(f"report {rel_to_repo(src.report)}  config {cfg.hash}  full {cfg.full_hash}\n\n")
+    out.write(f"pages {rel_to_repo(src.front)}, {rel_to_repo(src.report)}  "
+              f"config {cfg.hash}  full {cfg.full_hash}\n\n")
     for one in found:
         out.write(f"  {'ok     ' if one.path.exists() else 'MISSING'}  {one.name:<{width}}  "
                   f"{rel_to_repo(one.path)}\n")
@@ -694,6 +738,15 @@ BLOCKS: dict[str, Callable[[Facts], str]] = {
     "inputs": block_inputs,
 }
 
+#: The blocks the repo's README carries. One name, and it is also the report's: the diagram is
+#: rendered once and spliced into both, so the two copies are the same bytes by construction.
+FRONT_BLOCKS: tuple[str, ...] = ("architecture",)
+
+
+def pages(src: Sources) -> list[Page]:
+    """The files this script writes into, in the order a reader meets them."""
+    return [Page(src.front, FRONT_BLOCKS, REFERENCE), Page(src.report, tuple(BLOCKS))]
+
 
 # --- the blocks, in the file ---------------------------------------------------------------------
 
@@ -708,8 +761,12 @@ class Marked(NamedTuple):
     end: int
 
 
-def marked(text: str) -> list[Marked]:
-    """Every generated block in the file, checking the markers pair up and name a renderer."""
+def marked(text: str, names: Sequence[str]) -> list[Marked]:
+    """Every generated block in ``text``, checking the markers pair up and name a renderer.
+
+    ``names`` is the page's own blocks. A page carries some of :data:`BLOCKS`, not all of them,
+    so a marker for a block this page does not carry is as much an error as one for nothing.
+    """
     out: list[Marked] = []
     open_name: str | None = None
     start = 0
@@ -728,14 +785,19 @@ def marked(text: str) -> list[Marked]:
             open_name = None
     if open_name is not None:
         raise ValueError(f"gen:{open_name} is never closed")
-    unknown = [one.name for one in out if one.name not in BLOCKS]
+    unknown = [one.name for one in out if one.name not in names]
     if unknown:
-        raise ValueError(f"no renderer for gen:{', gen:'.join(unknown)}; "
-                         f"eval/scripts/final_report.py has {', '.join(BLOCKS)}")
-    absent = [name for name in BLOCKS if not any(one.name == name for one in out)]
+        raise ValueError(f"no renderer for gen:{', gen:'.join(unknown)} on this page; "
+                         f"it carries {', '.join(names)}")
+    absent = [name for name in names if not any(one.name == name for one in out)]
     if absent:
-        raise ValueError(f"the report has no gen:{' or gen:'.join(absent)} markers to write into")
+        raise ValueError(f"the page has no gen:{' or gen:'.join(absent)} markers to write into")
     return out
+
+
+def blocks_in(page: Page, text: str) -> list[Marked]:
+    """Every generated block on ``page``: its own names, inside its own region."""
+    return marked(page.region(text), page.blocks)
 
 
 def render_blocks(facts: Facts) -> dict[str, str]:
@@ -743,10 +805,14 @@ def render_blocks(facts: Facts) -> dict[str, str]:
     return {name: render(facts).rstrip("\n") + "\n" for name, render in BLOCKS.items()}
 
 
-def splice(text: str, bodies: Mapping[str, str]) -> str:
-    """``text`` with every generated block replaced by its rendered body."""
+def splice(page: Page, text: str, bodies: Mapping[str, str]) -> str:
+    """``text`` with every one of ``page``'s generated blocks replaced by its rendered body.
+
+    The spans come from the page's region, which is a prefix, so they index ``text`` unchanged
+    and everything below the region is copied through untouched.
+    """
     out = text
-    for one in reversed(marked(text)):
+    for one in reversed(blocks_in(page, text)):
         out = out[: one.start] + bodies[one.name] + out[one.end :]
     return out
 
@@ -788,14 +854,16 @@ ALLOWED: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 class Problem(NamedTuple):
-    """One thing ``--check`` found, and where in the file to look for it."""
+    """One thing ``--check`` found, and where to look for it: two pages, so the file is part of
+    the answer."""
 
+    path: Path
     line: int
     message: str
 
     def __str__(self) -> str:
         """``path:line: message`` -- the form an editor can jump to."""
-        return f"{rel_to_repo(REPORT)}:{self.line}: {self.message}"
+        return f"{rel_to_repo(self.path)}:{self.line}: {self.message}"
 
 
 def _leaves(node: Any) -> list[Any]:
@@ -921,9 +989,10 @@ def mask(text: str) -> str:
     return out
 
 
-def paragraphs(text: str) -> list[tuple[int, str]]:
-    """``(offset, paragraph)`` for the prose: no generated block, no fenced code, no heading."""
-    spans = [(one.start, one.end) for one in marked(text)]
+def paragraphs(page: Page, text: str) -> list[tuple[int, str]]:
+    """``(offset, paragraph)`` for the page's prose: no generated block, no fence, no heading."""
+    spans = [(one.start, one.end) for one in blocks_in(page, text)]
+    text = page.region(text)
     in_fence = False
     out: list[tuple[int, str]] = []
     offset = 0
@@ -955,19 +1024,20 @@ def _line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def check_blocks(text: str, bodies: Mapping[str, str]) -> list[Problem]:
+def check_blocks(page: Page, text: str, bodies: Mapping[str, str]) -> list[Problem]:
     """Every generated block is what the generator writes today."""
     return [
-        Problem(_line_of(text, one.start),
+        Problem(page.path, _line_of(text, one.start),
                 f"gen:{one.name} is out of date; run `python -m eval.scripts.final_report`")
-        for one in marked(text)
+        for one in blocks_in(page, text)
         if text[one.start : one.end] != bodies[one.name]
     ]
 
 
-def check_tables(text: str) -> list[Problem]:
+def check_tables(page: Page, text: str) -> list[Problem]:
     """A table in the prose is a number nothing regenerates, so it is an error."""
-    spans = [(one.start, one.end) for one in marked(text)]
+    spans = [(one.start, one.end) for one in blocks_in(page, text)]
+    text = page.region(text)
     problems = []
     in_fence = False
     offset = 0
@@ -978,101 +1048,113 @@ def check_tables(text: str) -> list[Problem]:
         if in_fence or any(a <= here < b for a, b in spans):
             continue
         if line.startswith("|"):
-            problems.append(Problem(_line_of(text, here),
+            problems.append(Problem(page.path, _line_of(text, here),
                                     "a table outside a gen: block; give it a generator"))
     return problems
 
 
-def check_hex(text: str, facts: Facts) -> list[Problem]:
-    """Every hex key the report names is one this config produces, or an input's sha256."""
+def check_hex(page: Page, text: str, facts: Facts) -> list[Problem]:
+    """Every hex key the page names is one this config produces, or an input's sha256."""
     digests = [digest for _, _, digest in facts.digests]
     problems = []
-    for m in HEX_RE.finditer(text):
+    for m in HEX_RE.finditer(page.region(text)):
         token = m.group(0)
         if token in facts.keys or any(digest.startswith(token) for digest in digests):
             continue
         problems.append(Problem(
-            _line_of(text, m.start()),
+            page.path, _line_of(text, m.start()),
             f"`{token}` is not a key this config produces or a prefix of an input's sha256; "
             f"this config's are {', '.join(sorted(facts.keys))}",
         ))
     return problems
 
 
-def check_prose(text: str, facts: Facts) -> list[Problem]:
-    """Every number in the prose is explained by a ``[src]`` link in its own paragraph."""
+def check_prose(page: Page, text: str, facts: Facts) -> list[Problem]:
+    """Every number in the prose is explained by a ``[src]`` link in its own paragraph.
+
+    A link is relative to the page that carries it, so the same run file is ``../eval/runs/x`` from
+    the report and ``eval/runs/x`` from the repo's README, and both resolve to the one file.
+    """
     problems: list[Problem] = []
     cache: dict[tuple[str, str], set[float] | None] = {}
-    for start, paragraph in paragraphs(text):
+    for start, paragraph in paragraphs(page, text):
         links = [(m.group("path"), m.group("key")) for m in SRC_RE.finditer(paragraph)]
         values: set[float] = set()
         for path, key in links:
-            target = (facts.src.report.parent / path).resolve()
+            target = (page.path.parent / path).resolve()
             line = _line_of(text, start + paragraph.find(path))
             if not target.exists():
-                problems.append(Problem(line, f"[src] link to a missing file: {path}"))
+                problems.append(Problem(page.path, line,
+                                        f"[src] link to a missing file: {path}"))
                 continue
             if (path, key) not in cache:
                 cache[path, key] = candidates(target, key)
             found = cache[path, key]
             if found is None:
                 problems.append(Problem(
-                    line, f"{path} has no key path {key!r} to read a value from"))
+                    page.path, line, f"{path} has no key path {key!r} to read a value from"))
                 continue
             values |= found
         for m in NUMBER_RE.finditer(mask(paragraph)):
             number = m.group(0)
             line = _line_of(text, start + m.start())
             if not links:
-                problems.append(Problem(line, f"{number} has no [src] link in its paragraph"))
+                problems.append(Problem(page.path, line,
+                                        f"{number} has no [src] link in its paragraph"))
             elif not explains(number, values):
                 named = ", ".join(sorted({path for path, _ in links}))
                 problems.append(Problem(
-                    line, f"{number} is not a value in {named} at the precision it is printed to"))
+                    page.path, line,
+                    f"{number} is not a value in {named} at the precision it is printed to"))
     return problems
 
 
-def check(text: str, facts: Facts, bodies: Mapping[str, str]) -> list[Problem]:
-    """Everything ``--check`` checks, in the order a reader would notice it."""
+def check(page: Page, text: str, facts: Facts, bodies: Mapping[str, str]) -> list[Problem]:
+    """Everything ``--check`` checks on one page, in the order a reader would notice it."""
     return sorted(
-        [*check_blocks(text, bodies), *check_tables(text), *check_prose(text, facts),
-         *check_hex(text, facts)],
+        [*check_blocks(page, text, bodies), *check_tables(page, text),
+         *check_prose(page, text, facts), *check_hex(page, text, facts)],
         key=lambda one: one.line,
     )
 
 
-def render_check(text: str, facts: Facts, bodies: Mapping[str, str], out: TextIO) -> int:
-    """``--check``: what does not trace, one per line, or a count of what does."""
-    problems = check(text, facts, bodies)
+def render_check(page: Page, text: str, facts: Facts, bodies: Mapping[str, str],
+                 out: TextIO) -> int:
+    """``--check`` for one page: what does not trace, one per line, or a count of what does."""
+    problems = check(page, text, facts, bodies)
     out.writelines(f"{problem}\n" for problem in problems)
-    numbers = sum(len(NUMBER_RE.findall(mask(p))) for _, p in paragraphs(text))
-    links = len(SRC_RE.findall(text))
+    region = page.region(text)
+    numbers = sum(len(NUMBER_RE.findall(mask(p))) for _, p in paragraphs(page, text))
+    links = len(SRC_RE.findall(region))
     if problems:
-        out.write(f"\n{plural(len(problems), 'problem')} in {rel_to_repo(facts.src.report)}.\n")
+        out.write(f"\n{plural(len(problems), 'problem')} in {rel_to_repo(page.path)}.\n")
         return 1
-    out.write(f"{rel_to_repo(facts.src.report)}: {len(bodies)} generated blocks are current, "
-              f"{numbers} prose numbers carry {links} source links, and every input matches the "
-              "sha256 its sidecar records.\n")
+    scope = "" if page.upto is None else f" above `{page.upto}`"
+    out.write(f"{rel_to_repo(page.path)}{scope}: {plural(len(page.blocks), 'generated block')} "
+              f"current, {numbers} prose numbers carry {links} source links, and every input "
+              "matches the sha256 its sidecar records.\n")
     return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Rewrite the report's generated blocks, or with ``--check`` verify every number traces.
+    """Rewrite both pages' generated blocks, or with ``--check`` verify every number traces.
 
     ``--check`` writes nothing and exits 1 on a failure, which is what CI runs; ``--inputs``
-    lists the artifacts behind the report and ``--dry-run`` prints it instead of writing it.
+    lists the artifacts behind the pages and ``--dry-run`` prints them instead of writing them.
+    Every mode covers both pages, because a diagram that is current in one file and stale in the
+    other is the drift this script exists to prevent.
     """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.final_report",
-        description="Rewrite report/README.md's generated blocks, or check that every number in "
-                    "it traces to a committed file.",
+        description="Rewrite the generated blocks in README.md and report/README.md, or check "
+                    "that every number in them traces to a committed file.",
     )
     parser.add_argument("--check", action="store_true",
-                        help="verify the committed report and write nothing; exit 1 if it fails")
+                        help="verify the committed pages and write nothing; exit 1 if it fails")
     parser.add_argument("--dry-run", action="store_true",
-                        help="print the rewritten report instead of writing it")
+                        help="print the rewritten pages instead of writing them")
     parser.add_argument("--inputs", action="store_true",
-                        help="list the artifacts the report is built from; write nothing")
+                        help="list the artifacts the pages are built from; write nothing")
     parser.add_argument("--config", default=None, help="config file path (default: config.yaml)")
     args = parser.parse_args(argv)
 
@@ -1086,21 +1168,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         facts = read_facts(cfg, src)
         bodies = render_blocks(facts)
-        text = src.report.read_text(encoding="utf-8")
+        written = [(page, page.path.read_text(encoding="utf-8")) for page in pages(src)]
         if args.check:
-            return render_check(text, facts, bodies, sys.stdout)
-        body = splice(text, bodies)
+            return max(render_check(page, text, facts, bodies, sys.stdout)
+                       for page, text in written)
+        spliced = [(page, text, splice(page, text, bodies)) for page, text in written]
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
     if args.dry_run:
-        sys.stdout.write(body)
+        for page, _, body in spliced:
+            sys.stdout.write(f"<!-- {rel_to_repo(page.path)} -->\n{body}")
         return 0
-    if body == text:
-        print(f"{rel_to_repo(src.report)} is already current")
-        return 0
-    src.report.write_text(body, encoding="utf-8")
-    print(f"rewrote {plural(len(bodies), 'block')} in {rel_to_repo(src.report)}")
+    for page, text, body in spliced:
+        if body == text:
+            print(f"{rel_to_repo(page.path)} is already current")
+            continue
+        page.path.write_text(body, encoding="utf-8")
+        print(f"rewrote {plural(len(page.blocks), 'block')} in {rel_to_repo(page.path)}")
     return 0
 
 

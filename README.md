@@ -1,5 +1,11 @@
 # almabot
 
+A question-answering agent over one university's course catalog whose real subject is **when to
+decline**. Three exits — an answer, a hand-off to a human advisor, or "that is not what this
+catalog is for" — and which one it picks is the thing being measured. It was built to answer three
+questions on a frozen, hand-verified eval set: does hybrid retrieval beat BM25, which confidence
+signal ranks correct answers above wrong ones, and does a conformal gate hold its error target.
+
 The retrieval + agent layer of AlmaBot, a UIUC course-planning assistant. Data comes from the other
 half, the React frontend [`almabot-web`](../almabot-web), whose `scripts/build_data.py` exports
 courses and the prerequisite DAG from `course-catalog.csv`. Throughout this README, *`almabot-web`*
@@ -8,6 +14,122 @@ means that repo; **almabot**, unqualified, is this one.
 Renamed from `course-agent` (#113). GitHub redirects the old URL, so a link written before the
 rename still resolves — but nothing here leans on that redirect: no module, import path, config key,
 index key or committed artifact ever carried the old name, so none of them moved.
+
+## Architecture
+
+<!-- BEGIN gen:architecture -->
+```mermaid
+flowchart TD
+    query(["a student's question"])
+    route_intent["route_intent — one of five intents (gpt-4o-mini)"]
+    dispatch["dispatch — a catalog tool, or retrieve(q, bm25, k=5)"]
+    check_evidence["check_evidence — gate: enough here to answer from?"]
+    answer["answer — grounded draft, then a citation check"]
+    confidence_gate["confidence_gate — dormant, built but not wired (#92)"]
+    out_of_scope["out_of_scope — exit: not a catalog question"]
+    refuse_handoff["refuse_handoff — exit: hand it to an advisor"]
+    reply(["one reply"])
+
+    query --> route_intent
+    route_intent -->|any other intent| dispatch
+    route_intent -->|intent is out_of_scope| out_of_scope
+    dispatch --> check_evidence
+    check_evidence -->|evidence_ok| answer
+    check_evidence -->|not evidence_ok| refuse_handoff
+    answer -.->|only under evidence.method conformal| confidence_gate
+    answer -->|cited a doc it was never given| refuse_handoff
+    answer --> reply
+    confidence_gate -.->|signal under threshold| refuse_handoff
+    confidence_gate -.->|signal over threshold| reply
+    out_of_scope --> reply
+    refuse_handoff --> reply
+```
+<!-- END gen:architecture -->
+
+Drawn from the wiring rather than from a picture: the node ids are the keys of `NODE_BUILDERS` in
+[`agent/graph.py`](agent/graph.py), the dashed node and its edges are the ones only
+`evidence.method: conformal` builds, and `tests/test_final_report.py` fails if the diagram and the
+registry drift apart. [The report](report/README.md) carries the same block — it is rendered once
+and spliced into both files, so there is one diagram and one owner.
+
+## What was found
+
+Three research questions, each read once on the frozen `test` half, and the answers are mostly
+negative. That is the result, not a shortfall in it.
+
+- **RQ1 — hybrid retrieval does not beat BM25 on this corpus.** Recall@5 hybrid − bm25 = −0.004
+  [−0.085, 0.073], an interval that contains 0; MRR@5 = −0.120 [−0.225, −0.023], which excludes 0
+  *against* hybrid. n = 41 test rows [src](eval/runs/bootstrap_baa560e9.json
+  "metrics.recall_at_5.difference, metrics.mrr_at_5.difference, n.test"). So the agent runs `bm25`.
+
+  Reranking hybrid's top 20 with a cross-encoder separates from neither
+  [src](report/day4_ablation_c73b197d.md "Reranking hybrid's top 20").
+
+- **RQ2 — the model's verbalized self-confidence ranks correct answers above incorrect ones.**
+  Test AUROC 0.847 [0.722, 0.953]
+  [src](eval/runs/risk_coverage_test_37164723.json "signals.verbalized.auroc"), for the signal
+  chosen on calib at 0.792 [src](eval/runs/conformal_83496e82.json "signals.verbalized.auroc").
+  `retrieval_score` scores 1.000 on the 10 rows that are not tool rows
+  [src](eval/runs/risk_coverage_test_37164723.json
+  "signals.retrieval_score.auroc, signals.retrieval_score.n"); that is a warning about a small
+  sample, not the headline.
+
+- **RQ3 — at α = 0.10 conformal calibration accepts no threshold at all**, so the calibrated gate
+  answers nothing: the fit returns t = +inf on calib n = 46
+  [src](eval/runs/conformal_83496e82.json "alpha, n"). The fixed 0.7 gate it was meant to replace
+  answers 42 of 42 at a realized error of 0.405 [0.256, 0.567]
+  [src](eval/runs/conformal_eval_83496e82.json "fixed, signals.verbalized") — the error of having
+  no gate at all. Both endpoints of the risk-coverage curve, and nothing in between.
+
+## What this is not
+
+- **Never deployed.** No users, no latency budget, no cost per session, no logs of what anyone
+  actually asks. The questions were drafted from the catalog by the people who built the system.
+- **One catalog, one term.** 4,502 courses for `2026-sp` [src](data/README.md "courses.json"), from
+  a single university. "The catalog cannot answer this" is a property of that export rather than of
+  the world, so the `unanswerable` bucket measures the system against a snapshot.
+- **Small.** The test half is n = 63, with per-bucket n from 10 to 29
+  [src](eval/runs/e2e_metrics_c73b197d.json "n, buckets"). Every interval above is wide, and the
+  ones that contain 0 are the reason RQ1 and RQ3 are reported as non-findings.
+
+## Quickstart
+
+Three commands from a fresh clone, and none of them needs an API key. The corpus and the lexical
+index are rebuilt rather than cloned — `data/{courses,prereqs,requirements}.json` are committed,
+the indexes are not — and the third query forces an intent and answers with a stand-in client, so
+the graph, the dispatch table, the catalog tools and the citation check all run for free.
+
+```bash
+uv sync --locked --extra analysis
+uv run python -m ingest.chunk && uv run python -m ingest.build_bm25
+uv run python -m agent "What do I need before CS 374?" --intent prereq_chain --fake-model
+```
+
+`uv run pytest -q` then runs the suite, and these are the same steps CI takes, in the same order
+([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) — including the `analysis` extra,
+without which part of the suite skips. The dense index is the one thing not built here, because it
+calls the embeddings API; the agent runs `bm25`, which is RQ1's answer. Everything that does call a
+model is run as `uv run --env-file .env python -m ...`; see [Setup](#setup) below for the key, and
+[Command line](#command-line) for what the trace prints. Reproducing a published table from a
+genuinely clean machine, following this file and nothing else, is its own exercise and is #118.
+
+## Where to read what
+
+- **[`report/README.md`](report/README.md)** — the study. What was built, what was measured, on
+  which rows, and where it fails. Start here; the three lines above are its abstract.
+- **The per-day reports** — [the eval set](report/day3_evalset_c73b197d.md) and
+  [the second annotator](report/day3_agreement_c73b197d.md), then
+  [the retrieval ablation](report/day4_ablation_c73b197d.md), then
+  [confidence signals and conformal gating](report/day5_signals_83496e82.md).
+- **[`eval/GUIDELINES.md`](eval/GUIDELINES.md)** — how the questions were written, and what makes
+  one answerable in the first place.
+- **The reference below** — chunking, the two indexes, fusion, every graph node, every eval script.
+  It is for someone changing the code, not for someone deciding whether to trust the numbers.
+
+## Reference
+
+Everything below this line is the component reference. It is not held to the front page's rule that
+every number carries a source link; `final_report.py --check` stops here.
 
 ## Setup
 
@@ -2683,18 +2805,31 @@ Four things the tables do not say on their own:
 
 ## Report traceability
 
-`eval/scripts/final_report.py` ([#107](../../issues/107)) owns the tables in
-[report/README.md](report/README.md) and the promise the first paragraph of that file makes.
+`eval/scripts/final_report.py` ([#107](../../issues/107)) owns the generated tables in two files
+and the promise each of them makes about its numbers.
 
 ```bash
 uv run python -m eval.scripts.final_report            # rewrite the generated blocks
-uv run python -m eval.scripts.final_report --check     # verify the committed file; exit 1 if not
+uv run python -m eval.scripts.final_report --check     # verify the committed files; exit 1 if not
 uv run python -m eval.scripts.final_report --inputs    # list the artifacts it reads
 ```
 
-The front page is the one report here whose prose is *written* rather than formatted, so the Day
-3–5 rule ("every number is printed from the data") is replaced by two lighter ones that a machine
-can still hold:
+`final_report.pages()` is the list, and `Page` is the difference between the two entries:
+
+| page | what is held to the rules |
+| --- | --- |
+| [report/README.md](report/README.md) ([#106](../../issues/106)) | the whole file |
+| this file ([#117](../../issues/117)) | everything above `## Reference`, and nothing below it |
+
+The front matter of this file is a front page, not a reference: six sections, three RQ conclusions
+with their intervals, and a `[src]` link on every number. The 2,600 lines below the divider predate
+the rule and nothing generates them, so `Page.upto` stops the check there rather than exempting
+them one at a time. The architecture diagram is on both pages, rendered once and spliced into each,
+so the two copies cannot drift — one diagram, one owner, and the owner is the script.
+
+Both of these are reports whose prose is *written* rather than formatted, so the Day 3–5 rule
+("every number is printed from the data") is replaced by two lighter ones that a machine can still
+hold:
 
 - **A table or a figure is generated.** Each sits between `<!-- BEGIN gen:name -->` and
   `<!-- END gen:name -->`, and `final_report.BLOCKS` is the only thing that writes between them.
@@ -2727,9 +2862,11 @@ because a number that wants an entry there usually wants a link instead.
   around a number is a fair reading of it is a person's judgement, and section 7 of the report is
   where that judgement is written down.
 
-`tests/test_final_report.py` runs `--check` on the committed report, then breaks the report a dozen
-ways — a typed-in wrong number, a stale block, a mistyped key path, an unsourced number, a stale
-hash — and fails if any of them passes.
+`tests/test_final_report.py` runs `--check` on both committed pages, then breaks them a dozen and a
+half ways — a typed-in wrong number, a stale block, a mistyped key path, an unsourced number, a
+stale hash, a missing `## Reference` divider, a diagram that has drifted from the registry — and
+fails if any of them passes. It also asserts that a number below the divider is *not* a failure,
+because a scope that quietly widened would make the reference impossible to edit.
 
 ## Day 1 goal
 

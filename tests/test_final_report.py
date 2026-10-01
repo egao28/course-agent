@@ -1,5 +1,5 @@
-"""Tests for report/README.md and the generator behind it: the study's front page, held to its
-sources.
+"""Tests for the two pages the generator owns -- report/README.md (#106) and the repo's own
+README.md above its `## Reference` divider (#117) -- held to their sources.
 
 A hand-written report cannot be unit tested into being *true*. What it can be held to is every
 claim it makes that something else in the repo already decides, and this file holds it to four:
@@ -22,6 +22,14 @@ claim it makes that something else in the repo already decides, and this file ho
 There is no exemption list for links. ``report/day4_ablation_c73b197d.md`` (#77) was the one link
 that did not resolve here, and the merge of ``feat/56-drafting-harness`` brought it, so a link
 target that is missing is simply a failure.
+
+#117 adds a second page and one new thing to hold: **its scope**. The repo's README is a front page
+down to ``## Reference`` and a 2,600-line component reference below it, and the check applies to the
+first part only. Both directions are tested -- an unsourced number above the divider fails, the same
+sentence below it does not -- because a scope that quietly widened would make the reference
+impossible to edit, and one that quietly narrowed would make the front page unchecked. The diagram
+is on both pages and is asserted to be the same bytes, so the four tests above hold the front
+page's copy too.
 """
 
 from __future__ import annotations
@@ -42,6 +50,12 @@ from eval.scripts.signals import RUNS_DIR
 pytest.importorskip("scipy")
 
 REPORT = fr.REPORT
+FRONT = fr.FRONT
+
+
+def page_of(path) -> fr.Page:
+    """The :class:`final_report.Page` for ``path``, found by path rather than by position."""
+    return next(one for one in fr.pages(fr.Sources()) if one.path == path)
 
 #: The sections #106 commissioned, in the order it commissioned them. Matched as prefixes of an
 #: ``## `` heading, so the wording after the number is free.
@@ -53,6 +67,17 @@ SECTIONS = (
     "## 5. Results",
     "## 6. Error analysis",
     "## 7. Limitations",
+)
+
+#: The front page's sections, in the order #117 commissioned them. The name, the diagram, the
+#: three RQ conclusions, the caveats, the commands, the map, and then the divider.
+FRONT_SECTIONS = (
+    "## Architecture",
+    "## What was found",
+    "## What this is not",
+    "## Quickstart",
+    "## Where to read what",
+    "## Reference",
 )
 
 #: Diagram nodes that are not graph nodes: where a query enters and where a reply leaves. The
@@ -78,8 +103,23 @@ def cfg():
 
 
 @pytest.fixture(scope="module")
+def report_page() -> fr.Page:
+    return page_of(REPORT)
+
+
+@pytest.fixture(scope="module")
+def front_page() -> fr.Page:
+    return page_of(FRONT)
+
+
+@pytest.fixture(scope="module")
 def text() -> str:
     return REPORT.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def front_text() -> str:
+    return FRONT.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
@@ -94,13 +134,20 @@ def bodies(facts):
 
 
 @pytest.fixture(scope="module")
-def blocks(text: str) -> dict[str, str]:
+def blocks(report_page, text: str) -> dict[str, str]:
     """``{name: body}`` for each generated block, checking the markers pair up as it goes."""
-    return {one.name: text[one.start : one.end] for one in fr.marked(text)}
+    return {one.name: text[one.start : one.end] for one in fr.blocks_in(report_page, text)}
 
 
-def problems(text: str, facts, bodies) -> list[str]:
-    return [problem.message for problem in fr.check(text, facts, bodies)]
+@pytest.fixture(scope="module")
+def front_blocks(front_page, front_text: str) -> dict[str, str]:
+    """The same, for the one block the repo's README carries."""
+    return {one.name: front_text[one.start : one.end]
+            for one in fr.blocks_in(front_page, front_text)}
+
+
+def problems(page, text: str, facts, bodies) -> list[str]:
+    return [problem.message for problem in fr.check(page, text, facts, bodies)]
 
 
 # --- the diagram is the graph ----------------------------------------------------------------
@@ -183,90 +230,236 @@ def test_every_local_link_resolves(text: str) -> None:
 # --- #107: the committed report passes its own check -----------------------------------------
 
 
-def test_check_passes_on_the_committed_report(text: str, facts, bodies) -> None:
+def test_check_passes_on_the_committed_report(report_page, text: str, facts, bodies) -> None:
     """The acceptance criterion: every block current, every number sourced, every value found."""
-    assert problems(text, facts, bodies) == []
+    assert problems(report_page, text, facts, bodies) == []
 
 
-def test_the_generator_is_idempotent(text: str, bodies) -> None:
+def test_the_generator_is_idempotent(report_page, text: str, bodies) -> None:
     """Rewriting over unchanged inputs writes the same bytes, so --check is not a clock."""
-    assert fr.splice(text, bodies) == text
+    assert fr.splice(report_page, text, bodies) == text
 
 
 # --- ... and fails, one way at a time --------------------------------------------------------
 
 
-def test_a_typed_in_wrong_number_fails(text: str, facts, bodies) -> None:
+def test_a_typed_in_wrong_number_fails(report_page, text: str, facts, bodies) -> None:
     """The expensive half: a prose number that no longer matches the file it cites."""
     broken = text.replace("with AUROC\n0.847 [0.722, 0.953]", "with AUROC\n0.857 [0.722, 0.953]")
     assert broken != text, "the sentence this test edits has been rewritten"
-    found = problems(broken, facts, bodies)
+    found = problems(report_page, broken, facts, bodies)
     assert any("0.857 is not a value in" in one for one in found), found
 
 
-def test_a_number_the_file_still_has_passes(text: str, facts, bodies) -> None:
+def test_a_number_the_file_still_has_passes(report_page, text: str, facts, bodies) -> None:
     """The same sentence, rounded the other way at one more decimal: 0.847 is 0.8471, not 0.8470."""
     ok = text.replace("with AUROC\n0.847 [0.722, 0.953]", "with AUROC\n0.8471 [0.722, 0.953]")
     assert ok != text
-    assert [one for one in problems(ok, facts, bodies) if "0.8471" in one] == []
+    assert [one for one in problems(report_page, ok, facts, bodies) if "0.8471" in one] == []
 
 
-def test_a_stale_block_fails(text: str, facts, bodies) -> None:
+def test_a_stale_block_fails(report_page, text: str, facts, bodies) -> None:
     broken = text.replace("| `bm25` | 0.870", "| `bm25` | 0.871")
     assert broken != text, "the day4 table this test edits has changed shape"
-    assert any("gen:day4_ablation is out of date" in one for one in problems(broken, facts, bodies))
+    assert any("gen:day4_ablation is out of date" in one
+               for one in problems(report_page, broken, facts, bodies))
 
 
-def test_an_unsourced_number_fails(text: str, facts, bodies) -> None:
+def test_an_unsourced_number_fails(report_page, text: str, facts, bodies) -> None:
     broken = text + "\nThe agent answered 7 questions about the weather.\n"
-    assert any("7 has no [src] link" in one for one in problems(broken, facts, bodies))
+    assert any("7 has no [src] link" in one
+               for one in problems(report_page, broken, facts, bodies))
 
 
-def test_a_number_in_a_table_outside_a_block_fails(text: str, facts, bodies) -> None:
+def test_a_number_in_a_table_outside_a_block_fails(report_page, text: str, facts, bodies) -> None:
     broken = text + "\n| rows | 41 |\n"
-    assert any("a table outside a gen: block" in one for one in problems(broken, facts, bodies))
+    assert any("a table outside a gen: block" in one
+               for one in problems(report_page, broken, facts, bodies))
 
 
-def test_a_mistyped_key_path_fails(text: str, facts, bodies) -> None:
+def test_a_mistyped_key_path_fails(report_page, text: str, facts, bodies) -> None:
     broken = text.replace('"metrics.false_block")', '"metrics.false_blocks")')
     assert broken != text
-    found = problems(broken, facts, bodies)
+    found = problems(report_page, broken, facts, bodies)
     assert any("has no key path 'metrics.false_blocks'" in one for one in found), found
 
 
-def test_one_bad_path_in_a_multi_key_title_fails(text: str, facts, bodies) -> None:
+
+def test_one_bad_path_in_a_multi_key_title_fails(report_page, text: str, facts, bodies) -> None:
     """A title naming three paths is not excused by two of them resolving."""
     broken = text.replace('"n, alpha, min_answered_to_accept")', '"n, alpha, min_answered")')
     assert broken != text
     assert any("has no key path 'n, alpha, min_answered'" in one
-               for one in problems(broken, facts, bodies))
+               for one in problems(report_page, broken, facts, bodies))
 
 
-def test_a_link_to_a_missing_file_fails(text: str, facts, bodies) -> None:
+def test_a_link_to_a_missing_file_fails(report_page, text: str, facts, bodies) -> None:
     broken = text.replace("../eval/runs/e2e_metrics_c73b197d.json \"n\")",
                           "../eval/runs/e2e_metrics_nope.json \"n\")")
     assert broken != text
-    assert any("[src] link to a missing file" in one for one in problems(broken, facts, bodies))
+    assert any("[src] link to a missing file" in one
+               for one in problems(report_page, broken, facts, bodies))
 
 
-def test_a_hex_key_this_config_does_not_produce_fails(text: str, facts, bodies) -> None:
+def test_a_hex_key_this_config_does_not_produce_fails(
+        report_page, text: str, facts, bodies) -> None:
     """A stale hash reads exactly like a current one, and names a file nobody has."""
     broken = text.replace("config hash `c73b197d`", "config hash `c73b197e`", 1)
     assert broken != text
     assert any("`c73b197e` is not a key this config produces" in one
-               for one in problems(broken, facts, bodies))
+               for one in problems(report_page, broken, facts, bodies))
 
 
 def test_an_unclosed_marker_is_refused(text: str) -> None:
     broken = text.replace("<!-- END gen:day6_exits -->", "")
     with pytest.raises(ValueError, match="gen:day6_exits"):
-        fr.marked(broken)
+        fr.marked(broken, tuple(fr.BLOCKS))
 
 
 def test_a_block_with_no_renderer_is_refused(text: str) -> None:
     broken = text.replace("gen:day6_exits", "gen:day6_exitss")
     with pytest.raises(ValueError, match="no renderer for gen:day6_exitss"):
-        fr.marked(broken)
+        fr.marked(broken, tuple(fr.BLOCKS))
+
+
+def test_a_block_the_page_does_not_carry_is_refused(front_page, front_text: str) -> None:
+    """The repo's README carries the diagram and nothing else. A table spliced into it would be
+    written by a generator that no longer knows which file it is writing."""
+    broken = front_text.replace("gen:architecture", "gen:day6_exits")
+    with pytest.raises(ValueError, match="no renderer for gen:day6_exits on this page"):
+        fr.blocks_in(front_page, broken)
+
+
+# --- #117: the front page, and the scope of the check ----------------------------------------
+
+
+def test_the_front_pages_diagram_is_the_reports(front_blocks, blocks) -> None:
+    """The same bytes in both files.
+
+    This is what "one diagram, one owner" buys, and it is also what makes the four diagram tests
+    above cover the front page: they read the report's copy, and this asserts there is only one.
+    """
+    assert front_blocks["architecture"] == blocks["architecture"]
+
+
+def test_the_front_page_carries_only_the_diagram(front_blocks, front_page) -> None:
+    assert set(front_blocks) == set(front_page.blocks) == {"architecture"}
+
+
+def test_front_page_sections_in_the_commissioned_order(front_text: str) -> None:
+    headings = [line for line in front_text.splitlines() if line.startswith("## ")]
+    found = [h for h in headings if h in FRONT_SECTIONS]
+    assert found == list(FRONT_SECTIONS), (
+        f"the front page's sections are missing or out of order: {found}"
+    )
+
+
+def test_the_front_page_names_all_three_rqs(front_page, front_text: str) -> None:
+    """One conclusion per research question, above the divider, each with its own source link."""
+    region = front_page.region(front_text)
+    for rq in ("RQ1", "RQ2", "RQ3"):
+        line = [one for one in region.splitlines() if one.startswith(f"- **{rq} ")]
+        assert len(line) == 1, f"expected one {rq} conclusion bullet, found {len(line)}"
+
+
+def test_every_front_page_link_resolves(front_page, front_text: str) -> None:
+    """Every link above the divider names a file in this repo that is there.
+
+    Targets outside the repo are skipped rather than exempted: `almabot-web` is the other half of
+    the project, and a clone of this repo does not contain it. In-page anchors never match
+    :data:`LINK_RE` in the first place.
+    """
+    region = front_page.region(front_text)
+    links = sorted({m.group("path") for m in LINK_RE.finditer(region)})
+    inside = [one for one in links if (REPO_ROOT / one).resolve().is_relative_to(REPO_ROOT)]
+    assert inside, "no in-repo links on the front page; LINK_RE or the page changed shape"
+    missing = [one for one in inside if not (REPO_ROOT / one).resolve().exists()]
+    assert not missing, f"link(s) to files that do not exist: {missing}"
+
+
+def test_check_passes_on_the_committed_front_page(front_page, front_text, facts, bodies) -> None:
+    """#117's acceptance criterion: every number in the front matter traces to a file."""
+    assert problems(front_page, front_text, facts, bodies) == []
+
+
+def test_the_front_page_generator_is_idempotent(front_page, front_text, bodies) -> None:
+    assert fr.splice(front_page, front_text, bodies) == front_text
+
+
+def test_a_rounded_away_interval_on_the_front_page_fails(
+        front_page, front_text, facts, bodies) -> None:
+    """RQ1 rests on an interval that contains 0. Rounding the bound away is the one edit that
+    would turn the finding into its opposite, so it is the one this test makes."""
+    broken = front_text.replace("[−0.085, 0.073]", "[−0.085, 0.003]", 1)
+    assert broken != front_text, "RQ1's interval has been rewritten"
+    found = problems(front_page, broken, facts, bodies)
+    assert any("0.003 is not a value in" in one for one in found), found
+
+
+def test_an_unsourced_number_above_the_divider_fails(
+        front_page, front_text, facts, bodies) -> None:
+    broken = front_text.replace(
+        "\n## Reference\n", "\nThe agent answered 7 questions about the weather.\n\n"
+                            "## Reference\n", 1)
+    assert broken != front_text
+    assert any("7 has no [src] link" in one
+               for one in problems(front_page, broken, facts, bodies))
+
+
+def test_the_reference_body_is_not_checked(front_page, front_text, facts, bodies) -> None:
+    """The same sentence below the divider is not a failure.
+
+    The reference is 2,600 lines of unsourced numbers -- token counts, RRF constants, flag tables
+    -- and #117 put a front page above it rather than a `[src]` link on every line of it.
+    """
+    broken = front_text + "\nThe agent answered 7 questions about the weather.\n"
+    assert problems(front_page, broken, facts, bodies) == []
+
+
+def test_a_table_below_the_divider_is_not_checked(front_page, front_text, facts, bodies) -> None:
+    """`check_tables` stops at the divider too: the reference's flag tables are hand-written."""
+    assert problems(front_page, front_text + "\n| flag | what it does |\n", facts, bodies) == []
+
+
+#: A hash `check_hex` would reject: `data/chunks.meta.json`'s chunk key, which is a hash of the
+#: term, the strategy and the chunk template rather than anything `config.hash` covers. The
+#: reference body names it in backticks already, so the mirrored pair below is not hypothetical.
+STALE_HASH = "Chunk key `05d00726`.\n"
+
+
+def test_a_stale_hash_above_the_divider_fails(front_page, front_text, facts, bodies) -> None:
+    """`check_hex` applies to the front matter: a hash there is one this config produces."""
+    broken = front_text.replace("\n## Reference\n", f"\n{STALE_HASH}\n## Reference\n", 1)
+    assert broken != front_text
+    assert any("`05d00726` is not a key this config produces" in one
+               for one in problems(front_page, broken, facts, bodies))
+
+
+def test_a_stale_hash_below_the_divider_is_not_checked(
+        front_page, front_text, facts, bodies) -> None:
+    """...and stops at the divider. The reference names that key, and five others like it, in the
+    sections that explain which part of the config each one hashes."""
+    assert problems(front_page, front_text + STALE_HASH, facts, bodies) == []
+
+
+def test_a_report_relative_src_link_on_the_front_page_fails(
+        front_page, front_text, facts, bodies) -> None:
+    """A `[src]` link is relative to the page carrying it, so the report's own `../eval/runs/...`
+    is a broken link here -- which is the mistake copying a sentence across makes."""
+    broken = front_text.replace("[src](eval/runs/conformal_83496e82.json",
+                                "[src](../eval/runs/conformal_83496e82.json", 1)
+    assert broken != front_text
+    assert any("[src] link to a missing file" in one
+               for one in problems(front_page, broken, facts, bodies))
+
+
+def test_the_front_page_needs_its_reference_divider(front_page, front_text: str) -> None:
+    """Without the divider there is no front page, and the check says so rather than checking
+    2,600 lines of reference or silently checking nothing."""
+    broken = front_text.replace("\n## Reference\n", "\n## Everything else\n", 1)
+    assert broken != front_text
+    with pytest.raises(ValueError, match="has no `## Reference` heading"):
+        front_page.region(broken)
 
 
 # --- the sha256 chain ------------------------------------------------------------------------
