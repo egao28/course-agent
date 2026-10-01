@@ -130,7 +130,7 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
         ]
     return found + [
         Input("review log", runs / REVIEW_LOG,
-              "uv run python -m eval.scripts.review_signals --split test"),
+              "uv run python -m eval.scripts.review_signals --split test --reviewer NAME"),
         Input("risk-coverage numbers", risk_coverage.result_path(REPORTED, cfg, runs),
               "uv run --extra analysis python -m eval.scripts.risk_coverage"),
         Input("risk-coverage figure", risk_coverage.figure_path(REPORTED, cfg, src.figures_dir),

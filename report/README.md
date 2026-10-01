@@ -579,8 +579,18 @@ pass-through, and that is a structural limit of the current design rather than a
 
 ## Reproduction
 
-The runs, in the order they were made. Each writes a committed file; none of the later commands
-calls a model or resamples.
+The whole chain, in the order it was made: every command that wrote a file these two pages are a
+function of, the labelling and review steps among them. It is what
+`uv run python -m eval.scripts.final_report --inputs` names per artifact, flattened into the order
+a reader would re-run it in, and every line writes a file this repo carries. The steps that need a
+person rather than an API key are marked, and the second annotator's sheet is handed over rather
+than run. The report commands — `day3_report`, `day4_report`, `day5_report`, `e2e_metrics` and
+`final_report` — read committed files: they call no model and draw no new sample, which is what
+makes a re-run of the last two a check rather than another result.
+
+It used to say "the runs, in the order they were made" over a list that left twelve of them out,
+systematically: the measuring runs were here and the steps where a person decides something were
+not, so the dataset, the gold intents and both Day 3 reports arrived from nowhere (#136).
 
 The export line is commented out because it is the one step a reader cannot run.
 `ingest.export_almabot` reads the catalog CSV at `data.source`, which is not in the repo, and
@@ -596,26 +606,50 @@ uv sync --locked --extra analysis
 uv run python -m ingest.chunk
 uv run --env-file .env python -m ingest.build_dense && uv run python -m ingest.build_bm25
 
-uv run --env-file .env python -m eval.scripts.ablation --split calib   # day 4, RQ1
+uv run --env-file .env python -m eval.scripts.draft_items --bucket fact      # day 3
+uv run --env-file .env python -m eval.scripts.draft_items --bucket ambiguous
+uv run python -m eval.scripts.build_multihop            # walked, not drafted
+uv run python -m eval.scripts.build_unanswerable        # constructed, not drafted
+uv run --env-file .env python -m eval.scripts.triage
+uv run python -m eval.scripts.review                    # a person, on every drafted row
+uv run python -m eval.scripts.recheck                   # ... and the sample to read again
+uv run python -m eval.scripts.review --promote
+uv run python -m eval.scripts.split
+uv run python -m eval.scripts.agreement                 # the blind sheet, for a second person
+uv run python -m eval.scripts.agreement --score         # ... once it comes back filled in
+uv run python -m eval.scripts.day3_report
+
+uv run --env-file .env python -m eval.scripts.ablation --split calib         # day 4, RQ1
 uv run --env-file .env python -m eval.scripts.ablation --split test
+uv run --env-file .env --extra local python -m eval.scripts.rerank --split calib
+uv run --env-file .env --extra local python -m eval.scripts.rerank --split test
 uv run python -m eval.scripts.bootstrap
+uv run --env-file .env python -m eval.scripts.hybrid_failures
 uv run python -m eval.scripts.day4_report
 
-uv run --env-file .env python -m eval.scripts.signals --split calib    # day 5, RQ2/RQ3
+uv run --env-file .env python -m eval.scripts.signals --split calib          # day 5, RQ2/RQ3
 uv run --env-file .env python -m eval.scripts.signals --split test
 uv run --env-file .env python -m eval.scripts.judge --split calib
 uv run --env-file .env python -m eval.scripts.judge --split test
+uv run python -m eval.scripts.review_signals --split calib --reviewer NAME   # a person, per row
+uv run python -m eval.scripts.review_signals --split test --reviewer NAME
+uv run python -m eval.scripts.review_signals --split calib --write-csv
+uv run python -m eval.scripts.review_signals --split test --write-csv
 uv run python -m eval.scripts.risk_coverage --split test
 uv run python -m eval.conformal                                        # calib only; no --split
 uv run python -m eval.scripts.conformal_eval
 uv run python -m eval.scripts.day5_report
 
-uv run --env-file .env python -m eval.scripts.e2e --split test         # day 6
-uv run --env-file .env python -m eval.scripts.e2e_labels --split test
+uv run python -m eval.intents --stamp --labeller NAME                  # day 6; a person
+uv run --env-file .env python -m eval.scripts.e2e --split test
+uv run --env-file .env python -m eval.scripts.e2e_labels --split test --judge
+uv run python -m eval.scripts.e2e_labels --split test --review --reviewer NAME   # a person
+uv run python -m eval.scripts.e2e_labels --split test --write-csv
 uv run python -m eval.scripts.e2e_metrics
-uv run python -m eval.scripts.attribute --review --reviewer NAME
-uv run python -m eval.scripts.final_report                             # rewrites this file's tables
-uv run python -m eval.scripts.final_report --check                     # ... and fails if a number moved
+uv run python -m eval.scripts.attribute --review --reviewer NAME       # a person, per failure
+
+uv run python -m eval.scripts.final_report                             # day 7; this file's tables
+uv run python -m eval.scripts.final_report --check                     # ... and fails if one moved
 ```
 
 ## Traceability
