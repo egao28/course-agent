@@ -606,7 +606,7 @@ uv run --env-file .env python -m eval.scripts.signals --split test
 uv run --env-file .env python -m eval.scripts.judge --split calib
 uv run --env-file .env python -m eval.scripts.judge --split test
 uv run python -m eval.scripts.risk_coverage --split test
-uv run python -m eval.conformal --split calib
+uv run python -m eval.conformal                                        # calib only; no --split
 uv run python -m eval.scripts.conformal_eval
 uv run python -m eval.scripts.day5_report
 
