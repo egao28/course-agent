@@ -95,6 +95,7 @@ from eval.scripts import (
     conformal_eval,
     day3_report,
     e2e,
+    e2e_labels,
     e2e_metrics,
     risk_coverage,
 )
@@ -198,6 +199,7 @@ def day6_inputs(cfg: Config, src: Sources) -> list[Input]:
     """Day 6's own artifacts. Day 4's and Day 5's are their reports' lists, not this one's."""
     runs = src.runs_dir
     run = e2e.run_path("test", cfg, runs)
+    csv = e2e_labels.csv_path("test", cfg, runs)
     metrics = e2e_metrics.result_path(cfg, runs)
     attribution = attribute.attribution_path(cfg, runs)
     return [
@@ -207,6 +209,13 @@ def day6_inputs(cfg: Config, src: Sources) -> list[Input]:
               "uv run --env-file .env python -m eval.scripts.e2e --split test"),
         Input("e2e run sidecar", run.with_suffix(META_SUFFIX),
               "uv run --env-file .env python -m eval.scripts.e2e --split test"),
+        # The labelled CSV is in :func:`read_facts`'s digest chain and was not in this list, so
+        # ``--inputs`` called the set complete while the metrics it is read through could not be
+        # rebuilt without it (#136).
+        Input("e2e labels", csv,
+              "uv run python -m eval.scripts.e2e_labels --split test --write-csv"),
+        Input("e2e labels sidecar", csv.with_name(csv.name + META_SUFFIX),
+              "uv run python -m eval.scripts.e2e_labels --split test --write-csv"),
         Input("e2e metrics", metrics, "uv run python -m eval.scripts.e2e_metrics"),
         Input("attribution", attribution,
               "uv run python -m eval.scripts.attribute --review --reviewer NAME"),
@@ -229,7 +238,7 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
         Input("day 3 report", sibling(day3_report.STEM, cfg, src),
               "uv run python -m eval.scripts.day3_report"),
         Input("day 3 agreement", sibling(agreement.STEM, cfg, src),
-              "uv run python -m eval.scripts.agreement --read SHEET"),
+              "uv run python -m eval.scripts.agreement --score"),
         Input("day 4 report", sibling(d4.STEM, cfg, src),
               "uv run python -m eval.scripts.day4_report"),
         Input("day 5 report", d5.report_path(cfg, src.report_dir),
