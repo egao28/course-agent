@@ -23,6 +23,10 @@ There is no exemption list for links. ``report/day4_ablation_c73b197d.md`` (#77)
 that did not resolve here, and the merge of ``feat/56-drafting-harness`` brought it, so a link
 target that is missing is simply a failure.
 
+#120 adds a third page, the claims table, and ``tests/test_day7_claims.py`` holds it: its rules
+are a table's rather than a page of prose's, and the two files share nothing but the generator.
+What is here is that the report carries every block except that page's (:data:`REPORT_BLOCKS`).
+
 #117 adds a second page and one new thing to hold: **its scope**. The repo's README is a front page
 down to ``## Reference`` and a 2,600-line component reference below it, and the check applies to the
 first part only. Both directions are tested -- an unsourced number above the divider fails, the same
@@ -216,7 +220,8 @@ def test_sections_in_the_commissioned_order(text: str) -> None:
 
 def test_every_generated_block_is_named_once(blocks: dict[str, str]) -> None:
     """The fixture does the checking; this asserts there is something to check."""
-    assert set(blocks) == set(fr.BLOCKS), "the markers and the renderers have drifted apart"
+    assert set(blocks) == set(fr.REPORT_BLOCKS), (
+        "the markers and the renderers have drifted apart")
     for name, body in blocks.items():
         assert body.strip(), f"gen:{name} is empty"
 
