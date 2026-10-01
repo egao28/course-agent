@@ -130,6 +130,9 @@ genuinely clean machine, following this file and nothing else, is its own exerci
   [the second annotator](report/day3_agreement_c73b197d.md), then
   [the retrieval ablation](report/day4_ablation_c73b197d.md), then
   [confidence signals and conformal gating](report/day5_signals_83496e82.md).
+- **[`report/day7_claims.md`](report/day7_claims.md)** — every claim this study can support, the
+  file and key path behind each number in it, and what each one does not say. The page to answer
+  "where is that from?" with.
 - **[`eval/GUIDELINES.md`](eval/GUIDELINES.md)** — how the questions were written, and what makes
   one answerable in the first place.
 - **The reference below** — chunking, the two indexes, fusion, every graph node, every eval script.
@@ -2837,8 +2840,8 @@ Four things the tables do not say on their own:
 
 ## Report traceability
 
-`eval/scripts/final_report.py` ([#107](../../issues/107)) owns the generated tables in two files
-and the promise each of them makes about its numbers.
+`eval/scripts/final_report.py` ([#107](../../issues/107)) owns the generated tables in three
+files and the promise each of them makes about its numbers.
 
 ```bash
 uv run python -m eval.scripts.final_report            # rewrite the generated blocks
@@ -2846,12 +2849,13 @@ uv run python -m eval.scripts.final_report --check     # verify the committed fi
 uv run python -m eval.scripts.final_report --inputs    # list the artifacts it reads
 ```
 
-`final_report.pages()` is the list, and `Page` is the difference between the two entries:
+`final_report.pages()` is the list, and `Page` is the difference between the entries:
 
 | page | what is held to the rules |
 | --- | --- |
 | [report/README.md](report/README.md) ([#106](../../issues/106)) | the whole file |
 | this file ([#117](../../issues/117)) | everything above `## Reference`, and nothing below it |
+| [report/day7_claims.md](report/day7_claims.md) ([#120](../../issues/120)) | the whole file, and every row of its two tables |
 
 The front matter of this file is a front page, not a reference: six sections, three RQ conclusions
 with their intervals, and a `[src]` link on every number. The 2,600 lines below the divider predate
@@ -2870,10 +2874,16 @@ hold:
   the link names the file and its title names the path inside it, or several paths separated by
   commas. `--check` reads the value there and compares it against the digits, at the precision
   they are printed to.
+- **A claim is read back through its own row.** The claims page *is* a table, so the rule above
+  would not see its numbers. `check_claims` applies the same one to a row: the `[src]` links in
+  the row name the files, and every number in the row — the claim, its interval, its caveat — is
+  read back out of them. Nothing on that page is typed in either; `CLAIMS` is hand-written wording
+  with the numbers interpolated from the files, and a test refuses a digit in the wording.
 
 `--check` fails when a block is stale, a prose number has no link in its paragraph, a linked value
-is not in the linked file, a table sits outside a block, a hex key is not one this config produces,
-or an input's sha256 no longer matches the one its sidecar records. The exceptions are an allowlist
+is not in the linked file, a claim row quotes a number its own sources do not have, a table sits
+outside a block, a hex key is not one this config produces, or an input's sha256 no longer matches
+the one its sidecar records. The exceptions are an allowlist
 in the script (`ALLOWED`) — issue and section numbers, RQ and day labels, the interval level, the
 two formulas, metric names, course codes — and a test fails if it grows past a dozen entries,
 because a number that wants an entry there usually wants a link instead.

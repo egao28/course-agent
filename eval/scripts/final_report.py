@@ -5,13 +5,15 @@
     uv run python -m eval.scripts.final_report --dry-run   # print the rewritten pages, write none
     uv run python -m eval.scripts.final_report --inputs    # list the artifacts it reads
 
-Two files are held to the rules, and :data:`Page` is the difference between them.
+Three files are held to the rules, and :data:`Page` is the difference between them.
 ``report/README.md`` (#106) is the study's report, and all of it is checked. The README (#117) is
 checked down to its ``## Reference`` heading and no further: above it sits a front page that states
 the three RQ conclusions with their intervals, below it the 2,600-line component reference that
-predates the rule and that nothing here generates.
+predates the rule and that nothing here generates. ``report/day7_claims.md`` (#120) is the claims
+page: one row per claim this study can support, the file and key path it comes from, the rows it
+rests on, and what it does not say.
 
-Both are pages whose prose is *written*, not formatted -- that is what makes #106 half a day's
+These are pages whose prose is *written*, not formatted -- that is what makes #106 half a day's
 work rather than a generator. So the Day 3-5 rule ("every number is formatted from the data") is
 replaced here by a lighter one that a machine can still hold:
 
@@ -24,11 +26,18 @@ replaced here by a lighter one that a machine can still hold:
 * **Everything else is an allowlist**, :data:`ALLOWED`, and it is meant to stay short: issue
   numbers, section numbers, RQ and day labels, interval levels, and the two formulas. A number
   that wants a new entry almost always wants a link instead.
+* **A claim is read back through its own row.** The claims page *is* a table, so its numbers are
+  not prose and the rule above would not see them. :func:`check_claims` applies the same rule to
+  a row: the ``[src]`` links in the row name the files, and every number in the row -- in the
+  claim, in its interval, in its caveat -- is read back out of them. Nothing there is typed in
+  either: :data:`CLAIMS` is hand-written wording with the numbers interpolated by
+  :func:`claim_values`, and a test refuses a digit in the wording.
 
 ``--check`` exits non-zero when a block is stale, a prose number has no link, a linked value is
-not in the linked file at the printed precision, a hex key is not one this config produces, a
-table sits outside a block, or any input fails the sha256 chain its sidecars record. That last one
-is not this script's own work: :func:`eval.scripts.day4_report.read_facts` and
+not in the linked file at the printed precision, a claim row quotes a number its own sources do
+not have, a hex key is not one this config produces, a table sits outside a block, or any input
+fails the sha256 chain its sidecars record. That last one is not this script's own work:
+:func:`eval.scripts.day4_report.read_facts` and
 :func:`eval.scripts.day5_report.read_facts` already refuse to build a report out of files that do
 not belong together, and this one runs both of them and adds Day 6's chain to it. A roll-up report
 that re-implemented those checks would be a second opinion nobody asked for.
@@ -97,12 +106,18 @@ from eval.scripts.review import DATASET_PATH
 from eval.scripts.signals import RUNS_DIR
 from eval.scripts.split import META_SUFFIX
 from eval.validate import plural
+from ingest.export_almabot import COURSES_PATH, PREREQS_PATH
 from retrieval.fusion import top_k_final
 
-#: The files this script owns. Neither is named after a hash: they are front pages, and a front
-#: page that changes its name when a threshold moves is one nobody can link to.
+#: The two front pages this script owns. Neither is named after a hash: they are front pages, and
+#: a front page that changes its name when a threshold moves is one nobody can link to.
 REPORT = REPORT_DIR / "README.md"
 FRONT = REPO_ROOT / "README.md"
+
+#: The claims page (#120): one row per claim, and the file and key path behind each number in it.
+#: Not named after a hash either -- it is the page a claim is answered from, and a page that
+#: renames itself when a threshold moves is one nobody can be pointed at twice.
+CLAIMS_PAGE = REPORT_DIR / "day7_claims.md"
 
 #: Where the repo's README stops being a front page. Everything below is the component reference.
 REFERENCE = "## Reference"
@@ -156,11 +171,14 @@ class Sources(NamedTuple):
 
     report: Path = REPORT
     front: Path = FRONT
+    claims: Path = CLAIMS_PAGE
     runs_dir: Path = RUNS_DIR
     dataset: Path = DATASET_PATH
     intents: Path = INTENTS_PATH
     figures_dir: Path = risk_coverage.FIGURES_DIR
     report_dir: Path = REPORT_DIR
+    courses: Path = COURSES_PATH
+    prereqs: Path = PREREQS_PATH
 
 
 class Input(NamedTuple):
@@ -216,8 +234,13 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
               "uv run python -m eval.scripts.day4_report"),
         Input("day 5 report", d5.report_path(cfg, src.report_dir),
               "uv run python -m eval.scripts.day5_report"),
+        Input("corpus: courses", src.courses, "committed; re-exported by "
+              "`uv run python -m ingest.export_almabot` from the private CSV"),
+        Input("corpus: prerequisites", src.prereqs, "committed; re-exported by "
+              "`uv run python -m ingest.export_almabot` from the private CSV"),
         Input("the report itself", src.report, "this script, with no flags"),
         Input("the front page", src.front, "this script, with no flags"),
+        Input("the claims page", src.claims, "this script, with no flags"),
     ]
 
 
@@ -230,8 +253,8 @@ def render_inputs(cfg: Config, src: Sources, out: TextIO) -> int:
     """``--inputs``: every artifact, and what to run for each that is absent."""
     found = inputs(cfg, src)
     width = max(len(one.name) for one in found)
-    out.write(f"pages {rel_to_repo(src.front)}, {rel_to_repo(src.report)}  "
-              f"config {cfg.hash}  full {cfg.full_hash}\n\n")
+    named = ", ".join(rel_to_repo(page.path) for page in pages(src))
+    out.write(f"pages {named}  config {cfg.hash}  full {cfg.full_hash}\n\n")
     for one in found:
         out.write(f"  {'ok     ' if one.path.exists() else 'MISSING'}  {one.name:<{width}}  "
                   f"{rel_to_repo(one.path)}\n")
@@ -268,6 +291,8 @@ class Facts(NamedTuple):
     digests: list[tuple[str, str, str]]
     #: Every hex key the report is allowed to name, and what produces it.
     keys: dict[str, str]
+    #: What the corpus claim counts: courses exported, and prerequisite edges among them.
+    corpus: dict[str, int]
 
 
 def _jsonl(path: Path) -> list[dict[str, Any]]:
@@ -277,6 +302,19 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _corpus(src: Sources) -> dict[str, int]:
+    """The two counts the corpus claim prints: courses exported, and prerequisite edges in them.
+
+    Counted from the committed export rather than quoted from a README, while the claim's own
+    ``[src]`` link points at the README section that documents them -- so a corpus that moves
+    without its documentation moving fails ``--check`` instead of passing quietly.
+    """
+    courses = json.loads(src.courses.read_text(encoding="utf-8"))
+    prereqs = json.loads(src.prereqs.read_text(encoding="utf-8"))
+    return {"courses": len(courses),
+            "prereq_edges": sum(len(row["prereqs"]) for row in prereqs)}
 
 
 def read_facts(cfg: Config, src: Sources) -> Facts:
@@ -368,7 +406,7 @@ def read_facts(cfg: Config, src: Sources) -> Facts:
     }
     return Facts(cfg, src, day4, day5, _jsonl(src.dataset), _jsonl(src.intents),
                  _jsonl(run_path), run_meta, metrics, attribution, attribution_meta,
-                 digests, keys)
+                 digests, keys, _corpus(src))
 
 
 # --- saying it: the header, the dataset, the seeds -----------------------------------------------
@@ -717,6 +755,340 @@ def block_inputs(f: Facts) -> str:
     return md_table(["input", "sha256"], rows)
 
 
+# --- saying it: the claims, and what each one does not say ---------------------------------------
+
+#: Where a claim may read from: the name a row uses, and the file it is under these
+#: :class:`Sources`. A row names a file from this table rather than a path of its own, so a run
+#: file that moves moves in one place, and so a claim cannot cite a file nothing above checked.
+CLAIM_FILES: dict[str, Callable[[Facts], Path]] = {
+    "dataset": lambda f: f.src.dataset,
+    "bootstrap": lambda f: d4.bs.result_path(f.cfg, f.src.runs_dir),
+    "risk_coverage": lambda f: risk_coverage.result_path(d5.REPORTED, f.cfg, f.src.runs_dir),
+    "conformal": lambda f: d5.conformal.result_path(f.cfg, f.src.runs_dir),
+    "conformal_eval": lambda f: conformal_eval.result_path(f.cfg, f.src.runs_dir),
+    "metrics": lambda f: e2e_metrics.result_path(f.cfg, f.src.runs_dir),
+    "attribution": lambda f: attribute.attribution_path(f.cfg, f.src.runs_dir).with_suffix(
+        META_SUFFIX),
+    "front": lambda f: f.src.front,
+}
+
+
+class Src(NamedTuple):
+    """One file a claim's numbers come from, and the key paths inside it they come from."""
+
+    #: A key of :data:`CLAIM_FILES`.
+    file: str
+    #: A JSON key path, a JSONL column, or a Markdown heading -- whatever :func:`candidates`
+    #: reads out of that kind of file.
+    keys: tuple[str, ...]
+
+
+class Claim(NamedTuple):
+    """One claim, where its numbers come from, what it rests on, and what it does not say.
+
+    ``line``, ``rests_on`` and ``unsaid`` are format strings over :func:`claim_values`: the
+    wording is hand-written and every number in it is interpolated from the file the row names.
+    ``tests/test_day7_claims.py`` refuses a digit in any of the three, which is what makes the
+    first column a quotation of the data rather than a sentence about it.
+    """
+
+    #: ``C1``, so a bullet above the table can name the row it quotes.
+    id: str
+    #: The claim, in the register of the measurement rather than of a resume.
+    line: str
+    sources: tuple[Src, ...]
+    #: The rows behind the number, and how the interval was made.
+    rests_on: str
+    #: The caveat that travels with the claim. #120's fourth column, and the reason this file is
+    #: not simply a list of numbers.
+    unsaid: str
+
+
+class Refused(NamedTuple):
+    """A line this work may not be described with, and what the committed numbers say instead."""
+
+    line: str
+    instead: str
+    sources: tuple[Src, ...] = ()
+
+
+#: One row per claim this study can support. The order is the order the study was done in: the
+#: eval set, then RQ1, RQ2 and RQ3, then the end-to-end run, then the corpus under all of it.
+CLAIMS: tuple[Claim, ...] = (
+    Claim(
+        "C1",
+        "A hand-verified evaluation set, {rows} questions in four buckets, split {calib} "
+        "calibration / {test} test and frozen before anything was measured, with a second "
+        "annotator on a sample of it.",
+        (Src("dataset", ("split",)),),
+        "{rows} rows; counts rather than estimates, so no interval. Digest `{dataset_sha}`.",
+        "Not a double-annotated set. The second annotator read a fifteen-row sample, reported it "
+        "verbally for transcription rather than filling the sheet in, and κ on `answer_correct` "
+        "is zero there by construction — the percent agreement is the number to read "
+        "({day3_agreement}). The questions were drafted from the catalog by the people who built "
+        "the system.",
+    ),
+    Claim(
+        "C2",
+        "A tuned hybrid retriever did not beat `bm25` on a code-heavy catalog: Recall@5 "
+        "hybrid − bm25 = {recall_gap}, MRR@5 = {mrr_gap} — the first interval containing zero, "
+        "the second excluding it *against* hybrid.",
+        (Src("bootstrap", ("metrics.recall_at_5.difference", "metrics.mrr_at_5.difference",
+                           "n.test", "n_resamples")),),
+        "n = {n_ablation} test rows, paired bootstrap over {resamples} resamples, 95% "
+        "percentile intervals.",
+        "Not an improvement in either direction that a reader should hear as one. This is why "
+        "the agent ships `bm25`, and a cross-encoder rerank of hybrid's pool separates from "
+        "neither metric ({day4_report}). One corpus, where course codes make a lexical index "
+        "hard to beat.",
+    ),
+    Claim(
+        "C3",
+        "The model's verbalized self-confidence ranks correct answers above wrong ones: test "
+        "AUROC {auroc_test}, for the signal chosen on the calibration half at {auroc_calib}.",
+        (Src("risk_coverage", ("signals.verbalized.auroc", "n", "n_resamples")),
+         Src("conformal", ("signals.verbalized.auroc",))),
+        "n = {n_signals} test rows, {rc_resamples} bootstrap resamples, 95% percentile "
+        "interval; the test half was read once.",
+        "Ranking, not calibration: AUROC says nothing about whether a stated confidence matches "
+        "an observed rate, and the gate fitted on this signal accepts no threshold at all (C4). "
+        "These rows were collected with the evidence gate bypassed, so they describe answers the "
+        "deployed agent might never have released.",
+    ),
+    Claim(
+        "C4",
+        "Conformal calibration at α = {alpha} accepts no threshold on a calibration half of "
+        "{n_calib} rows, so the fitted gate answers nothing; the fixed {fixed_t} threshold it "
+        "was built to replace answers {gate_answered} of {n_signals} at a realized error of "
+        "{gate_error}.",
+        (Src("conformal", ("alpha", "n", "min_answered_to_accept")),
+         Src("conformal_eval", ("fixed", "n", "signals.verbalized.fixed"))),
+        "Calibration n = {n_calib} for the fit, by a fixed-sequence scan; n = {n_signals} test "
+        "rows for the reading, Clopper-Pearson 95%.",
+        "Not a reduction in anything. The conformal gate is built and dormant (#92) and the live "
+        "config still runs the Day 2 `top_score` rule. The guarantee is marginal over "
+        "calibration draws rather than conditional on this half, and at this size the scan "
+        "cannot accept a threshold that answers fewer than {min_answered} rows — so the finding "
+        "is \"not measurable here\", not \"conformal does not work\".",
+    ),
+    Claim(
+        "C5",
+        "The intent router is right on {intent_k} of {intent_n} test rows, {intent}.",
+        (Src("metrics", ("metrics.intent_accuracy",)),),
+        "{intent_k} / {intent_n}, Clopper-Pearson 95%, on one end-to-end run.",
+        "The most forgiving number in the study: the gold label is a set per row, and the labels "
+        "were written after the run existed, so nothing in the process proves the labeller had "
+        "not seen the router's output. One of the five intents, `degree_requirement`, has no "
+        "test row at all.",
+    ),
+    Claim(
+        "C6",
+        "{correct_k} of {correct_n} test rows end in the outcome their bucket calls correct, "
+        "{correct} — or {low_k} of {correct_n}, {low}, if the {unread} ambiguous hand-offs "
+        "nobody read do not count.",
+        (Src("metrics", ("metrics.answer_correctness", "caveats.ambiguous_handoff")),),
+        "{correct_k} / {correct_n} and {low_k} / {correct_n}, Clopper-Pearson 95%, on one run "
+        "read once. A correct outcome is an answer a person judged right, a decline on an "
+        "unanswerable row, or a clarifying question on an ambiguous one.",
+        "Three readings, not one: exit-only is {exit_k} / {correct_n} ({exit_only}), and "
+        "{correct_k} / {correct_n} is the upper bound of the range rather than the number — the "
+        "report asks for it never to be quoted alone. Correctness is one person's verdict and "
+        "the judge's call was displayed before they made it, so the agreement between them is "
+        "not independent confirmation.",
+    ),
+    Claim(
+        "C7",
+        "False release {release_k} of {release_n}, {release}; false block {block_k} of "
+        "{block_n}, {block}.",
+        (Src("metrics", ("metrics.false_release", "metrics.false_block")),),
+        "{release_k} / {release_n} rows that should not have been answered and {block_k} / "
+        "{block_n} that should have been, Clopper-Pearson 95%.",
+        "Read two ways, because the graph has no clarify exit: a reply that declines without "
+        "asking the question counts as a release on the exit-only reading, which is "
+        "{release_exit_k} / {release_n} ({release_exit}). The false-block rate is what the gate "
+        "costs — {block_k} answerable questions were handed to an advisor instead.",
+    ),
+    Claim(
+        "C8",
+        "Every one of the {failures} failures carries a cause, assigned by a fixed rule order "
+        "and confirmed by a reviewer: {retrieval} retrieval, {misread} evidence misread, "
+        "{overconfident} overconfident, {intent_misjudged} intent, {other} other.",
+        (Src("attribution", ("by_class", "actions", "n_rows", "n_failures")),),
+        "{failures} failure rows out of {rows_e2e}; a classification, so no interval. All "
+        "{confirmed} confirmed, none overridden.",
+        "Agreement with a rule, not a second opinion: the reviewer saw the rule's proposal on "
+        "every row. The order charges each row to a single cause, so a row with two causes shows "
+        "only the first, and `retrieval` leading is partly a property of that order.",
+    ),
+    Claim(
+        "C9",
+        "One university catalog, one term: {courses} courses and {edges} prerequisite edges, "
+        "re-exported from the catalog CSV and pinned by digest.",
+        (Src("front", ("Data",)),),
+        "Counts over the committed export rather than estimates; the input CSV is pinned by "
+        "`data.source_sha256` and checked on every run.",
+        "One institution and one term (`2026-sp`), so \"the catalog cannot answer this\" is a "
+        "property of this export rather than of the world. The edges are a reading of catalog "
+        "prose, with the known failures written down ({data_readme}). Nothing was deployed, and "
+        "no question here came from a real student.",
+    ),
+)
+
+#: The lines this work may not be described with. #120 names them, and each one is refused by a
+#: number rather than by taste — which is why they are a generated table and not a warning.
+REFUSED: tuple[Refused, ...] = (
+    Refused(
+        "Improved retrieval by X%",
+        "RQ1 found no gap on Recall@5 ({recall_gap}) and a gap *against* hybrid on MRR@5 "
+        "({mrr_gap}). The finding is that a tuned hybrid did not beat `bm25` on this corpus, "
+        "which is the stronger line because it is the true one.",
+        (Src("bootstrap", ("metrics.recall_at_5.difference", "metrics.mrr_at_5.difference")),),
+    ),
+    Refused(
+        "Deployed / in production / served N users / p99 latency",
+        "Nothing was deployed. No user has asked this agent anything; there is no load, no cost "
+        "per session and no log of what anyone asks. The only timing in the repo is a "
+        "cross-encoder's median per question on one laptop cpu ({day4_report}), measured once, "
+        "and a clean machine measured it differently (#118).",
+    ),
+    Refused(
+        "Calibrated confidence gating reduced hallucination",
+        "The calibrated gate answers nothing at α = {alpha} on {n_calib} calibration rows, and "
+        "the live config still runs `top_score`. What the calibration produced is a measurement "
+        "of the calibration half, not a shipped improvement.",
+        (Src("conformal", ("alpha", "n")),),
+    ),
+    Refused(
+        "A rate without its n, or a point estimate with the interval dropped",
+        "Every rate above is printed as k / n with a 95% interval. At these sample sizes the "
+        "interval *is* the finding: several of the comparisons have intervals wide enough to "
+        "contain the opposite conclusion, and dropping one turns a measurement into an "
+        "assertion.",
+    ),
+    Refused(
+        "{correct_k} of {correct_n} correct, with the lower reading left out",
+        "Both readings or neither: {low_k} of {correct_n} ({low}) is the same run with the "
+        "{unread} unread ambiguous hand-offs counted wrong. Which one is right is a judgement "
+        "about what a hand-off that declines without asking is worth, and that judgement belongs "
+        "beside the number rather than behind it.",
+        (Src("metrics", ("metrics.answer_correctness", "caveats.ambiguous_handoff")),),
+    ),
+)
+
+
+def claim_values(f: Facts) -> dict[str, str]:
+    """Every number and link the claims print, formatted once, out of the facts.
+
+    One namespace for every row, so two claims that name the same number print the same digits
+    and the place a number is formatted is the place to look when it moves. The rates are
+    formatted as :func:`block_day6_metrics` formats them and the differences through Day 4's own
+    :func:`eval.scripts.day4_report.cell`, so a claim and the table it is a quotation of cannot
+    print one value two ways.
+    """
+    cfg, src = f.cfg, f.src
+    m, caveat = f.metrics["metrics"], f.metrics["caveats"]["ambiguous_handoff"]
+    gaps = f.day4.result["metrics"]
+    rc, fit, reading = f.day5.rc, f.day5.fit, f.day5.reading
+    chosen = fit["chosen"]["signal"]
+    auroc = rc["signals"][chosen]["auroc"]
+    gate = reading["signals"][reading["chosen"]]["fixed"]
+    by_class, actions = f.attribution_meta["by_class"], f.attribution_meta["actions"]
+    sha = {name: digest for name, _, digest in f.digests}
+    split = Counter(row["split"] for row in f.dataset)
+
+    def rate(block: Mapping[str, Any]) -> str:
+        """``0.683 [0.553, 0.794]`` -- a rate and its interval, as the report's tables print it."""
+        lo, hi = block["ci"]
+        return f"{block['rate']:.3f} [{lo:.3f}, {hi:.3f}]"
+
+    return {
+        "day3_agreement": link(sibling(agreement.STEM, cfg, src), src, "Day 3's agreement report"),
+        "day4_report": link(sibling(d4.STEM, cfg, src), src, "Day 4's report"),
+        "data_readme": link(src.courses.parent / "README.md", src, "`data/README.md`"),
+        "rows": str(len(f.dataset)),
+        "calib": str(split["calib"]),
+        "test": str(split["test"]),
+        "dataset_sha": sha["dataset"][:12],
+        "recall_gap": d4.cell(gaps["recall_at_5"]["difference"], signed=True),
+        "mrr_gap": d4.cell(gaps["mrr_at_5"]["difference"], signed=True),
+        "n_ablation": str(f.day4.result["n"]["test"]),
+        "resamples": f"{f.day4.result['n_resamples']:,}",
+        "auroc_test": f"{auroc['point']:.3f} [{auroc['lo']:.3f}, {auroc['hi']:.3f}]",
+        "auroc_calib": f"{fit['signals'][chosen]['auroc']:.3f}",
+        "n_signals": str(rc["n"]),
+        "rc_resamples": f"{rc['n_resamples']:,}",
+        "alpha": f"{reading['alpha']:.2f}",
+        "n_calib": str(fit["n"]),
+        "min_answered": str(fit["min_answered_to_accept"]),
+        "fixed_t": str(reading["fixed"]),
+        "gate_answered": str(gate["answered"]),
+        "gate_error": rate({"rate": gate["realized_error"], "ci": gate["ci"]}),
+        "intent": rate(m["intent_accuracy"]),
+        "intent_k": str(m["intent_accuracy"]["k"]),
+        "intent_n": str(m["intent_accuracy"]["n"]),
+        "correct": rate(m["answer_correctness"]["verdict_backed"]),
+        "correct_k": str(m["answer_correctness"]["verdict_backed"]["k"]),
+        "correct_n": str(m["answer_correctness"]["verdict_backed"]["n"]),
+        "exit_only": rate(m["answer_correctness"]["exit_only"]),
+        "exit_k": str(m["answer_correctness"]["exit_only"]["k"]),
+        "low": rate(caveat["correctness_if_none_counted"]),
+        "low_k": str(caveat["correctness_if_none_counted"]["k"]),
+        "unread": str(caveat["n"]),
+        "release": rate(m["false_release"]["verdict_backed"]),
+        "release_k": str(m["false_release"]["verdict_backed"]["k"]),
+        "release_n": str(m["false_release"]["verdict_backed"]["n"]),
+        "release_exit": rate(m["false_release"]["exit_only"]),
+        "release_exit_k": str(m["false_release"]["exit_only"]["k"]),
+        "block": rate(m["false_block"]),
+        "block_k": str(m["false_block"]["k"]),
+        "block_n": str(m["false_block"]["n"]),
+        "failures": str(f.attribution_meta["n_failures"]),
+        "rows_e2e": str(f.attribution_meta["n_rows"]),
+        "confirmed": str(actions["confirmed"]),
+        "retrieval": str(by_class["retrieval_failure"]),
+        "misread": str(by_class["evidence_misread"]),
+        "overconfident": str(by_class["overconfident"]),
+        "intent_misjudged": str(by_class["intent_misjudged"]),
+        "other": str(by_class["other"]),
+        "courses": f"{f.corpus['courses']:,}",
+        "edges": f"{f.corpus['prereq_edges']:,}",
+    }
+
+
+def claim_source(src: Src, f: Facts) -> str:
+    """One source cell: the file, the key paths in it, and the ``[src]`` link ``--check`` reads.
+
+    The path is printed as well as linked because #120 asks for the file and the key path to be
+    *in* the row -- a reader answering "where is that from?" should not have to hover over a link
+    to find out.
+    """
+    path = CLAIM_FILES[src.file](f)
+    keys = ", ".join(src.keys)
+    return (f"`{rel_to_repo(path)}` → {', '.join(f'`{key}`' for key in src.keys)} "
+            f'[src]({to_report(path, f.src)} "{keys}")')
+
+
+def block_claims(f: Facts) -> str:
+    """#120's four columns, one row per claim, every number formatted from the file it names."""
+    values = claim_values(f)
+    rows = [[f"**{claim.id}** — {claim.line.format(**values)}",
+             " · ".join(claim_source(one, f) for one in claim.sources),
+             claim.rests_on.format(**values),
+             claim.unsaid.format(**values)]
+            for claim in CLAIMS]
+    return md_table(["the claim", "where every number in it comes from", "what it rests on",
+                     "what it does not say"], rows)
+
+
+def block_claims_refused(f: Facts) -> str:
+    """The lines the numbers refuse, each with what they say instead, and where that is."""
+    values = claim_values(f)
+    rows = [[f"*{one.line.format(**values)}*", one.instead.format(**values),
+             " · ".join(claim_source(src, f) for src in one.sources) or "—"]
+            for one in REFUSED]
+    return md_table(["the line", "what the committed numbers say instead", "where that is"], rows)
+
+
 #: Every generated block, in the order the report uses them. The one place that writes between a
 #: ``BEGIN gen:`` and its ``END``; a name here with no markers in the file, or markers with no
 #: name here, is an error rather than a no-op.
@@ -736,16 +1108,26 @@ BLOCKS: dict[str, Callable[[Facts], str]] = {
     "attribution": block_attribution,
     "false_blocks": block_false_blocks,
     "inputs": block_inputs,
+    "claims": block_claims,
+    "claims_refused": block_claims_refused,
 }
 
 #: The blocks the repo's README carries. One name, and it is also the report's: the diagram is
 #: rendered once and spliced into both, so the two copies are the same bytes by construction.
 FRONT_BLOCKS: tuple[str, ...] = ("architecture",)
 
+#: The claims page's blocks (#120). A row of either one carries its own sources, which is what
+#: :func:`check_claims` reads them back through.
+CLAIMS_BLOCKS: tuple[str, ...] = ("claims", "claims_refused")
+
+#: Everything else, which is the report's.
+REPORT_BLOCKS: tuple[str, ...] = tuple(name for name in BLOCKS if name not in CLAIMS_BLOCKS)
+
 
 def pages(src: Sources) -> list[Page]:
     """The files this script writes into, in the order a reader meets them."""
-    return [Page(src.front, FRONT_BLOCKS, REFERENCE), Page(src.report, tuple(BLOCKS))]
+    return [Page(src.front, FRONT_BLOCKS, REFERENCE), Page(src.report, REPORT_BLOCKS),
+            Page(src.claims, CLAIMS_BLOCKS)]
 
 
 # --- the blocks, in the file ---------------------------------------------------------------------
@@ -854,7 +1236,7 @@ ALLOWED: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 class Problem(NamedTuple):
-    """One thing ``--check`` found, and where to look for it: two pages, so the file is part of
+    """One thing ``--check`` found, and where to look for it: three pages, so the file is part of
     the answer."""
 
     path: Path
@@ -1069,51 +1451,97 @@ def check_hex(page: Page, text: str, facts: Facts) -> list[Problem]:
     return problems
 
 
-def check_prose(page: Page, text: str, facts: Facts) -> list[Problem]:
-    """Every number in the prose is explained by a ``[src]`` link in its own paragraph.
+def trace(page: Page, text: str, start: int, chunk: str,
+          cache: dict[tuple[str, str], set[float] | None], where: str = "paragraph",
+          ) -> list[Problem]:
+    """Every number in ``chunk`` read back through the ``[src]`` links ``chunk`` carries.
+
+    The whole rule, in one place: a paragraph of prose (#107) and a row of the claims table
+    (#120) are held to the same thing, so they are held to it by the same function. ``start`` is
+    where ``chunk`` begins in ``text``, which is what makes the reported line the one an editor
+    jumps to, and ``where`` is the word for the unit in the message.
 
     A link is relative to the page that carries it, so the same run file is ``../eval/runs/x`` from
-    the report and ``eval/runs/x`` from the repo's README, and both resolve to the one file.
+    a page in ``report/`` and ``eval/runs/x`` from the repo's README, and both resolve to the one
+    file.
     """
     problems: list[Problem] = []
-    cache: dict[tuple[str, str], set[float] | None] = {}
-    for start, paragraph in paragraphs(page, text):
-        links = [(m.group("path"), m.group("key")) for m in SRC_RE.finditer(paragraph)]
-        values: set[float] = set()
-        for path, key in links:
-            target = (page.path.parent / path).resolve()
-            line = _line_of(text, start + paragraph.find(path))
-            if not target.exists():
-                problems.append(Problem(page.path, line,
-                                        f"[src] link to a missing file: {path}"))
-                continue
-            if (path, key) not in cache:
-                cache[path, key] = candidates(target, key)
-            found = cache[path, key]
-            if found is None:
-                problems.append(Problem(
-                    page.path, line, f"{path} has no key path {key!r} to read a value from"))
-                continue
-            values |= found
-        for m in NUMBER_RE.finditer(mask(paragraph)):
-            number = m.group(0)
-            line = _line_of(text, start + m.start())
-            if not links:
-                problems.append(Problem(page.path, line,
-                                        f"{number} has no [src] link in its paragraph"))
-            elif not explains(number, values):
-                named = ", ".join(sorted({path for path, _ in links}))
-                problems.append(Problem(
-                    page.path, line,
-                    f"{number} is not a value in {named} at the precision it is printed to"))
+    links = [(m.group("path"), m.group("key")) for m in SRC_RE.finditer(chunk)]
+    values: set[float] = set()
+    for path, key in links:
+        target = (page.path.parent / path).resolve()
+        line = _line_of(text, start + chunk.find(path))
+        if not target.exists():
+            problems.append(Problem(page.path, line, f"[src] link to a missing file: {path}"))
+            continue
+        if (path, key) not in cache:
+            cache[path, key] = candidates(target, key)
+        found = cache[path, key]
+        if found is None:
+            problems.append(Problem(
+                page.path, line, f"{path} has no key path {key!r} to read a value from"))
+            continue
+        values |= found
+    for m in NUMBER_RE.finditer(mask(chunk)):
+        number = m.group(0)
+        line = _line_of(text, start + m.start())
+        if not links:
+            problems.append(Problem(page.path, line,
+                                    f"{number} has no [src] link in its {where}"))
+        elif not explains(number, values):
+            named = ", ".join(sorted({path for path, _ in links}))
+            problems.append(Problem(
+                page.path, line,
+                f"{number} is not a value in {named} at the precision it is printed to"))
     return problems
+
+
+def check_prose(page: Page, text: str) -> list[Problem]:
+    """Every number in the prose is explained by a ``[src]`` link in its own paragraph."""
+    cache: dict[tuple[str, str], set[float] | None] = {}
+    return [problem for start, paragraph in paragraphs(page, text)
+            for problem in trace(page, text, start, paragraph, cache)]
+
+
+def claim_rows(page: Page, text: str) -> list[tuple[int, str]]:
+    """``(offset, row)`` for every data row of the page's claim tables.
+
+    A generated table's first two lines are its header and its ``| --- |`` divider, by
+    construction -- :func:`eval.scripts.agreement.md_table` writes them and nothing else writes
+    between the markers -- so the rows are everything after them. A page that lost them lost its
+    block, which :func:`check_blocks` says first and more clearly.
+    """
+    out: list[tuple[int, str]] = []
+    for one in blocks_in(page, text):
+        if one.name not in CLAIMS_BLOCKS:
+            continue
+        offset = one.start
+        for i, line in enumerate(text[one.start : one.end].splitlines(keepends=True)):
+            here, offset = offset, offset + len(line)
+            if i >= 2 and line.startswith("|"):
+                out.append((here, line))
+    return out
+
+
+def check_claims(page: Page, text: str) -> list[Problem]:
+    """Every number in a claim row is in a file that row names, at the precision it is printed to.
+
+    #120's acceptance, which is #107's rule applied to a table: the claims page is a row per
+    claim, and the file and key path are in the row rather than in a paragraph around it. The
+    numbers get there by being formatted from those files (:func:`claim_values`), so what this
+    catches is a hand-edited cell, a claim whose wording moved without its link, and a source
+    that has stopped carrying the value the claim quotes from it.
+    """
+    cache: dict[tuple[str, str], set[float] | None] = {}
+    return [problem for start, row in claim_rows(page, text)
+            for problem in trace(page, text, start, row, cache, where="row")]
 
 
 def check(page: Page, text: str, facts: Facts, bodies: Mapping[str, str]) -> list[Problem]:
     """Everything ``--check`` checks on one page, in the order a reader would notice it."""
     return sorted(
         [*check_blocks(page, text, bodies), *check_tables(page, text),
-         *check_prose(page, text, facts), *check_hex(page, text, facts)],
+         *check_prose(page, text), *check_claims(page, text), *check_hex(page, text, facts)],
         key=lambda one: one.line,
     )
 
@@ -1123,31 +1551,37 @@ def render_check(page: Page, text: str, facts: Facts, bodies: Mapping[str, str],
     """``--check`` for one page: what does not trace, one per line, or a count of what does."""
     problems = check(page, text, facts, bodies)
     out.writelines(f"{problem}\n" for problem in problems)
-    region = page.region(text)
-    numbers = sum(len(NUMBER_RE.findall(mask(p))) for _, p in paragraphs(page, text))
-    links = len(SRC_RE.findall(region))
+    prose = paragraphs(page, text)
+    numbers = sum(len(NUMBER_RE.findall(mask(one))) for _, one in prose)
+    links = sum(len(SRC_RE.findall(one)) for _, one in prose)
     if problems:
         out.write(f"\n{plural(len(problems), 'problem')} in {rel_to_repo(page.path)}.\n")
         return 1
     scope = "" if page.upto is None else f" above `{page.upto}`"
+    rows = claim_rows(page, text)
+    claimed = ""
+    if rows:
+        claimed = (f", every number in {plural(len(rows), 'claim row')} read back through the "
+                   "row's own links")
     out.write(f"{rel_to_repo(page.path)}{scope}: {plural(len(page.blocks), 'generated block')} "
-              f"current, {numbers} prose numbers carry {links} source links, and every input "
-              "matches the sha256 its sidecar records.\n")
+              f"current, {numbers} prose numbers carry {links} source links{claimed}, and every "
+              "input matches the sha256 its sidecar records.\n")
     return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Rewrite both pages' generated blocks, or with ``--check`` verify every number traces.
+    """Rewrite every page's generated blocks, or with ``--check`` verify every number traces.
 
     ``--check`` writes nothing and exits 1 on a failure, which is what CI runs; ``--inputs``
     lists the artifacts behind the pages and ``--dry-run`` prints them instead of writing them.
-    Every mode covers both pages, because a diagram that is current in one file and stale in the
+    Every mode covers every page, because a diagram that is current in one file and stale in the
     other is the drift this script exists to prevent.
     """
     parser = argparse.ArgumentParser(
         prog="python -m eval.scripts.final_report",
-        description="Rewrite the generated blocks in README.md and report/README.md, or check "
-                    "that every number in them traces to a committed file.",
+        description="Rewrite the generated blocks in README.md, report/README.md and "
+                    "report/day7_claims.md, or check that every number in them traces to a "
+                    "committed file.",
     )
     parser.add_argument("--check", action="store_true",
                         help="verify the committed pages and write nothing; exit 1 if it fails")

@@ -5,8 +5,9 @@
 #
 # `tests` is the repo as it is developed, through uv. Five things are checked, in the order a
 # failure is cheapest to read: the locked environment resolves at all, the generated
-# requirements files still match the lock, the tree lints, the suite passes, and
-# report/README.md still traces to the files it cites. One further step is not a check but the
+# requirements files still match the lock, the tree lints, the suite passes, and the three
+# generated pages -- README.md, report/README.md and report/day7_claims.md -- still trace to the
+# files they cite. One further step is not a check but the
 # setup two of them need: the corpus and the lexical index are rebuilt, because they are not
 # committed.
 #
@@ -91,9 +92,10 @@ jobs:
       - name: Tests
         run: uv run pytest -q -rs
 
-      # Redundant with tests/test_final_report.py on purpose: when this fails, the log says
-      # which number in the report moved and where, rather than which assertion did.
-      - name: The report traces to its files
+      # Redundant with tests/test_final_report.py and tests/test_day7_claims.py on purpose: when
+      # this fails, the log says which number moved and in which page, rather than which
+      # assertion did.
+      - name: Every page traces to its files
         run: uv run python -m eval.scripts.final_report --check
 
   # The same suite, installed the way someone without uv installs it. requirements-dev.txt rather
