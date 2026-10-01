@@ -462,6 +462,37 @@ def test_the_front_page_needs_its_reference_divider(front_page, front_text: str)
         front_page.region(broken)
 
 
+BLOCK_FLAG_RE = re.compile(r"--[a-z][a-z-]*")
+ADD_ARGUMENT_RE = re.compile(r"""add_argument\(\s*["'](--[a-z][a-z-]*)["']""")
+
+
+def reproduction_commands(text: str) -> list[str]:
+    """The live `uv run` commands of `report/README.md`'s Reproduction block, `&&` split apart."""
+    block = text.split("## Reproduction")[1].split("```bash")[1].split("```")[0]
+    lines = [re.sub(r"\s+#.*$", "", one) for one in block.splitlines() if one.startswith("uv run")]
+    return [part.strip() for one in lines for part in one.split("&&") if part.strip()]
+
+
+def test_every_flag_in_the_reproduction_block_is_one_its_module_defines(text: str) -> None:
+    """A command that argparse rejects exits 2, so the block stops there.
+
+    `eval.conformal --split calib` did: the module fits on calib by construction and documents
+    that it has no `--split`. Checked statically against each module's `add_argument` calls --
+    flags before `-m` belong to `uv`, not to the module (#132).
+    """
+    commands = [one for one in reproduction_commands(text) if " -m " in one]
+    assert commands, "the Reproduction block names no modules; the section changed shape"
+    wrong = []
+    for one in commands:
+        module, _, rest = one.split(" -m ", 1)[1].partition(" ")
+        source = REPO_ROOT / (module.replace(".", "/") + ".py")
+        assert source.exists(), f"{module} is not a module in this repo"
+        defined = set(ADD_ARGUMENT_RE.findall(source.read_text(encoding="utf-8")))
+        wrong += [f"{module} {flag}" for flag in BLOCK_FLAG_RE.findall(rest)
+                  if flag not in defined and flag != "--help"]
+    assert not wrong, f"flag(s) the module does not define: {wrong}"
+
+
 def test_the_reproduction_chain_runs_without_the_private_csv(text: str) -> None:
     """`data.source` is not in the repo, so a live `ingest.export_almabot` would stop a reader
     on an absolute path from the machine that made the export. Its three `data/*.json` outputs
