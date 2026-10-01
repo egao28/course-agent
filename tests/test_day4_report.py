@@ -279,6 +279,16 @@ def test_minus_signs_are_real_and_negative_zero_is_not_printed():
     assert report.num(0.07317) == "0.073"
 
 
+def test_the_reproduction_block_builds_the_dense_index_before_it_queries_one():
+    """`indexes/` is gitignored and two of the three modes query the dense index (#132)."""
+    lines = report.REPRODUCTION.splitlines()
+    build = [i for i, line in enumerate(lines)
+             if line.startswith("uv run") and "build_dense" in line]
+    query = [i for i, line in enumerate(lines) if "eval.scripts.ablation" in line]
+    assert len(build) == 1 and len(query) == 2
+    assert build[0] < min(query)
+
+
 # --- the stretch row (#79) ------------------------------------------------------------------------
 
 

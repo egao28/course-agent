@@ -70,6 +70,7 @@ The failing rows are read from `eval/runs/ablation_test_c73b197d.jsonl`. The ran
 ## Reproduction
 
 ```bash
+uv run --env-file .env python -m ingest.build_dense       # indexes/ is gitignored
 uv run --env-file .env python -m eval.scripts.ablation --split calib
 uv run --env-file .env python -m eval.scripts.ablation --split test
 uv run --env-file .env --extra local python -m eval.scripts.rerank --split test
@@ -78,9 +79,13 @@ uv run --env-file .env python -m eval.scripts.hybrid_failures
 uv run python -m eval.scripts.day4_report
 ```
 
+Picks up from the Quickstart, which has built the corpus and the lexical index
+(`uv run python -m ingest.chunk && uv run python -m ingest.build_bm25`); the dense index is the one
+the Quickstart leaves out, and `dense` and `hybrid` have nothing to query without it (#132).
+
 This file is a function of the two committed run files, the rerank run, the bootstrap result
 computed from them, the failure log's sidecar, the dataset, and `config.yaml`. It has no timestamp,
-so re-running the last command over unchanged inputs rewrites it byte for byte. Re-running the
-first three does not reproduce the run files: the embeddings API returns slightly different query
-vectors from call to call (two live calib runs differed in 1 of 41 dense lines), and the rerank run
-records its own timings. The committed run files are the sample this table describes.
+so re-running the last command over unchanged inputs rewrites it byte for byte. Re-running the two
+ablations and the rerank does not reproduce the run files: the embeddings API returns slightly
+different query vectors from call to call (two live calib runs differed in 1 of 41 dense lines), and
+the rerank run records its own timings. The committed run files are the sample this table describes.
