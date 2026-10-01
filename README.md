@@ -106,8 +106,10 @@ uv run python -m agent "What do I need before CS 374?" --intent prereq_chain --f
 ```
 
 `uv run pytest -q` then runs the suite, and these are the same steps CI takes, in the same order
-([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) — including the `analysis` extra,
-without which part of the suite skips. The dense index is the one thing not built here, because it
+([`.github/workflows/tests.yml`](.github/workflows/tests.yml)). The `analysis` extra is named
+for CI's sake; with the `dev` group present it changes nothing, since `pyproject.toml` puts
+`almabot[analysis]` in `dev` so that a plain `uv run pytest` does not skip. It is a `--no-dev` or
+bare-`requirements.txt` install where part of the suite skips — see [Without uv](#without-uv). The dense index is the one thing not built here, because it
 calls the embeddings API; the agent runs `bm25`, which is RQ1's answer. Everything that does call a
 model is run as `uv run --env-file .env python -m ...`; see [Setup](#setup) below for the key, and
 [Command line](#command-line) for what the trace prints. Reproducing a published table from a
@@ -142,8 +144,13 @@ lagged new CPython releases before, so we stay one version behind the system Pyt
 ```bash
 uv sync --locked         # creates .venv (Python 3.12), installs deps + dev group; fails if uv.lock is stale
 cp -n .env.example .env  # then fill in OPENAI_API_KEY (-n never overwrites an existing .env)
+uv run python -m ingest.chunk && uv run python -m ingest.build_bm25   # not committed; Quickstart's step 2
 uv run pytest -q         # smoke: imports resolve + config hash properties hold
 ```
+
+The third line is the one a reader who skipped Quickstart does not expect: `data/chunks.jsonl` and
+the BM25 index are rebuilt rather than cloned, and without them `pytest` reports 5 failures and 5
+skips instead of a clean suite (#118).
 
 Nothing loads `.env` by itself yet (that is #11), so commands that call the embeddings API are run
 as `uv run --env-file .env python -m ...`. Everything else — tests, chunking, `--dry-run` — needs
@@ -2342,9 +2349,14 @@ and `hybrid`, and writes one line per (row, mode) with Recall@5 and MRR@5 from `
 `unanswerable` and `ambiguous` rows are skipped, and the skips are counted by bucket and printed.
 
 ```bash
+uv run --env-file .env python -m ingest.build_dense                    # `dense` and `hybrid` need it
 uv run --env-file .env python -m eval.scripts.ablation --split calib   # choose and debug here
 uv run --env-file .env python -m eval.scripts.ablation --split test    # the reported number
 ```
+
+The first line is not part of the ablation and is skipped on a machine that has already built the
+index, but `indexes/` is gitignored, so on a fresh clone two of the three modes have nothing to
+query and the first run stops on `no collection 'courses_094143d8'` (#118).
 
 The output goes to `eval/runs/ablation_{split}_{hash}.jsonl` plus a `.meta.json` sidecar that holds
 the config hash, `dense_key`, `bm25_key`, the dataset sha256 from the freeze, and the row ids.

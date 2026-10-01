@@ -60,7 +60,11 @@ jobs:
           cache-dependency-glob: uv.lock
 
       # --locked fails if uv.lock does not match pyproject.toml, which is half of what
-      # "reproducible" means here; the analysis extra is what keeps 47 tests from skipping.
+      # "reproducible" means here. The analysis extra is named explicitly rather than relied on:
+      # `dev` already asks for almabot[analysis], so this job's counts do not depend on it (#118
+      # measured both and got 2337 passed, 0 skipped either way). Neither job can skip for want of
+      # it: requirements-dev.txt below is a rendering of that same dev group. A bare
+      # requirements.txt install is the one that skips, and nothing here does that.
       - name: Sync the locked environment
         run: uv sync --locked --extra analysis
 
