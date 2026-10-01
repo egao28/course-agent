@@ -582,9 +582,18 @@ pass-through, and that is a structural limit of the current design rather than a
 The runs, in the order they were made. Each writes a committed file; none of the later commands
 calls a model or resamples.
 
+The export line is commented out because it is the one step a reader cannot run.
+`ingest.export_almabot` reads the catalog CSV at `data.source`, which is not in the repo, and
+`data/{courses,prereqs,requirements}.json` are its committed output, so a clone starts at
+`ingest.chunk` ([Data](../README.md#data)). Run without the CSV it raises a bare
+`FileNotFoundError` on an absolute path belonging to the machine that made the export, naming
+nothing to do about it, and the `&&` that used to join it to `ingest.chunk` took that step down
+with it too (#132).
+
 ```bash
 uv sync --locked --extra analysis
-uv run python -m ingest.export_almabot && uv run python -m ingest.chunk
+# uv run python -m ingest.export_almabot     # ran once, on the private CSV; a reader skips it
+uv run python -m ingest.chunk
 uv run --env-file .env python -m ingest.build_dense && uv run python -m ingest.build_bm25
 
 uv run --env-file .env python -m eval.scripts.ablation --split calib   # day 4, RQ1
