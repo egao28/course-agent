@@ -762,10 +762,12 @@ def render_limitations(facts: Facts) -> str:
             "files are the sample, and nothing downstream re-queries."
         ),
         (
-            f"**The conformal guarantee is marginal.** Error <= alpha = {reading['alpha']:.2f} "
-            "holds in expectation over calib draws, not on this calib half and not on this test "
-            f"half. With calib n = {facts.fit['n']} the scan cannot accept a threshold that "
-            f"answers fewer than {facts.fit['min_answered_to_accept']} rows, whatever the signal."
+            f"**This rule carries no guarantee.** It accepts a threshold when a plug-in "
+            f"estimate of the error among the rows it would answer is at most "
+            f"alpha = {reading['alpha']:.2f} -- an estimate against a budget, with no confidence "
+            "level in it, so split conformal's theorem does not transfer to it (#142). With "
+            f"calib n = {facts.fit['n']} the scan cannot accept a threshold that answers fewer "
+            f"than {facts.fit['min_answered_to_accept']} rows, whatever the signal."
         ),
         (
             f"**`self_consistency` is heavily tied.** It takes {len(sc)} values on test: "

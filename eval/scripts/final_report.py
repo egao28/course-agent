@@ -99,6 +99,7 @@ from eval.scripts import (
     e2e_metrics,
     risk_coverage,
     saturation,
+    validity,
 )
 from eval.scripts import day4_report as d4
 from eval.scripts import day5_report as d5
@@ -246,6 +247,8 @@ def inputs(cfg: Config, src: Sources) -> list[Input]:
               "uv run python -m eval.scripts.day5_report"),
         Input("day 8 saturation", saturation.report_path(cfg, src.report_dir),
               "uv run python -m eval.scripts.saturation"),
+        Input("day 8 validity", validity.report_path(cfg, src.report_dir),
+              "uv run python -m eval.scripts.validity"),
         Input("corpus: courses", src.courses, "committed; re-exported by "
               "`uv run python -m ingest.export_almabot` from the private CSV"),
         Input("corpus: prerequisites", src.prereqs, "committed; re-exported by "
@@ -877,11 +880,12 @@ CLAIMS: tuple[Claim, ...] = (
          Src("conformal_eval", ("fixed", "n", "signals.verbalized.fixed"))),
         "Calibration n = {n_calib} for the fit, by a fixed-sequence scan; n = {n_signals} test "
         "rows for the reading, Clopper-Pearson 95%.",
-        "Not a reduction in anything. The conformal gate is built and dormant (#92) and the live "
-        "config still runs the Day 2 `top_score` rule. The guarantee is marginal over "
-        "calibration draws rather than conditional on this half, and at this size the scan "
-        "cannot accept a threshold that answers fewer than {min_answered} rows — so the finding "
-        "is \"not measurable here\", not \"conformal does not work\".",
+        "Not a reduction in anything, and not a guarantee: the rule accepts on a plug-in "
+        "estimate with no confidence level, so it is an abstention gate fitted by a threshold "
+        "rule rather than conformal prediction (#142). The gate is built and dormant (#92) and "
+        "the live config still runs the Day 2 `top_score` rule. What refuses every threshold is "
+        "the signal's resolution and its error rate rather than the row count ({day8_saturation}, "
+        "{day8_validity}).",
     ),
     Claim(
         "C5",
@@ -1017,6 +1021,10 @@ def claim_values(f: Facts) -> dict[str, str]:
         "day3_agreement": link(sibling(agreement.STEM, cfg, src), src, "Day 3's agreement report"),
         "day4_report": link(sibling(d4.STEM, cfg, src), src, "Day 4's report"),
         "data_readme": link(src.courses.parent / "README.md", src, "`data/README.md`"),
+        "day8_saturation": link(saturation.report_path(cfg, src.report_dir), src,
+                                "why it accepts nothing"),
+        "day8_validity": link(validity.report_path(cfg, src.report_dir), src,
+                              "what it does and does not control"),
         "rows": str(len(f.dataset)),
         "calib": str(split["calib"]),
         "test": str(split["test"]),

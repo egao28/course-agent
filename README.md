@@ -227,7 +227,7 @@ almabot/
 ├── ingest/        # export_almabot.py → chunk.py → build_dense.py / tokenize.py → build_bm25.py; majors.json = the hand-encoded degrees
 ├── retrieval/     # types.py (Hit), dense.py, bm25.py, fusion.py, __init__.py = retrieve(query, mode)
 ├── agent/         # state.py + graph.py = the LangGraph skeleton, nodes/ = one node per state key (route_intent, dispatch, check_evidence, answer, exits), prompts.py = the versioned prompts, tools/ (get_course, get_prereq_chain, check_requirement …), mcp_server.py, __main__.py + trace.py = the CLI and the trace it prints   (Day 2)
-├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), scripts/saturation.py = why the fitted gate accepts nothing (→ report/day8_saturation_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
+├── eval/          # schema.py + validate.py = the eval row and the check over a file of them, GUIDELINES.md = the annotation spec (Day 3), scripts/draft_items.py = the seeded drafting harness → datasets/drafts/, scripts/build_unanswerable.py = the 25 constructed refusals, scripts/build_multihop.py = the 25 multi-hop rows built from the prereq graph, scripts/review.py = the verification pass (three verdicts → datasets/review_log.jsonl → datasets/v1.jsonl), scripts/agreement.py = the second annotator's packet and the agreement report (percent + Cohen's κ → report/day3_agreement_{hash}.md), scripts/split.py = the frozen 50/50 calibration/test split (load_split("calib"|"test")), scripts/day3_report.py = Day 3's closing report over all of the above (→ report/day3_evalset_{hash}.md), scripts/ablation.py + scripts/bootstrap.py + scripts/day4_report.py = the RQ1 run, its paired CIs and the table, scripts/rerank.py = the stretch row (hybrid top 20 → cross-encoder → top 5) (→ report/day4_ablation_{hash}.md), scripts/day5_report.py = Day 5's closing report (→ report/day5_signals_{conformal_key}.md), scripts/saturation.py = why the fitted gate accepts nothing (→ report/day8_saturation_{conformal_key}.md), scripts/validity.py = what that rule does and does not control (→ report/day8_validity_{conformal_key}.md), datasets/day2_queries.jsonl = ten handwritten queries, scripts/day2_smoke.py = the run that writes report/day2_smoke_{hash}.md
 ├── report/        # one markdown report per experiment, filename tagged with the config hash
 ├── scripts/       # repo maintenance, never imported by the library: export_requirements.py regenerates requirements*.txt from uv.lock
 ├── tests/         # pytest suite (fixtures/ holds a synthetic config, not the live one)
@@ -2535,10 +2535,14 @@ in either half, and `multihop` has none in calib.
   `40070d8d`. The 9 count as unreviewed and are shown again. The CSV sidecar counts carried-over
   verdicts.
 
-## Conformal threshold
+## Abstention threshold
 
 `eval/conformal.py` (#90) fits an answering threshold for each signal on the **calib half only**,
-at target error `conformal.alpha` = 0.10, and picks the one signal #91 and #92 use.
+at target error `conformal.alpha` = 0.10, and picks the one signal #91 and #92 use. **It is a
+threshold rule, not conformal prediction** — it accepts on a plug-in estimate with no confidence
+level, so nothing it accepts carries a guarantee ([#142](../../issues/142) works through which
+theorem would be needed and what it would change). The module and the key keep their names because
+renaming them would move every committed artifact.
 
 ```
 uv sync --extra analysis                # scikit-learn, for the AUROC that picks the signal
@@ -2695,6 +2699,35 @@ a sweep, so the sweep replays the same steps exactly.
 **Every candidate is printed, and none may be chosen.** Section 2 is the whole curve rather than
 the prefix the rule tests. Reading a threshold off it would be the global selection the
 fixed-sequence rule refuses, and the report says so where someone might.
+
+### What the gate controls
+
+`eval/scripts/validity.py` ([#142](../../issues/142)) asks the question #140 did not: by what
+theorem, over what randomness, does accepting a threshold control anything? Writes
+`report/day8_validity_{conformal_key}.md` (committed: `day8_validity_83496e82.md`).
+
+```bash
+uv run python -m eval.scripts.validity --check    # the same two inputs; write nothing
+uv run python -m eval.scripts.validity            # write the verification
+```
+
+**The target is a selective risk**, `R(t) = P(wrong | signal ≥ t)` for a future exchangeable row —
+an error rate among the answered. **Split conformal's theorem is not the one**: its `n + 1` is a
+rank correction for a test point among exchangeable scores, while this `+1` is added to a count of
+errors in a subset the threshold selects. Same shape, different object, so the conclusion does not
+transfer however exactly the arithmetic is done.
+
+**What would carry a theorem** is Learn-then-Test, which `eval/conformal.py` names but does not
+implement: a valid p-value per candidate, a family fixed in advance, and fixed-sequence testing at
+δ. Run that way at δ = 0.05 it accepts nothing for any signal — and `verbalized`'s only selective
+cut (28 rows) is **one row below the 29 a valid bound needs even with no errors at all**, so it is
+skipped as too small to test rather than failed. #140's saturation finding gets stronger under the
+stricter rule, not weaker.
+
+**It is reported, never fitted.** #92's dormant gate, `conformal.alpha` and every file named after
+`conformal_key` are untouched; a second rule in the pipeline would rename every committed
+artifact. `δ` is a module constant for the same reason — a key in the `conformal` section would
+move the key that names the files.
 
 ## End-to-end run
 
