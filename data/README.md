@@ -25,6 +25,56 @@ Degree Attributes, Schedule Information, CRN, Section, Status Code, Part of Term
 Section Credit Hours, Section Status, Enrollment Status, Type, Type Code, Start Time, End Time,
 Days of Week, Room, Building, Instructors. Only one term is present: 2026 Spring.
 
+## Redistribution
+
+**The decision (#119): these files ship as they are, with this note.** The repo is MIT-licensed and
+the `LICENSE` says what that does not reach. This section is the part a reader needs before reusing
+anything under `data/`, and it is a decision rather than an oversight.
+
+### What in here is not ours
+
+| What | How much | Whose |
+|---|---|---|
+| Course names and **full descriptions** | 4,502 courses, 1,733,065 characters of description (max 2,429) | The University of Illinois Urbana-Champaign catalog |
+| `Degree Attributes`, credit hours, prerequisite prose | 572 courses carry attributes; 1,135 requirement statements | Same |
+| Degree requirements in [`ingest/majors.json`](../ingest/majors.json) | 2 programs (`cs-bs`, `statistics-bslas`), transcribed 2026-09-15 | [2025-2026 catalog program pages](https://catalog.illinois.edu/archivedacademiccatalogs/2025-2026/) |
+
+What *is* ours, and what MIT actually covers: the export, chunking, indexing, retrieval, agent and
+eval code; the Gen Ed rule encoding; the 127-row eval set and its labels; and every report. The
+derived structure — `prereqs.json`'s 2,086 prerequisite and 34 corequisite edges, the `gened_ids`
+on each chunk — is our reading of the catalog's prose, and the prose it reads is not.
+
+The input CSV itself (`data.source`, pinned by `source_sha256` in `config.yaml`) is **not** in the
+repo and is not redistributed. These three JSON files are a derived subset of it: course-level
+columns only, one term, de-duplicated to one row per course. Nothing section-level survives the
+export — no CRNs, no rooms, no meeting times, and **no instructor names**.
+
+### The alternative, and why not
+
+The other option was to ship the code and the eval set and leave `data/` to be rebuilt from a CSV
+the reader supplies, which `data.source` + `source_sha256` already support. That was rejected
+because it is not actually reproducible: the eval set cites `doc_id`s from *this* export, the
+committed runs and every report name index keys (`c73b197d`, `bm25_877a6610`) built from *this*
+corpus, and a reader with a different CSV — or, far more likely, no CSV at all, since the source is
+not public — can re-run none of it. Shipping 2.9 MB of catalog text is the cost of the repo's one
+substantive claim, which is that every number in it can be re-derived. The claim is the point.
+
+### Two real email addresses
+
+`courses.json` contains **3 occurrences of 2 instructor email addresses**, inside description text:
+`sustaindesign@illinois.edu` (2) and `jjkramer@illinois.edu` (1). They are in the catalog
+descriptions verbatim, already published by the university on public catalog pages in the same
+sentences, and they are institutional contact points given out to be written to. They are recorded
+here rather than discovered after the fact. No other personal data is in the export — the
+section-level `Instructors` column is dropped, so no instructor is named anywhere in `data/`.
+
+### If you are the university
+
+This is a student project: non-commercial, for coursework and a portfolio, reproducing published
+catalog text to make a retrieval evaluation checkable by someone who was not there. If the terms
+of use say this redistribution is not allowed, open an issue and `data/` comes out — the rebuild
+path above is what the repo falls back to, at the cost named there.
+
 ## courses.json
 
 One record per course, sorted by (subject, number). Course-level CSV columns are identical across

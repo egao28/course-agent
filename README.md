@@ -6,14 +6,21 @@ catalog is for" — and which one it picks is the thing being measured. It was b
 questions on a frozen, hand-verified eval set: does hybrid retrieval beat BM25, which confidence
 signal ranks correct answers above wrong ones, and does a conformal gate hold its error target.
 
-The retrieval + agent layer of AlmaBot, a UIUC course-planning assistant. Data comes from the other
-half, the React frontend [`almabot-web`](../almabot-web), whose `scripts/build_data.py` exports
-courses and the prerequisite DAG from `course-catalog.csv`. Throughout this README, *`almabot-web`*
-means that repo; **almabot**, unqualified, is this one.
+The retrieval + agent layer of AlmaBot, a UIUC course-planning assistant. The other half is a React
+frontend called `almabot-web`, whose `scripts/build_data.py` first turned `course-catalog.csv` into
+courses and a prerequisite DAG. **That half is not published** — it is a private project on one
+laptop, there is no URL to link, and nothing here needs it: what this repo took from it was the
+export *logic*, reimplemented in [`ingest/export_almabot.py`](ingest/export_almabot.py) against the
+same CSV, plus the Gen Ed rules. Throughout this README, *`almabot-web`* names that unpublished
+repo and is always a reference to where a rule came from, never a path you can follow;
+**almabot**, unqualified, is this one. The CSV it reads is not public either — see
+[`data/README.md`](data/README.md), which is why the corpus it produced is committed here.
 
-Renamed from `course-agent` (#113). GitHub redirects the old URL, so a link written before the
-rename still resolves — but nothing here leans on that redirect: no module, import path, config key,
-index key or committed artifact ever carried the old name, so none of them moved.
+Renamed from `course-agent` (#113): the name moved in `pyproject.toml`, this file and `uv.lock`,
+and the GitHub repo is renamed at publication (#119). GitHub redirects a renamed URL, so a link
+written before the rename still resolves — but nothing here leans on that redirect: no module,
+import path, config key, index key or committed artifact ever carried the old name, so none of
+them moved.
 
 ## Architecture
 
@@ -127,6 +134,19 @@ genuinely clean machine, following this file and nothing else, is its own exerci
   one answerable in the first place.
 - **The reference below** — chunking, the two indexes, fusion, every graph node, every eval script.
   It is for someone changing the code, not for someone deciding whether to trust the numbers.
+
+## License
+
+[MIT](LICENSE) for the code, which is every line in `agent/`, `retrieval/`, `ingest/`, `eval/` and
+`scripts/`, plus the eval set and the reports.
+
+**Not the catalog.** `data/` redistributes 4,502 courses of University of Illinois catalog text
+[src](data/README.md "courses.json") — full descriptions, credit hours and prerequisite prose — and
+`ingest/majors.json` holds degree requirements transcribed from published program pages. None of that is the copyright holder's to
+relicense, so MIT does not reach it. [`data/README.md`](data/README.md) records what is
+redistributed, why it ships rather than being left rebuildable, the two institutional email
+addresses the descriptions contain, and what happens if the university objects. Read it before
+reusing anything under `data/`.
 
 ## Reference
 
