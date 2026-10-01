@@ -36,8 +36,9 @@ is given as a count, answered of the signal's non-null rows, and as a fraction. 
 (``retrieval_score`` on tool rows) cannot clear any threshold, so it is not answered. What the gate
 does on it in production is #92's decision.
 
-**Nothing here decides whether conformal "worked".** Its guarantee holds in expectation over calib
-draws, not on this one test half, and about 40 answered rows put one standard error near 5 points.
+**Nothing here decides whether the gate "worked".** There is no guarantee to hold: the fit accepts
+on a plug-in estimate with no confidence level, which #142 works through, and about 40 answered
+rows put one standard error near 5 points.
 The file records the numbers and ``above_target``, a comparison, not a verdict.
 """
 

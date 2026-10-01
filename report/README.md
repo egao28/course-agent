@@ -284,9 +284,12 @@ The fixed 0.7 is no better placed, in the opposite direction. On the `verbalized
 "fixed, signals.verbalized") — exactly the error of answering everything. A gate that answers
 everything and a gate that answers nothing are the two endpoints of the risk-coverage curve, and
 at α = 0.10 with 46 calibration rows those are the only two points this method can reach
-[src](../eval/runs/conformal_83496e82.json "alpha, n"). That is a statement about the sample size,
-not about conformal prediction: the guarantee is marginal over calibration draws, and n = 46 is too
-few to buy coverage at that target when the underlying error rate is 0.405.
+[src](../eval/runs/conformal_83496e82.json "alpha, n"). That is a statement about this rule on
+this half, and not about conformal prediction, which it does not implement: the rule accepts a
+threshold when a plug-in estimate of the error among answered rows is under α, with no confidence
+level attached, so nothing it accepts or refuses carries a guarantee either way (#142). What
+refuses this one is the signal's resolution and its error rate, not the row count
+[src](day8_saturation_83496e82.md "6. The answer").
 
 ### 5.4 Day 6 — the whole agent, end to end
 
@@ -539,8 +542,15 @@ re-running the generators over unchanged inputs rewrites the same bytes, but re-
 produces a new draw rather than a check of this
 one.
 
-**The conformal guarantee is marginal, and here it is vacuous.** Error ≤ α holds in expectation over
-calibration draws, not on this calib half and not on this test half. At calib n = 46 and α = 0.10
+**The gate carries no guarantee, marginal or otherwise.** The rule accepts a threshold when
+`(k+1)/(n+1)`, a plug-in estimate of the error among the rows it would answer, is at most α. That
+is an estimate against a budget, not a bound at a confidence level — there is no δ in it — and the
+`+1` is added to a count of errors rather than being conformal prediction's rank correction, so
+split conformal's theorem does not transfer however the arithmetic is done (#142). Under a rule
+that does carry one — a valid p-value per candidate at δ = 0.05 — nothing is accepted for any
+signal, and the one cut `verbalized` can offer is 1 row too small even to test
+[src](day8_validity_83496e82.md "5. What each rule needs before it can accept anything"). At calib
+n = 46 and α = 0.10
 the scan cannot accept a threshold that answers fewer than 9 rows
 [src](../eval/runs/conformal_83496e82.json "n, alpha, min_answered_to_accept"), and no threshold
 for any signal was accepted, so the fitted gate answers nothing and the deployed system still runs
@@ -592,8 +602,8 @@ function of, the labelling and review steps among them. It is what
 a reader would re-run it in, and every line writes a file this repo carries. The steps that need a
 person rather than an API key are marked, and the second annotator's sheet is handed over rather
 than run. The report commands — `day3_report`, `day4_report`, `day5_report`, `e2e_metrics`,
-`saturation` and `final_report` — read committed files: they call no model and draw no new
-sample, which is what makes a re-run of the last two a check rather than another result.
+`saturation`, `validity` and `final_report` — read committed files: they call no model and draw
+no new sample, which is what makes a re-run of the last two a check rather than another result.
 
 It used to say "the runs, in the order they were made" over a list that left twelve of them out,
 systematically: the measuring runs were here and the steps where a person decides something were
@@ -656,6 +666,7 @@ uv run python -m eval.scripts.e2e_metrics
 uv run python -m eval.scripts.attribute --review --reviewer NAME       # a person, per failure
 
 uv run python -m eval.scripts.saturation                               # why the gate accepts none
+uv run python -m eval.scripts.validity                                 # ... and what it controls
 
 uv run python -m eval.scripts.final_report                             # day 7; this file's tables
 uv run python -m eval.scripts.final_report --check                     # ... and fails if one moved
